@@ -22,14 +22,14 @@ export default function TelemetryCharts({ history }) {
 
   if (data.length < 2) {
     return (
-      <div className="panel-glass p-3 flex items-center justify-center h-full" data-testid="telemetry-charts">
+      <div className="panel-glass p-3 flex items-center justify-center" style={{ minHeight: '200px' }} data-testid="telemetry-charts">
         <span className="text-[10px] text-slate-700">Collecting telemetry data...</span>
       </div>
     );
   }
 
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="telemetry-charts">
+    <div className="panel-glass p-3 relative corner-bracket" data-testid="telemetry-charts" style={{ minHeight: '200px' }}>
       <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Telemetry Charts</h3>
       
       <div className="space-y-3">
