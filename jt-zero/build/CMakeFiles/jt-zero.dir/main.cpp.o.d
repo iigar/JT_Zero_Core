@@ -166,8 +166,10 @@ CMakeFiles/jt-zero.dir/main.cpp.o: /app/jt-zero/main.cpp \
  /usr/include/aarch64-linux-gnu/c++/12/bits/atomic_word.h \
  /usr/include/aarch64-linux-gnu/sys/single_threaded.h \
  /app/jt-zero/include/jt_zero/output_engine.h \
- /app/jt-zero/include/jt_zero/sensors.h /usr/include/c++/12/thread \
- /usr/include/c++/12/bits/std_thread.h \
+ /app/jt-zero/include/jt_zero/sensors.h \
+ /app/jt-zero/include/jt_zero/camera.h \
+ /app/jt-zero/include/jt_zero/mavlink_interface.h \
+ /usr/include/c++/12/thread /usr/include/c++/12/bits/std_thread.h \
  /usr/include/c++/12/bits/unique_ptr.h \
  /usr/include/c++/12/bits/this_thread_sleep.h /usr/include/c++/12/csignal \
  /usr/include/signal.h \

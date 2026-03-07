@@ -90,6 +90,14 @@ async def get_threads():
 async def get_engines():
     return simulator.get_engine_stats()
 
+@app.get("/api/camera")
+async def get_camera():
+    return simulator.get_camera_stats()
+
+@app.get("/api/mavlink")
+async def get_mavlink():
+    return simulator.get_mavlink_stats()
+
 @app.post("/api/command")
 async def send_command(req: CommandRequest):
     success = simulator.send_command(req.command, req.param1, req.param2)
@@ -134,6 +142,8 @@ async def websocket_telemetry(ws: WebSocket):
             threads = simulator.get_thread_stats()
             engines = simulator.get_engine_stats()
             events = simulator.get_events(10)
+            camera = simulator.get_camera_stats()
+            mavlink = simulator.get_mavlink_stats()
             
             await ws.send_json({
                 "type": "telemetry",
@@ -142,6 +152,8 @@ async def websocket_telemetry(ws: WebSocket):
                 "threads": threads,
                 "engines": engines,
                 "recent_events": events,
+                "camera": camera,
+                "mavlink": mavlink,
             })
             await asyncio.sleep(0.1)  # 10 Hz
     except WebSocketDisconnect:

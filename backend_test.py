@@ -151,9 +151,54 @@ class JTZeroTester:
                 return f"Missing field: {field}"
         return True
 
+    def validate_camera_stats(self, data):
+        """Validate camera/visual odometry stats structure"""
+        required_fields = ['camera_type', 'fps_actual', 'frame_count', 'width', 'height', 
+                          'vo_features_detected', 'vo_features_tracked', 'vo_tracking_quality',
+                          'vo_dx', 'vo_dy', 'vo_valid']
+        for field in required_fields:
+            if field not in data:
+                return f"Missing camera field: {field}"
+        
+        # Validate data types and ranges
+        if not isinstance(data['fps_actual'], (int, float)):
+            return "fps_actual should be numeric"
+        if not isinstance(data['frame_count'], int):
+            return "frame_count should be integer"
+        if data['vo_tracking_quality'] < 0 or data['vo_tracking_quality'] > 1:
+            return "vo_tracking_quality should be between 0 and 1"
+        
+        return True
+
+    def validate_mavlink_stats(self, data):
+        """Validate MAVLink stats structure"""
+        required_fields = ['state', 'messages_sent', 'messages_received', 'link_quality',
+                          'fc_autopilot', 'fc_firmware', 'vision_pos_sent', 'odometry_sent', 
+                          'optical_flow_sent']
+        for field in required_fields:
+            if field not in data:
+                return f"Missing mavlink field: {field}"
+        
+        # Validate state values
+        valid_states = ['CONNECTED', 'CONNECTING', 'DISCONNECTED', 'LOST']
+        if data['state'] not in valid_states:
+            return f"Invalid state: {data['state']} (expected one of {valid_states})"
+        
+        # Validate counters are non-negative integers
+        counters = ['messages_sent', 'messages_received', 'vision_pos_sent', 'odometry_sent', 'optical_flow_sent']
+        for counter in counters:
+            if not isinstance(data[counter], int) or data[counter] < 0:
+                return f"{counter} should be non-negative integer"
+        
+        # Validate link quality is between 0 and 1
+        if data['link_quality'] < 0 or data['link_quality'] > 1:
+            return "link_quality should be between 0 and 1"
+        
+        return True
+
     def test_all_endpoints(self):
         """Test all JT-Zero API endpoints"""
-        self.log("🚀 Starting JT-Zero Backend API Tests")
+        self.log("🚀 Starting JT-Zero Backend API Tests (Iteration 2 - Camera + MAVLink)")
         
         # Test health endpoint
         self.run_test(
@@ -216,6 +261,24 @@ class JTZeroTester:
             "/api/engines", 
             200, 
             validate_response=self.validate_engines
+        )
+        
+        # Test new Camera endpoint (Phase 5)
+        self.run_test(
+            "Camera Stats", 
+            "GET", 
+            "/api/camera", 
+            200, 
+            validate_response=self.validate_camera_stats
+        )
+        
+        # Test new MAVLink endpoint (Phase 6) 
+        self.run_test(
+            "MAVLink Stats", 
+            "GET", 
+            "/api/mavlink", 
+            200, 
+            validate_response=self.validate_mavlink_stats
         )
         
         # Test command endpoints

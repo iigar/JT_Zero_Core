@@ -187,6 +187,30 @@ jt-zero/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/jt-zero.dir/build.make CMakeFiles/jt-zero.dir/build
 .PHONY : jt-zero/fast
 
+camera/camera_pipeline.o: camera/camera_pipeline.cpp.o
+.PHONY : camera/camera_pipeline.o
+
+# target to build an object file
+camera/camera_pipeline.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o
+.PHONY : camera/camera_pipeline.cpp.o
+
+camera/camera_pipeline.i: camera/camera_pipeline.cpp.i
+.PHONY : camera/camera_pipeline.i
+
+# target to preprocess a source file
+camera/camera_pipeline.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.i
+.PHONY : camera/camera_pipeline.cpp.i
+
+camera/camera_pipeline.s: camera/camera_pipeline.cpp.s
+.PHONY : camera/camera_pipeline.s
+
+# target to generate assembly for a file
+camera/camera_pipeline.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.s
+.PHONY : camera/camera_pipeline.cpp.s
+
 core/event_engine.o: core/event_engine.cpp.o
 .PHONY : core/event_engine.o
 
@@ -355,6 +379,30 @@ main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/jt-zero.dir/build.make CMakeFiles/jt-zero.dir/main.cpp.s
 .PHONY : main.cpp.s
 
+mavlink/mavlink_interface.o: mavlink/mavlink_interface.cpp.o
+.PHONY : mavlink/mavlink_interface.o
+
+# target to build an object file
+mavlink/mavlink_interface.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o
+.PHONY : mavlink/mavlink_interface.cpp.o
+
+mavlink/mavlink_interface.i: mavlink/mavlink_interface.cpp.i
+.PHONY : mavlink/mavlink_interface.i
+
+# target to preprocess a source file
+mavlink/mavlink_interface.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.i
+.PHONY : mavlink/mavlink_interface.cpp.i
+
+mavlink/mavlink_interface.s: mavlink/mavlink_interface.cpp.s
+.PHONY : mavlink/mavlink_interface.s
+
+# target to generate assembly for a file
+mavlink/mavlink_interface.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.s
+.PHONY : mavlink/mavlink_interface.cpp.s
+
 sensors/sensors.o: sensors/sensors.cpp.o
 .PHONY : sensors/sensors.o
 
@@ -393,6 +441,9 @@ help:
 	@echo "... rebuild_cache"
 	@echo "... jt-zero"
 	@echo "... jtzero_core"
+	@echo "... camera/camera_pipeline.o"
+	@echo "... camera/camera_pipeline.i"
+	@echo "... camera/camera_pipeline.s"
 	@echo "... core/event_engine.o"
 	@echo "... core/event_engine.i"
 	@echo "... core/event_engine.s"
@@ -414,6 +465,9 @@ help:
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"
+	@echo "... mavlink/mavlink_interface.o"
+	@echo "... mavlink/mavlink_interface.i"
+	@echo "... mavlink/mavlink_interface.s"
 	@echo "... sensors/sensors.o"
 	@echo "... sensors/sensors.i"
 	@echo "... sensors/sensors.s"

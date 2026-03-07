@@ -11,6 +11,8 @@
 #include "jt_zero/memory_engine.h"
 #include "jt_zero/output_engine.h"
 #include "jt_zero/sensors.h"
+#include "jt_zero/camera.h"
+#include "jt_zero/mavlink_interface.h"
 
 #include <thread>
 #include <atomic>
@@ -52,6 +54,12 @@ public:
     RangefinderSensor&  range() { return range_; }
     OpticalFlowSensor&  flow()  { return flow_; }
     
+    // Access camera & MAVLink
+    CameraPipeline&    camera()  { return camera_; }
+    MAVLinkInterface&  mavlink() { return mavlink_; }
+    const CameraPipeline&   camera()  const { return camera_; }
+    const MAVLinkInterface& mavlink() const { return mavlink_; }
+    
     // Command interface
     bool send_command(const char* cmd, float param1 = 0, float param2 = 0);
     
@@ -86,6 +94,10 @@ private:
     RangefinderSensor  range_;
     OpticalFlowSensor  flow_;
     
+    // Camera & MAVLink
+    CameraPipeline    camera_;
+    MAVLinkInterface  mavlink_;
+    
     // State
     SystemState state_;
     std::atomic<bool> running_{false};
@@ -97,6 +109,8 @@ private:
     std::thread t2_events_;
     std::thread t3_reflex_;
     std::thread t4_rules_;
+    std::thread t5_mavlink_;
+    std::thread t6_camera_;
     
     // Thread stats (lock-free access)
     static constexpr int NUM_THREADS = 8;
@@ -115,6 +129,8 @@ private:
     void event_loop();          // T2: 200 Hz
     void reflex_loop();         // T3: 200 Hz
     void rule_loop();           // T4: 20 Hz
+    void mavlink_loop();        // T5: 50 Hz
+    void camera_loop();         // T6: 15 FPS
     
     // Setup default rules
     void setup_default_reflexes();

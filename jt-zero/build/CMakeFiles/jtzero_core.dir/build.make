@@ -167,6 +167,34 @@ CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /app/jt-zero/sensors/sensors.cpp -o CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.s
 
+CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o: CMakeFiles/jtzero_core.dir/flags.make
+CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o: /app/jt-zero/camera/camera_pipeline.cpp
+CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o: CMakeFiles/jtzero_core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/app/jt-zero/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o -MF CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o.d -o CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o -c /app/jt-zero/camera/camera_pipeline.cpp
+
+CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /app/jt-zero/camera/camera_pipeline.cpp > CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.i
+
+CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /app/jt-zero/camera/camera_pipeline.cpp -o CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.s
+
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o: CMakeFiles/jtzero_core.dir/flags.make
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o: /app/jt-zero/mavlink/mavlink_interface.cpp
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o: CMakeFiles/jtzero_core.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/app/jt-zero/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o -MF CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o.d -o CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o -c /app/jt-zero/mavlink/mavlink_interface.cpp
+
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /app/jt-zero/mavlink/mavlink_interface.cpp > CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.i
+
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /app/jt-zero/mavlink/mavlink_interface.cpp -o CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.s
+
 # Object files for target jtzero_core
 jtzero_core_OBJECTS = \
 "CMakeFiles/jtzero_core.dir/core/event_engine.cpp.o" \
@@ -175,7 +203,9 @@ jtzero_core_OBJECTS = \
 "CMakeFiles/jtzero_core.dir/core/memory_engine.cpp.o" \
 "CMakeFiles/jtzero_core.dir/core/output_engine.cpp.o" \
 "CMakeFiles/jtzero_core.dir/core/runtime.cpp.o" \
-"CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o"
+"CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o" \
+"CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o" \
+"CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o"
 
 # External object files for target jtzero_core
 jtzero_core_EXTERNAL_OBJECTS =
@@ -187,9 +217,11 @@ libjtzero_core.a: CMakeFiles/jtzero_core.dir/core/memory_engine.cpp.o
 libjtzero_core.a: CMakeFiles/jtzero_core.dir/core/output_engine.cpp.o
 libjtzero_core.a: CMakeFiles/jtzero_core.dir/core/runtime.cpp.o
 libjtzero_core.a: CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o
+libjtzero_core.a: CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o
+libjtzero_core.a: CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o
 libjtzero_core.a: CMakeFiles/jtzero_core.dir/build.make
 libjtzero_core.a: CMakeFiles/jtzero_core.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/app/jt-zero/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Linking CXX static library libjtzero_core.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/app/jt-zero/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Linking CXX static library libjtzero_core.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/jtzero_core.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/jtzero_core.dir/link.txt --verbose=$(VERBOSE)
 

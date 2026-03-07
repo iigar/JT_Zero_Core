@@ -6,6 +6,8 @@ import DronePanel from './components/DronePanel';
 import EventLog from './components/EventLog';
 import CommandPanel from './components/CommandPanel';
 import TelemetryCharts from './components/TelemetryCharts';
+import CameraPanel from './components/CameraPanel';
+import MAVLinkPanel from './components/MAVLinkPanel';
 import { useWebSocket } from './hooks/useApi';
 
 function App() {
@@ -13,6 +15,8 @@ function App() {
   const [threads, setThreads] = useState([]);
   const [engines, setEngines] = useState({});
   const [events, setEvents] = useState([]);
+  const [camera, setCamera] = useState(null);
+  const [mavlink, setMavlink] = useState(null);
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
 
@@ -21,6 +25,8 @@ function App() {
       setState(data.state);
       setThreads(data.threads || []);
       setEngines(data.engines || {});
+      if (data.camera) setCamera(data.camera);
+      if (data.mavlink) setMavlink(data.mavlink);
       if (data.recent_events) {
         setEvents(prev => {
           const combined = [...prev, ...data.recent_events];
@@ -69,7 +75,7 @@ function App() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col gap-2 p-2 overflow-y-auto">
-          {/* Top: Drone + Sensors */}
+          {/* Row 1: Drone Telemetry + Sensors */}
           <div className="grid grid-cols-12 gap-2">
             <div className="col-span-5">
               <DronePanel state={state} history={history} />
@@ -79,17 +85,28 @@ function App() {
             </div>
           </div>
 
-          {/* Bottom: Charts + Events + Commands */}
-          <div className="grid grid-cols-12 gap-2 flex-1" style={{ minHeight: '220px' }}>
+          {/* Row 2: Camera + MAVLink + Charts */}
+          <div className="grid grid-cols-12 gap-2">
+            <div className="col-span-4">
+              <CameraPanel camera={camera} />
+            </div>
+            <div className="col-span-3">
+              <MAVLinkPanel mavlink={mavlink} />
+            </div>
             <div className="col-span-5">
               <TelemetryCharts history={history} />
             </div>
-            <div className="col-span-4 flex flex-col">
+          </div>
+
+          {/* Row 3: Events + Commands + Runtime */}
+          <div className="grid grid-cols-12 gap-2 flex-1" style={{ minHeight: '180px' }}>
+            <div className="col-span-5 flex flex-col">
               <EventLog events={events} />
             </div>
-            <div className="col-span-3 flex flex-col gap-2">
+            <div className="col-span-4 flex flex-col gap-2">
               <CommandPanel />
-              {/* C++ Runtime info */}
+            </div>
+            <div className="col-span-3 flex flex-col">
               <div className="panel-glass p-3 flex-1 relative corner-bracket" data-testid="runtime-info">
                 <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Runtime</h3>
                 <div className="space-y-1">
@@ -97,8 +114,11 @@ function App() {
                   <InfoRow label="TARGET" value="Pi Zero 2 W" />
                   <InfoRow label="MODE" value="SIMULATOR" color="text-amber-400" />
                   <InfoRow label="LANG" value="C++17" />
-                  <InfoRow label="THREADS" value="8 (5 active)" />
+                  <InfoRow label="THREADS" value={`8 (${threads?.filter(t => t.running).length || 0} active)`} />
                   <InfoRow label="CORE" value="Lock-free SPSC" />
+                  <InfoRow label="CAMERA" value="FAST+LK VO" />
+                  <InfoRow label="MAVLINK" value={mavlink?.state || 'N/A'} 
+                           color={mavlink?.state === 'CONNECTED' ? 'text-emerald-400' : 'text-slate-400'} />
                   <InfoRow label="REFRESH" value="10 Hz WS" />
                 </div>
               </div>

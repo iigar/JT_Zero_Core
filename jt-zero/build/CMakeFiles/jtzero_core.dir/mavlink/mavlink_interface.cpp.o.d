@@ -1,6 +1,6 @@
-CMakeFiles/jtzero_core.dir/core/runtime.cpp.o: \
- /app/jt-zero/core/runtime.cpp /usr/include/stdc-predef.h \
- /app/jt-zero/include/jt_zero/runtime.h \
+CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o: \
+ /app/jt-zero/mavlink/mavlink_interface.cpp /usr/include/stdc-predef.h \
+ /app/jt-zero/include/jt_zero/mavlink_interface.h \
  /app/jt-zero/include/jt_zero/common.h /usr/include/c++/12/atomic \
  /usr/include/c++/12/bits/atomic_base.h \
  /usr/include/aarch64-linux-gnu/c++/12/bits/c++config.h \
@@ -72,39 +72,18 @@ CMakeFiles/jtzero_core.dir/core/runtime.cpp.o: \
  /usr/include/aarch64-linux-gnu/bits/floatn.h \
  /usr/include/aarch64-linux-gnu/bits/floatn-common.h \
  /usr/include/aarch64-linux-gnu/bits/stdio.h \
- /app/jt-zero/include/jt_zero/event_engine.h \
- /app/jt-zero/include/jt_zero/reflex_engine.h \
- /usr/include/c++/12/functional /usr/include/c++/12/bits/stl_function.h \
- /usr/include/c++/12/backward/binders.h /usr/include/c++/12/new \
- /usr/include/c++/12/bits/exception.h /usr/include/c++/12/tuple \
- /usr/include/c++/12/bits/uses_allocator.h \
- /usr/include/c++/12/bits/invoke.h \
- /usr/include/c++/12/bits/functional_hash.h \
- /usr/include/c++/12/bits/hash_bytes.h /usr/include/c++/12/bits/refwrap.h \
- /usr/include/c++/12/bits/std_function.h /usr/include/c++/12/typeinfo \
- /usr/include/c++/12/unordered_map /usr/include/c++/12/bits/allocator.h \
- /usr/include/aarch64-linux-gnu/c++/12/bits/c++allocator.h \
- /usr/include/c++/12/bits/new_allocator.h \
- /usr/include/c++/12/bits/memoryfwd.h \
- /usr/include/c++/12/ext/alloc_traits.h \
- /usr/include/c++/12/bits/alloc_traits.h \
- /usr/include/c++/12/bits/stl_construct.h \
- /usr/include/c++/12/ext/aligned_buffer.h \
- /usr/include/c++/12/bits/hashtable.h \
- /usr/include/c++/12/bits/hashtable_policy.h \
- /usr/include/c++/12/bits/enable_special_members.h \
- /usr/include/c++/12/bits/node_handle.h \
- /usr/include/c++/12/bits/unordered_map.h \
- /usr/include/c++/12/bits/erase_if.h /usr/include/c++/12/vector \
- /usr/include/c++/12/bits/stl_uninitialized.h \
- /usr/include/c++/12/bits/stl_vector.h \
- /usr/include/c++/12/bits/stl_bvector.h \
- /usr/include/c++/12/bits/vector.tcc /usr/include/c++/12/bits/stl_algo.h \
- /usr/include/c++/12/bits/algorithmfwd.h \
- /usr/include/c++/12/bits/stl_heap.h \
- /usr/include/c++/12/bits/stl_tempbuf.h \
- /usr/include/c++/12/bits/uniform_int_dist.h /usr/include/c++/12/cstdlib \
- /usr/include/stdlib.h /usr/include/aarch64-linux-gnu/bits/waitflags.h \
+ /app/jt-zero/include/jt_zero/camera.h /usr/include/c++/12/cmath \
+ /usr/include/math.h /usr/include/aarch64-linux-gnu/bits/math-vector.h \
+ /usr/include/aarch64-linux-gnu/bits/libm-simd-decl-stubs.h \
+ /usr/include/aarch64-linux-gnu/bits/flt-eval-method.h \
+ /usr/include/aarch64-linux-gnu/bits/fp-logb.h \
+ /usr/include/aarch64-linux-gnu/bits/fp-fast.h \
+ /usr/include/aarch64-linux-gnu/bits/mathcalls-helper-functions.h \
+ /usr/include/aarch64-linux-gnu/bits/mathcalls.h \
+ /usr/include/aarch64-linux-gnu/bits/mathcalls-narrow.h \
+ /usr/include/aarch64-linux-gnu/bits/iscanonical.h \
+ /usr/include/c++/12/bits/std_abs.h /usr/include/stdlib.h \
+ /usr/include/aarch64-linux-gnu/bits/waitflags.h \
  /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
  /usr/include/aarch64-linux-gnu/sys/types.h /usr/include/endian.h \
  /usr/include/aarch64-linux-gnu/bits/byteswap.h \
@@ -122,66 +101,6 @@ CMakeFiles/jtzero_core.dir/core/runtime.cpp.o: \
  /usr/include/alloca.h \
  /usr/include/aarch64-linux-gnu/bits/stdlib-bsearch.h \
  /usr/include/aarch64-linux-gnu/bits/stdlib-float.h \
- /usr/include/c++/12/bits/std_abs.h \
- /app/jt-zero/include/jt_zero/rule_engine.h \
- /app/jt-zero/include/jt_zero/memory_engine.h /usr/include/c++/12/mutex \
- /usr/include/c++/12/exception /usr/include/c++/12/bits/exception_ptr.h \
- /usr/include/c++/12/bits/cxxabi_init_exception.h \
- /usr/include/c++/12/bits/nested_exception.h \
- /usr/include/c++/12/system_error \
- /usr/include/aarch64-linux-gnu/c++/12/bits/error_constants.h \
- /usr/include/c++/12/cerrno /usr/include/errno.h \
- /usr/include/aarch64-linux-gnu/bits/errno.h /usr/include/linux/errno.h \
- /usr/include/aarch64-linux-gnu/asm/errno.h \
- /usr/include/asm-generic/errno.h /usr/include/asm-generic/errno-base.h \
- /usr/include/aarch64-linux-gnu/bits/types/error_t.h \
- /usr/include/c++/12/iosfwd /usr/include/c++/12/bits/stringfwd.h \
- /usr/include/c++/12/bits/postypes.h /usr/include/c++/12/cwchar \
- /usr/include/wchar.h /usr/include/aarch64-linux-gnu/bits/types/wint_t.h \
- /usr/include/aarch64-linux-gnu/bits/types/mbstate_t.h \
- /usr/include/c++/12/stdexcept /usr/include/c++/12/string \
- /usr/include/c++/12/bits/char_traits.h \
- /usr/include/c++/12/bits/localefwd.h \
- /usr/include/aarch64-linux-gnu/c++/12/bits/c++locale.h \
- /usr/include/c++/12/clocale /usr/include/locale.h \
- /usr/include/aarch64-linux-gnu/bits/locale.h /usr/include/c++/12/cctype \
- /usr/include/ctype.h /usr/include/c++/12/bits/ostream_insert.h \
- /usr/include/c++/12/bits/cxxabi_forced.h \
- /usr/include/c++/12/bits/basic_string.h /usr/include/c++/12/string_view \
- /usr/include/c++/12/bits/string_view.tcc \
- /usr/include/c++/12/ext/string_conversions.h \
- /usr/include/c++/12/bits/charconv.h \
- /usr/include/c++/12/bits/basic_string.tcc \
- /usr/include/c++/12/bits/std_mutex.h \
- /usr/include/aarch64-linux-gnu/c++/12/bits/gthr.h \
- /usr/include/aarch64-linux-gnu/c++/12/bits/gthr-default.h \
- /usr/include/pthread.h /usr/include/sched.h \
- /usr/include/aarch64-linux-gnu/bits/sched.h \
- /usr/include/aarch64-linux-gnu/bits/types/struct_sched_param.h \
- /usr/include/aarch64-linux-gnu/bits/cpu-set.h \
- /usr/include/aarch64-linux-gnu/bits/setjmp.h \
- /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h \
- /usr/include/aarch64-linux-gnu/bits/pthread_stack_min-dynamic.h \
- /usr/include/c++/12/bits/unique_lock.h \
- /usr/include/c++/12/ext/atomicity.h \
- /usr/include/aarch64-linux-gnu/c++/12/bits/atomic_word.h \
- /usr/include/aarch64-linux-gnu/sys/single_threaded.h \
- /app/jt-zero/include/jt_zero/output_engine.h \
- /app/jt-zero/include/jt_zero/sensors.h \
- /app/jt-zero/include/jt_zero/camera.h \
- /app/jt-zero/include/jt_zero/mavlink_interface.h \
- /usr/include/c++/12/thread /usr/include/c++/12/bits/std_thread.h \
- /usr/include/c++/12/bits/unique_ptr.h \
- /usr/include/c++/12/bits/this_thread_sleep.h /usr/include/c++/12/cmath \
- /usr/include/math.h /usr/include/aarch64-linux-gnu/bits/math-vector.h \
- /usr/include/aarch64-linux-gnu/bits/libm-simd-decl-stubs.h \
- /usr/include/aarch64-linux-gnu/bits/flt-eval-method.h \
- /usr/include/aarch64-linux-gnu/bits/fp-logb.h \
- /usr/include/aarch64-linux-gnu/bits/fp-fast.h \
- /usr/include/aarch64-linux-gnu/bits/mathcalls-helper-functions.h \
- /usr/include/aarch64-linux-gnu/bits/mathcalls.h \
- /usr/include/aarch64-linux-gnu/bits/mathcalls-narrow.h \
- /usr/include/aarch64-linux-gnu/bits/iscanonical.h \
  /usr/include/c++/12/bits/specfun.h /usr/include/c++/12/tr1/gamma.tcc \
  /usr/include/c++/12/tr1/special_function_util.h \
  /usr/include/c++/12/tr1/bessel_function.tcc \

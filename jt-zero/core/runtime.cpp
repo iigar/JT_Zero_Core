@@ -51,6 +51,16 @@ bool Runtime::initialize() {
     setup_default_reflexes();
     setup_default_rules();
     
+    // Initialize camera pipeline
+    std::printf("[JT-Zero] Initializing camera pipeline...\n");
+    if (!camera_.initialize(CameraType::SIMULATED)) {
+        std::printf("[JT-Zero] Camera init failed (non-critical)\n");
+    }
+    
+    // Initialize MAVLink
+    std::printf("[JT-Zero] Initializing MAVLink interface...\n");
+    mavlink_.initialize(simulator_mode_);
+    
     // Set output handler
     output_engine_.set_handler([](const OutputCommand& cmd) {
         const char* prefix = "INFO";
@@ -88,8 +98,10 @@ void Runtime::start() {
     t2_events_     = std::thread([this]() { event_loop(); });
     t3_reflex_     = std::thread([this]() { reflex_loop(); });
     t4_rules_      = std::thread([this]() { rule_loop(); });
+    t5_mavlink_    = std::thread([this]() { mavlink_loop(); });
+    t6_camera_     = std::thread([this]() { camera_loop(); });
     
-    std::printf("[JT-Zero] All threads started\n");
+    std::printf("[JT-Zero] All threads started (7 threads)\n");
 }
 
 void Runtime::stop() {
@@ -103,6 +115,12 @@ void Runtime::stop() {
     if (t2_events_.joinable())     t2_events_.join();
     if (t3_reflex_.joinable())     t3_reflex_.join();
     if (t4_rules_.joinable())      t4_rules_.join();
+    if (t5_mavlink_.joinable())    t5_mavlink_.join();
+    if (t6_camera_.joinable())     t6_camera_.join();
+    
+    // Shutdown camera & MAVLink
+    camera_.shutdown();
+    mavlink_.shutdown();
     
     event_engine_.emit(EventType::SYSTEM_SHUTDOWN, 255, "Runtime stopped");
     std::printf("[JT-Zero] Runtime stopped\n");
@@ -467,6 +485,72 @@ void Runtime::setup_default_rules() {
         return false;
     };
     rule_engine_.add_rule(takeoff_complete);
+}
+
+// ─── MAVLink Thread ──────────────────────────────────────
+
+void Runtime::mavlink_loop() {
+    constexpr int HZ = 50;
+    thread_stats_[5].running.store(true);
+    auto next_wake = SteadyClock::now();
+    
+    while (running_.load(std::memory_order_acquire)) {
+        auto start = SteadyClock::now();
+        
+        // Build VO result from camera
+        VOResult vo = camera_.last_vo_result();
+        
+        // MAVLink tick: sends heartbeat, vision position, odometry, optical flow
+        mavlink_.tick(state_, vo);
+        
+        // Emit MAVLink heartbeat event periodically
+        if (thread_stats_[5].loop_count.load(std::memory_order_relaxed) % 50 == 0) {
+            event_engine_.emit(EventType::MAVLINK_HEARTBEAT, 30, "MAVLink heartbeat");
+        }
+        
+        auto end = SteadyClock::now();
+        update_thread_stats(5, start, end, HZ);
+        rate_sleep(next_wake, HZ);
+    }
+    
+    thread_stats_[5].running.store(false);
+}
+
+// ─── Camera Thread ───────────────────────────────────────
+
+void Runtime::camera_loop() {
+    constexpr int HZ = 15;
+    thread_stats_[6].running.store(true);
+    auto next_wake = SteadyClock::now();
+    
+    while (running_.load(std::memory_order_acquire)) {
+        auto start = SteadyClock::now();
+        
+        float ground_dist = state_.range.valid ? state_.range.distance : 1.0f;
+        
+        if (camera_.is_running()) {
+            camera_.tick(ground_dist);
+            
+            // Emit frame event periodically
+            auto stats = camera_.get_stats();
+            if (stats.frame_count % 15 == 0) {
+                char msg[64];
+                std::snprintf(msg, sizeof(msg), 
+                    "frame=%u feat=%u/%u q=%.0f%%",
+                    stats.frame_count, 
+                    stats.vo_features_tracked,
+                    stats.vo_features_detected,
+                    stats.vo_tracking_quality * 100.0f);
+                event_engine_.emit(EventType::CAMERA_VO_UPDATE, 20, msg);
+            }
+        }
+        
+        auto end = SteadyClock::now();
+        update_thread_stats(6, start, end, HZ);
+        rate_sleep(next_wake, HZ);
+    }
+    
+    thread_stats_[6].running.store(false);
 }
 
 } // namespace jtzero

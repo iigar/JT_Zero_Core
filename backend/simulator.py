@@ -136,6 +136,42 @@ class SystemState:
     rangefinder: dict = field(default_factory=lambda: asdict(RangefinderData()))
     optical_flow: dict = field(default_factory=lambda: asdict(OpticalFlowData()))
 
+@dataclass
+class CameraStats:
+    camera_type: str = "SIMULATED"
+    camera_open: bool = True
+    frame_count: int = 0
+    fps_actual: float = 14.8
+    width: int = 320
+    height: int = 240
+    vo_features_detected: int = 0
+    vo_features_tracked: int = 0
+    vo_tracking_quality: float = 0.0
+    vo_dx: float = 0.0
+    vo_dy: float = 0.0
+    vo_dz: float = 0.0
+    vo_vx: float = 0.0
+    vo_vy: float = 0.0
+    vo_valid: bool = True
+
+@dataclass
+class MAVLinkStats:
+    state: str = "CONNECTED"
+    messages_sent: int = 0
+    messages_received: int = 0
+    errors: int = 0
+    link_quality: float = 0.95
+    system_id: int = 1
+    component_id: int = 191
+    fc_system_id: int = 1
+    fc_autopilot: str = "ArduPilot"
+    fc_firmware: str = "ArduPilot 4.5.0"
+    fc_type: str = "QUADROTOR"
+    fc_armed: bool = False
+    vision_pos_sent: int = 0
+    odometry_sent: int = 0
+    optical_flow_sent: int = 0
+
 class JTZeroSimulator:
     def __init__(self):
         self.state = SystemState()
@@ -154,8 +190,8 @@ class JTZeroSimulator:
             ThreadStats("T2_Events", 200, 200.0, 3.1, 0, 2, True),
             ThreadStats("T3_Reflex", 200, 200.0, 1.5, 0, 1, True),
             ThreadStats("T4_Rules", 20, 19.9, 0.8, 0, 3, True),
-            ThreadStats("T5_MAVLink", 50, 49.8, 1.2, 0, 5, False),
-            ThreadStats("T6_Camera", 15, 14.9, 12.5, 0, 15000, False),
+            ThreadStats("T5_MAVLink", 50, 49.8, 1.2, 0, 5, True),
+            ThreadStats("T6_Camera", 15, 14.9, 12.5, 0, 15000, True),
             ThreadStats("T7_API", 30, 29.7, 0.5, 0, 2, True),
         ]
         
@@ -167,6 +203,10 @@ class JTZeroSimulator:
             "memory": {"telemetry_records": 0, "event_records": 0, "usage_bytes": 434176},
             "output": {"total_outputs": 0, "pending": 0},
         }
+        
+        # Camera & MAVLink stats
+        self.camera_stats = CameraStats()
+        self.mavlink_stats = MAVLinkStats()
         
     def start(self):
         if self.running:
@@ -238,6 +278,14 @@ class JTZeroSimulator:
         with self._lock:
             return dict(self.engine_stats)
     
+    def get_camera_stats(self) -> dict:
+        with self._lock:
+            return asdict(self.camera_stats)
+    
+    def get_mavlink_stats(self) -> dict:
+        with self._lock:
+            return asdict(self.mavlink_stats)
+    
     def _emit_event(self, etype: EventType, priority: int, message: str):
         ev = EventRecord(
             timestamp=time.time() - self._start_time,
@@ -258,6 +306,8 @@ class JTZeroSimulator:
                 
                 self._update_sensors(t)
                 self._update_state(t)
+                self._update_camera(t)
+                self._update_mavlink(t)
                 self._update_thread_stats()
                 self._record_telemetry()
                 
@@ -269,21 +319,21 @@ class JTZeroSimulator:
                 # Sensor update events (every 2 seconds)
                 if self._tick % 40 == 10:
                     self._emit_event(EventType.SENSOR_BARO_UPDATE, 10, 
-                        f"alt={s.baro['altitude']:.1f}m press={s.baro['pressure']:.1f}hPa")
+                        f"alt={self.state.baro['altitude']:.1f}m press={self.state.baro['pressure']:.1f}hPa")
                 if self._tick % 40 == 20:
                     self._emit_event(EventType.SENSOR_GPS_UPDATE, 10, 
-                        f"lat={s.gps['lat']:.6f} lon={s.gps['lon']:.6f} sat={s.gps['satellites']}")
+                        f"lat={self.state.gps['lat']:.6f} lon={self.state.gps['lon']:.6f} sat={self.state.gps['satellites']}")
                 if self._tick % 60 == 30:
                     self._emit_event(EventType.SENSOR_RANGE_UPDATE, 10, 
-                        f"dist={s.rangefinder['distance']:.2f}m q={s.rangefinder['signal_quality']:.0%}")
+                        f"dist={self.state.rangefinder['distance']:.2f}m q={self.state.rangefinder['signal_quality']:.0%}")
                 if self._tick % 60 == 45:
                     self._emit_event(EventType.SENSOR_FLOW_UPDATE, 10,
-                        f"flow=({s.optical_flow['flow_x']:.3f},{s.optical_flow['flow_y']:.3f}) q={s.optical_flow['quality']}")
+                        f"flow=({self.state.optical_flow['flow_x']:.3f},{self.state.optical_flow['flow_y']:.3f}) q={self.state.optical_flow['quality']}")
                 
                 # Occasional warnings
-                if self._tick % 200 == 100 and s.battery_percent < 50:
+                if self._tick % 200 == 100 and self.state.battery_percent < 50:
                     self._emit_event(EventType.SYSTEM_WARNING, 100, 
-                        f"Battery at {s.battery_percent:.0f}%")
+                        f"Battery at {self.state.battery_percent:.0f}%")
                 
             time.sleep(0.05)  # 20 Hz update
     
@@ -388,3 +438,52 @@ class JTZeroSimulator:
         }
         self.telemetry_history.append(record)
         self.engine_stats["memory"]["telemetry_records"] += 1
+
+
+    def _update_camera(self, t: float):
+        cam = self.camera_stats
+        cam.frame_count += 1
+        cam.fps_actual = 14.8 + random.gauss(0, 0.3)
+        
+        # Simulate FAST corner detection + LK tracking
+        base_features = 80 + int(30 * math.sin(t * 0.1))
+        cam.vo_features_detected = max(10, base_features + random.randint(-10, 10))
+        cam.vo_features_tracked = max(5, int(cam.vo_features_detected * (0.7 + random.gauss(0, 0.05))))
+        cam.vo_tracking_quality = min(1.0, max(0.0, cam.vo_features_tracked / max(1, cam.vo_features_detected)))
+        
+        # VO motion estimate
+        cam.vo_dx = 0.001 * math.sin(t * 0.3) + random.gauss(0, 0.0005)
+        cam.vo_dy = 0.0008 * math.cos(t * 0.2) + random.gauss(0, 0.0005)
+        cam.vo_dz = random.gauss(0, 0.0001)
+        cam.vo_vx = cam.vo_dx * 15.0  # ~15 FPS
+        cam.vo_vy = cam.vo_dy * 15.0
+        cam.vo_valid = cam.vo_features_tracked >= 5
+        
+        # Camera events
+        if self._tick % 60 == 15:
+            self._emit_event(EventType.CAMERA_VO_UPDATE, 20,
+                f"frame={cam.frame_count} feat={cam.vo_features_tracked}/{cam.vo_features_detected} q={cam.vo_tracking_quality:.0%}")
+    
+    def _update_mavlink(self, t: float):
+        mav = self.mavlink_stats
+        mav.fc_armed = self.state.armed
+        
+        # Simulate message sending at ~50Hz tick, but messages at different rates
+        mav.messages_sent += 3  # heartbeat + vision + odometry per tick
+        mav.messages_received += 2  # heartbeat + attitude from FC
+        
+        # Vision position: ~30Hz
+        mav.vision_pos_sent += 1
+        mav.odometry_sent += 1
+        
+        # Optical flow: every 2nd tick
+        if self._tick % 2 == 0:
+            mav.optical_flow_sent += 1
+        
+        # Link quality varies slightly
+        mav.link_quality = min(1.0, max(0.0, 0.95 + random.gauss(0, 0.01)))
+        
+        # MAVLink events
+        if self._tick % 100 == 50:
+            self._emit_event(EventType.MAVLINK_HEARTBEAT, 30, 
+                f"MAV link: sent={mav.messages_sent} recv={mav.messages_received} q={mav.link_quality:.0%}")

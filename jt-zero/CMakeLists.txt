@@ -52,10 +52,20 @@ set(SENSOR_SOURCES
     sensors/sensors.cpp
 )
 
+set(CAMERA_SOURCES
+    camera/camera_pipeline.cpp
+)
+
+set(MAVLINK_SOURCES
+    mavlink/mavlink_interface.cpp
+)
+
 # ─── Static Library ──────────────────────────────────────
 add_library(jtzero_core STATIC
     ${CORE_SOURCES}
     ${SENSOR_SOURCES}
+    ${CAMERA_SOURCES}
+    ${MAVLINK_SOURCES}
 )
 
 target_include_directories(jtzero_core PUBLIC

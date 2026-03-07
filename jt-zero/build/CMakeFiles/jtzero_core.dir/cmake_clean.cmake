@@ -1,4 +1,6 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o"
+  "CMakeFiles/jtzero_core.dir/camera/camera_pipeline.cpp.o.d"
   "CMakeFiles/jtzero_core.dir/core/event_engine.cpp.o"
   "CMakeFiles/jtzero_core.dir/core/event_engine.cpp.o.d"
   "CMakeFiles/jtzero_core.dir/core/memory_engine.cpp.o"
@@ -11,6 +13,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/jtzero_core.dir/core/rule_engine.cpp.o.d"
   "CMakeFiles/jtzero_core.dir/core/runtime.cpp.o"
   "CMakeFiles/jtzero_core.dir/core/runtime.cpp.o.d"
+  "CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o"
+  "CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o.d"
   "CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o"
   "CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o.d"
   "libjtzero_core.a"
