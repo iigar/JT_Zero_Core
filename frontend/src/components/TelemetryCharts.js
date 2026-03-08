@@ -1,5 +1,6 @@
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer, YAxis, CartesianGrid, XAxis, Tooltip } from 'recharts';
+import { LineChart, Line, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import SafeChart from './SafeChart';
 
 const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
@@ -36,50 +37,44 @@ export default function TelemetryCharts({ history }) {
         {/* Attitude */}
         <div>
           <span className="text-[8px] text-slate-700 uppercase">Attitude (Roll / Pitch)</span>
-          <div className="h-[60px]">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
-                <YAxis domain={['auto', 'auto']} hide />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="roll" stroke="#00F0FF" strokeWidth={1.5} dot={false} />
-                <Line type="monotone" dataKey="pitch" stroke="#7dd3fc" strokeWidth={1} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <SafeChart height="60px">
+            <LineChart data={data}>
+              <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
+              <YAxis domain={['auto', 'auto']} hide />
+              <Tooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey="roll" stroke="#00F0FF" strokeWidth={1.5} dot={false} />
+              <Line type="monotone" dataKey="pitch" stroke="#7dd3fc" strokeWidth={1} dot={false} />
+            </LineChart>
+          </SafeChart>
         </div>
 
         {/* IMU Gyro */}
         <div>
           <span className="text-[8px] text-slate-700 uppercase">IMU Gyroscope</span>
-          <div className="h-[60px]">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
-                <YAxis domain={['auto', 'auto']} hide />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="imu_gyro_x" stroke="#EF4444" strokeWidth={1} dot={false} />
-                <Line type="monotone" dataKey="imu_gyro_y" stroke="#10B981" strokeWidth={1} dot={false} />
-                <Line type="monotone" dataKey="imu_gyro_z" stroke="#00F0FF" strokeWidth={1} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <SafeChart height="60px">
+            <LineChart data={data}>
+              <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
+              <YAxis domain={['auto', 'auto']} hide />
+              <Tooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey="imu_gyro_x" stroke="#EF4444" strokeWidth={1} dot={false} />
+              <Line type="monotone" dataKey="imu_gyro_y" stroke="#10B981" strokeWidth={1} dot={false} />
+              <Line type="monotone" dataKey="imu_gyro_z" stroke="#00F0FF" strokeWidth={1} dot={false} />
+            </LineChart>
+          </SafeChart>
         </div>
 
         {/* Battery + CPU */}
         <div>
           <span className="text-[8px] text-slate-700 uppercase">System (Battery V / CPU %)</span>
-          <div className="h-[50px]">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-              <LineChart data={data}>
-                <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
-                <YAxis domain={['auto', 'auto']} hide />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="battery_voltage" stroke="#F59E0B" strokeWidth={1.5} dot={false} />
-                <Line type="monotone" dataKey="cpu_usage" stroke="#64748B" strokeWidth={1} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <SafeChart height="50px">
+            <LineChart data={data}>
+              <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
+              <YAxis domain={['auto', 'auto']} hide />
+              <Tooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey="battery_voltage" stroke="#F59E0B" strokeWidth={1.5} dot={false} />
+              <Line type="monotone" dataKey="cpu_usage" stroke="#64748B" strokeWidth={1} dot={false} />
+            </LineChart>
+          </SafeChart>
         </div>
       </div>
     </div>

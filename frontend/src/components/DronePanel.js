@@ -1,6 +1,6 @@
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer, YAxis, CartesianGrid } from 'recharts';
-import { Compass, ArrowUp, Navigation } from 'lucide-react';
+import { LineChart, Line, YAxis, CartesianGrid } from 'recharts';
+import SafeChart from './SafeChart';
 
 function AttitudeIndicator({ roll, pitch }) {
   const r = roll || 0;
@@ -85,13 +85,13 @@ export default function DronePanel({ state, history }) {
         <span className="text-[8px] text-slate-700 uppercase">Altitude History</span>
         <div className="h-[40px] mt-1">
           {history && history.length > 2 ? (
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+            <SafeChart height="40px">
               <LineChart data={history.slice(-60)}>
                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
                 <YAxis domain={['auto', 'auto']} hide />
                 <Line type="monotone" dataKey="altitude" stroke="#00F0FF" strokeWidth={1.5} dot={false} />
               </LineChart>
-            </ResponsiveContainer>
+            </SafeChart>
           ) : (
             <div className="h-full bg-black/30 rounded-sm flex items-center justify-center">
               <span className="text-[9px] text-slate-700">Waiting for data...</span>

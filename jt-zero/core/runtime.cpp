@@ -100,8 +100,9 @@ void Runtime::start() {
     t4_rules_      = std::thread([this]() { rule_loop(); });
     t5_mavlink_    = std::thread([this]() { mavlink_loop(); });
     t6_camera_     = std::thread([this]() { camera_loop(); });
+    t7_api_        = std::thread([this]() { api_bridge_loop(); });
     
-    std::printf("[JT-Zero] All threads started (7 threads)\n");
+    std::printf("[JT-Zero] All threads started (8 threads)\n");
 }
 
 void Runtime::stop() {
@@ -117,6 +118,7 @@ void Runtime::stop() {
     if (t4_rules_.joinable())      t4_rules_.join();
     if (t5_mavlink_.joinable())    t5_mavlink_.join();
     if (t6_camera_.joinable())     t6_camera_.join();
+    if (t7_api_.joinable())        t7_api_.join();
     
     // Shutdown camera & MAVLink
     camera_.shutdown();
@@ -686,6 +688,41 @@ void Runtime::camera_loop() {
     }
     
     thread_stats_[6].running.store(false);
+}
+
+// ─── API Bridge Thread ───────────────────────────────────
+
+void Runtime::api_bridge_loop() {
+    constexpr int HZ = 30;
+    thread_stats_[7].running.store(true);
+    auto next_wake = SteadyClock::now();
+    
+    while (running_.load(std::memory_order_acquire)) {
+        auto start = SteadyClock::now();
+        
+        // API bridge thread: maintains runtime state consistency
+        // for external API consumers (pybind11/FastAPI).
+        // Computes derived metrics and aggregates system health.
+        
+        // Update RAM usage estimate
+        size_t mem = memory_engine_.memory_usage_bytes();
+        mem += sizeof(Event) * EventEngine::QUEUE_SIZE;
+        mem += sizeof(FrameBuffer) * 2;
+        state_.ram_usage_mb = static_cast<float>(mem) / (1024.0f * 1024.0f);
+        
+        // Aggregate CPU usage from all threads
+        double total_cpu = 0;
+        for (int i = 0; i < NUM_THREADS; ++i) {
+            total_cpu += thread_stats_[i].cpu_percent.load(std::memory_order_relaxed);
+        }
+        state_.cpu_usage = static_cast<float>(total_cpu);
+        
+        auto end = SteadyClock::now();
+        update_thread_stats(7, start, end, HZ);
+        rate_sleep(next_wake, HZ);
+    }
+    
+    thread_stats_[7].running.store(false);
 }
 
 } // namespace jtzero

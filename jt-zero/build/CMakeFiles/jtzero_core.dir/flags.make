@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I/app/jt-zero/include
 
-CXX_FLAGS = -fPIC -Wall -Wextra -Wpedantic -O2 -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections -std=c++17
+CXX_FLAGS = -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -O2 -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections -O3 -DNDEBUG -flto -std=c++17
 
