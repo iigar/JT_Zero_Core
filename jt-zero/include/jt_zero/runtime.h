@@ -79,6 +79,10 @@ public:
     void set_simulator_mode(bool enabled) { simulator_mode_ = enabled; }
     bool is_simulator_mode() const { return simulator_mode_; }
     
+    // Simulator config (tuneable)
+    SimulatorConfig& sim_config() { return sim_config_; }
+    const SimulatorConfig& sim_config() const { return sim_config_; }
+    
 private:
     // Engines
     EventEngine   event_engine_;
@@ -100,6 +104,7 @@ private:
     
     // State
     SystemState state_;
+    SimulatorConfig sim_config_;
     std::atomic<bool> running_{false};
     bool simulator_mode_{true};
     
@@ -135,6 +140,9 @@ private:
     // Setup default rules
     void setup_default_reflexes();
     void setup_default_rules();
+    
+    // Flight physics simulation
+    void update_flight_physics(float dt);
     
     // Helper: precise sleep to target frequency
     static void rate_sleep(TimePoint& next_wake, int hz);

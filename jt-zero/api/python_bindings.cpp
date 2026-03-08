@@ -78,6 +78,9 @@ static py::dict state_to_dict(const jtzero::SystemState& s) {
         "yaw"_a = s.yaw,
         "altitude_agl"_a = s.altitude_agl,
         "vx"_a = s.vx, "vy"_a = s.vy, "vz"_a = s.vz,
+        "pos_n"_a = s.pos_n, "pos_e"_a = s.pos_e, "pos_d"_a = s.pos_d,
+        "target_altitude"_a = s.target_altitude,
+        "motor"_a = py::list(py::cast(std::vector<float>{s.motor[0], s.motor[1], s.motor[2], s.motor[3]})),
         "imu"_a = imu_to_dict(s.imu),
         "baro"_a = baro_to_dict(s.baro),
         "gps"_a = gps_to_dict(s.gps),
@@ -265,6 +268,29 @@ PYBIND11_MODULE(jtzero_native, m) {
         .def("send_command", &jtzero::Runtime::send_command,
              py::arg("cmd"), py::arg("param1") = 0.0f, py::arg("param2") = 0.0f,
              "Send a command: arm, disarm, takeoff, land, hold, rtl, emergency")
+        
+        // Simulator config
+        .def("get_sim_config", [](const jtzero::Runtime& self) {
+            auto& c = self.sim_config();
+            return py::dict(
+                "wind_speed"_a = c.wind_speed, "wind_direction"_a = c.wind_direction,
+                "sensor_noise"_a = c.sensor_noise, "battery_drain"_a = c.battery_drain,
+                "gravity"_a = c.gravity, "mass_kg"_a = c.mass_kg,
+                "max_thrust"_a = c.max_thrust, "drag_coeff"_a = c.drag_coeff,
+                "turbulence"_a = c.turbulence
+            );
+        })
+        .def("set_sim_config", [](jtzero::Runtime& self, py::dict d) {
+            auto& c = self.sim_config();
+            if (d.contains("wind_speed"))     c.wind_speed = d["wind_speed"].cast<float>();
+            if (d.contains("wind_direction")) c.wind_direction = d["wind_direction"].cast<float>();
+            if (d.contains("sensor_noise"))   c.sensor_noise = d["sensor_noise"].cast<float>();
+            if (d.contains("battery_drain"))  c.battery_drain = d["battery_drain"].cast<float>();
+            if (d.contains("gravity"))        c.gravity = d["gravity"].cast<float>();
+            if (d.contains("mass_kg"))        c.mass_kg = d["mass_kg"].cast<float>();
+            if (d.contains("drag_coeff"))     c.drag_coeff = d["drag_coeff"].cast<float>();
+            if (d.contains("turbulence"))     c.turbulence = d["turbulence"].cast<bool>();
+        })
         
         // Data access (returns Python dicts for JSON serialization)
         .def("get_state", [](const jtzero::Runtime& self) {

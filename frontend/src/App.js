@@ -3,12 +3,14 @@ import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import SensorPanels from './components/SensorPanels';
 import DronePanel from './components/DronePanel';
+import Drone3DPanel from './components/Drone3DPanel';
 import EventLog from './components/EventLog';
 import CommandPanel from './components/CommandPanel';
 import TelemetryCharts from './components/TelemetryCharts';
 import CameraPanel from './components/CameraPanel';
 import MAVLinkPanel from './components/MAVLinkPanel';
 import PerformancePanel from './components/PerformancePanel';
+import SimulatorPanel from './components/SimulatorPanel';
 import { useWebSocket } from './hooks/useApi';
 
 function App() {
@@ -79,12 +81,15 @@ function App() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col gap-2 p-2 overflow-y-auto">
-          {/* Row 1: Drone Telemetry + Sensors */}
-          <div className="grid grid-cols-12 gap-2">
-            <div className="col-span-5">
+          {/* Row 1: 3D Drone + Drone Data + Sensors */}
+          <div className="grid grid-cols-12 gap-2" style={{ minHeight: '240px' }}>
+            <div className="col-span-3">
+              <Drone3DPanel state={state} />
+            </div>
+            <div className="col-span-3">
               <DronePanel state={state} history={history} />
             </div>
-            <div className="col-span-7">
+            <div className="col-span-6">
               <SensorPanels state={state} history={history} />
             </div>
           </div>
@@ -102,34 +107,32 @@ function App() {
             </div>
           </div>
 
-          {/* Row 3: Charts + Events + Commands */}
+          {/* Row 3: Charts + Events + Commands + Simulator */}
           <div className="grid grid-cols-12 gap-2 flex-1" style={{ minHeight: '200px' }}>
-            <div className="col-span-4">
+            <div className="col-span-3">
               <TelemetryCharts history={history} />
             </div>
-            <div className="col-span-4 flex flex-col">
+            <div className="col-span-3 flex flex-col">
               <EventLog events={events} />
             </div>
-            <div className="col-span-4 flex flex-col gap-2">
+            <div className="col-span-3 flex flex-col gap-2">
               <CommandPanel />
-              <div className="panel-glass p-3 flex-1 relative corner-bracket" data-testid="runtime-info">
-                <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Runtime</h3>
-                <div className="space-y-1">
-                  <InfoRow label="ENGINE" value="JT-Zero v1.0" />
-                  <InfoRow label="TARGET" value="Pi Zero 2 W" />
+              <div className="panel-glass p-2 relative corner-bracket" data-testid="runtime-info">
+                <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Runtime</h3>
+                <div className="space-y-0.5 text-[9px]">
                   <InfoRow label="MODE" 
-                    value={runtimeMode === 'native' ? 'C++ NATIVE' : 'PY SIMULATOR'} 
+                    value={runtimeMode === 'native' ? 'C++ NATIVE' : 'PY SIM'} 
                     color={runtimeMode === 'native' ? 'text-emerald-400' : 'text-amber-400'} />
-                  <InfoRow label="LANG" value={runtimeMode === 'native' ? 'C++17 (GCC 12)' : 'Python 3.11'} />
-                  <InfoRow label="THREADS" value={`8 (${threads?.filter(t => t.running).length || 0} active)`} />
-                  <InfoRow label="CORE" value="Lock-free SPSC" />
-                  <InfoRow label="CAMERA" value="FAST+LK VO" />
+                  <InfoRow label="THREADS" value={`${threads?.filter(t => t.running).length || 0}/8`} />
                   <InfoRow label="MAVLINK" value={mavlink?.state || 'N/A'} 
-                           color={mavlink?.state === 'CONNECTED' ? 'text-emerald-400' : 'text-slate-400'} />
-                  <InfoRow label="BINDINGS" value={runtimeMode === 'native' ? 'pybind11' : 'N/A'}
-                           color={runtimeMode === 'native' ? 'text-cyan-400' : 'text-slate-600'} />
+                    color={mavlink?.state === 'CONNECTED' ? 'text-emerald-400' : 'text-slate-400'} />
+                  <InfoRow label="BIND" value={runtimeMode === 'native' ? 'pybind11' : 'N/A'}
+                    color={runtimeMode === 'native' ? 'text-cyan-400' : 'text-slate-600'} />
                 </div>
               </div>
+            </div>
+            <div className="col-span-3">
+              <SimulatorPanel />
             </div>
           </div>
         </main>
@@ -150,7 +153,7 @@ function InfoRow({ label, value, color }) {
   return (
     <div className="flex justify-between items-center">
       <span className="text-[9px] text-slate-600 uppercase">{label}</span>
-      <span className={`text-[10px] font-bold tabular-nums ${color || 'text-slate-400'}`}>{value}</span>
+      <span className={`text-[9px] font-bold tabular-nums ${color || 'text-slate-400'}`}>{value}</span>
     </div>
   );
 }

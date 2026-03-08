@@ -223,12 +223,15 @@ void Runtime::supervisor_loop() {
         state_.event_count = static_cast<uint32_t>(event_engine_.total_events());
         
         // Battery simulation (slow drain)
-        state_.battery_voltage -= 0.00001f;
+        state_.battery_voltage -= 0.00001f * sim_config_.battery_drain;
         if (state_.battery_voltage < 10.0f) state_.battery_voltage = 10.0f;
         state_.battery_percent = (state_.battery_voltage - 10.0f) / 2.6f * 100.0f;
         
         // Simulated CPU temp
         state_.cpu_temp = 42.0f + static_cast<float>(rand() % 100) / 100.0f;
+        
+        // Flight physics (10 Hz)
+        update_flight_physics(0.1f);
         
         // Emit heartbeat
         event_engine_.emit(EventType::SYSTEM_HEARTBEAT, 50, "heartbeat");
@@ -438,6 +441,138 @@ void Runtime::setup_default_reflexes() {
 }
 
 // ─── Default Rules ───────────────────────────────────────
+
+// ─── Flight Physics ──────────────────────────────────────
+
+void Runtime::update_flight_physics(float dt) {
+    if (!simulator_mode_) return;
+    
+    auto& s = state_;
+    const auto& cfg = sim_config_;
+    
+    // Gravity + thrust model
+    float thrust = 0.0f;
+    float target_vz = 0.0f;
+    
+    switch (s.flight_mode) {
+        case FlightMode::IDLE:
+        case FlightMode::ARMED:
+            // On ground
+            s.altitude_agl = 0.0f;
+            s.vx = s.vy = s.vz = 0.0f;
+            s.pos_n = s.pos_e = s.pos_d = 0.0f;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.0f;
+            s.baro.altitude = 0.0f;
+            s.baro.pressure = 1013.25f;
+            s.range.distance = 0.0f;
+            break;
+            
+        case FlightMode::TAKEOFF:
+            // Climb to target altitude
+            target_vz = 2.0f;  // m/s climb rate
+            if (s.altitude_agl >= s.target_altitude) {
+                s.flight_mode = FlightMode::HOVER;
+                event_engine_.emit(EventType::FLIGHT_ALTITUDE_REACHED, 150, "Target altitude reached");
+            }
+            thrust = cfg.gravity * cfg.mass_kg + cfg.mass_kg * 1.5f;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.7f;
+            break;
+            
+        case FlightMode::HOVER:
+            // Maintain altitude
+            target_vz = (s.target_altitude - s.altitude_agl) * 0.8f;
+            target_vz = std::max(-1.0f, std::min(1.0f, target_vz));
+            thrust = cfg.gravity * cfg.mass_kg;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.5f;
+            break;
+            
+        case FlightMode::NAVIGATE:
+            // Simple forward flight + altitude hold
+            target_vz = (s.target_altitude - s.altitude_agl) * 0.8f;
+            target_vz = std::max(-1.0f, std::min(1.0f, target_vz));
+            s.vx = 2.0f;  // Forward 2 m/s
+            thrust = cfg.gravity * cfg.mass_kg;
+            s.motor[0] = s.motor[1] = 0.55f;
+            s.motor[2] = s.motor[3] = 0.50f;
+            break;
+            
+        case FlightMode::LAND:
+            // Controlled descent
+            target_vz = -0.5f;
+            if (s.altitude_agl <= 0.1f) {
+                s.altitude_agl = 0.0f;
+                s.armed = false;
+                s.flight_mode = FlightMode::IDLE;
+                s.vx = s.vy = s.vz = 0.0f;
+                s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.0f;
+                event_engine_.emit(EventType::FLIGHT_DISARM, 200, "Landed and disarmed");
+                return;
+            }
+            thrust = cfg.gravity * cfg.mass_kg * 0.85f;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.35f;
+            break;
+            
+        case FlightMode::RTL:
+            // Return to launch + descend
+            s.vx *= 0.95f;
+            s.vy *= 0.95f;
+            s.pos_n *= 0.98f;
+            s.pos_e *= 0.98f;
+            target_vz = -0.3f;
+            if (s.altitude_agl <= 0.5f && 
+                std::abs(s.pos_n) < 1.0f && std::abs(s.pos_e) < 1.0f) {
+                s.flight_mode = FlightMode::LAND;
+                event_engine_.emit(EventType::FLIGHT_LAND, 180, "RTL: landing at home");
+            }
+            thrust = cfg.gravity * cfg.mass_kg * 0.9f;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.4f;
+            break;
+            
+        case FlightMode::EMERGENCY:
+            // Kill motors
+            thrust = 0;
+            s.motor[0] = s.motor[1] = s.motor[2] = s.motor[3] = 0.0f;
+            target_vz = -cfg.gravity;
+            if (s.altitude_agl <= 0.0f) {
+                s.altitude_agl = 0.0f;
+                s.vz = 0.0f;
+            }
+            break;
+    }
+    
+    // Vertical dynamics
+    float accel_z = (thrust / cfg.mass_kg) - cfg.gravity;
+    s.vz += (target_vz - s.vz) * 3.0f * dt;  // Smooth towards target
+    s.altitude_agl += s.vz * dt;
+    if (s.altitude_agl < 0.0f) {
+        s.altitude_agl = 0.0f;
+        s.vz = 0.0f;
+    }
+    
+    // Horizontal drag
+    s.vx -= s.vx * cfg.drag_coeff * dt;
+    s.vy -= s.vy * cfg.drag_coeff * dt;
+    
+    // Wind effect
+    if (cfg.wind_speed > 0.0f) {
+        float wind_rad = cfg.wind_direction * 0.0174533f;
+        s.vx += cfg.wind_speed * std::cos(wind_rad) * 0.01f;
+        s.vy += cfg.wind_speed * std::sin(wind_rad) * 0.01f;
+    }
+    
+    // Position update
+    s.pos_n += s.vx * dt;
+    s.pos_e += s.vy * dt;
+    s.pos_d = -s.altitude_agl;
+    
+    // Update barometer to reflect altitude
+    s.baro.altitude = s.altitude_agl;
+    s.baro.pressure = 1013.25f - (s.altitude_agl * 0.12f);
+    
+    // Update rangefinder
+    s.range.distance = s.altitude_agl;
+    s.range.valid = s.altitude_agl < 40.0f;
+}
 
 void Runtime::setup_default_rules() {
     // Auto-RTL on very low battery

@@ -75,3 +75,9 @@ class NativeRuntime:
     
     def get_performance(self) -> dict:
         return dict(self._rt.get_performance())
+    
+    def get_sim_config(self) -> dict:
+        return dict(self._rt.get_sim_config())
+    
+    def set_sim_config(self, config: dict):
+        self._rt.set_sim_config(config)

@@ -314,6 +314,27 @@ struct SystemState {
     float roll{0}, pitch{0}, yaw{0};     // degrees
     float altitude_agl{0};                // m above ground
     float vx{0}, vy{0}, vz{0};           // m/s body frame
+    
+    // Position (NED, relative to home)
+    float pos_n{0}, pos_e{0}, pos_d{0};  // m, North-East-Down
+    float target_altitude{10.0f};         // m, for takeoff/hover
+    
+    // Motor output (0-1)
+    float motor[4]{0, 0, 0, 0};
+};
+
+// ─── Simulator Config (tuneable at runtime) ──────────────
+
+struct SimulatorConfig {
+    float wind_speed{0.0f};       // m/s
+    float wind_direction{0.0f};   // degrees
+    float sensor_noise{1.0f};     // noise multiplier (0=none, 1=default)
+    float battery_drain{1.0f};    // drain rate multiplier
+    float gravity{9.81f};
+    float mass_kg{1.2f};          // drone mass
+    float max_thrust{20.0f};      // N, total
+    float drag_coeff{0.3f};
+    bool  turbulence{false};
 };
 
 // ─── Thread Configuration ────────────────────────────────

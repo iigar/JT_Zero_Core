@@ -122,6 +122,30 @@ async def get_performance():
         return runtime.get_performance()
     return {"error": "Performance metrics only available with native runtime"}
 
+@app.get("/api/simulator/config")
+async def get_sim_config():
+    if hasattr(runtime, 'get_sim_config'):
+        return runtime.get_sim_config()
+    return {"error": "Simulator config only available with native runtime"}
+
+class SimConfigUpdate(BaseModel):
+    wind_speed: Optional[float] = None
+    wind_direction: Optional[float] = None
+    sensor_noise: Optional[float] = None
+    battery_drain: Optional[float] = None
+    gravity: Optional[float] = None
+    mass_kg: Optional[float] = None
+    drag_coeff: Optional[float] = None
+    turbulence: Optional[bool] = None
+
+@app.post("/api/simulator/config")
+async def set_sim_config(req: SimConfigUpdate):
+    if hasattr(runtime, 'set_sim_config'):
+        config = {k: v for k, v in req.dict().items() if v is not None}
+        runtime.set_sim_config(config)
+        return {"success": True, "config": runtime.get_sim_config()}
+    return {"error": "Simulator config only available with native runtime"}
+
 @app.post("/api/command")
 async def send_command(req: CommandRequest):
     success = runtime.send_command(req.command, req.param1, req.param2)
