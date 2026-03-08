@@ -37,7 +37,7 @@ export default function TelemetryCharts({ history }) {
         <div>
           <span className="text-[8px] text-slate-700 uppercase">Attitude (Roll / Pitch)</span>
           <div className="h-[60px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={data}>
                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
                 <YAxis domain={['auto', 'auto']} hide />
@@ -53,7 +53,7 @@ export default function TelemetryCharts({ history }) {
         <div>
           <span className="text-[8px] text-slate-700 uppercase">IMU Gyroscope</span>
           <div className="h-[60px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={data}>
                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
                 <YAxis domain={['auto', 'auto']} hide />
@@ -70,7 +70,7 @@ export default function TelemetryCharts({ history }) {
         <div>
           <span className="text-[8px] text-slate-700 uppercase">System (Battery V / CPU %)</span>
           <div className="h-[50px]">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={data}>
                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
                 <YAxis domain={['auto', 'auto']} hide />

@@ -85,7 +85,7 @@ export default function DronePanel({ state, history }) {
         <span className="text-[8px] text-slate-700 uppercase">Altitude History</span>
         <div className="h-[40px] mt-1">
           {history && history.length > 2 ? (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={history.slice(-60)}>
                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
                 <YAxis domain={['auto', 'auto']} hide />

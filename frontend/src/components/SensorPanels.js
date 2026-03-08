@@ -4,7 +4,7 @@ import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 function MiniChart({ data, dataKey, color = '#00F0FF', height = 32 }) {
   if (!data || data.length < 2) return <div style={{ height }} className="bg-black/30 rounded-sm" />;
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={height} minWidth={1} minHeight={1}>
       <LineChart data={data}>
         <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} dot={false} />
         <YAxis domain={['auto', 'auto']} hide />
