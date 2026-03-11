@@ -28,42 +28,43 @@ Full scope: C++ core, Python bindings (pybind11), FastAPI backend, React monitor
 - Phase 9: React Dashboard
 - Phase 10: Performance Optimization
 - Phase 11: Real Sensor Drivers (I2C/SPI/UART HALs, MPU6050, BMP280, NMEA GPS)
-- Cross-Compilation Toolchain
-- Flight Physics & 3D Visualization
-- UI Overhaul: Tabbed Interface (2026-03-11)
 
-## Code Review Bug Fixes (2026-03-08)
-All 9 issues from 3 independent code reviewers addressed:
+## Recent Work (2026-03-11)
 
-| Bug | Status |
-|-----|--------|
-| VO displacement = 0 | FIXED |
-| FAST threshold overflow | FIXED |
-| MemoryPool race condition | FIXED |
-| Heartbeat double-increment | FIXED |
-| GPS-as-vision-position | FIXED |
-| Odometry delta-as-position | FIXED |
-| uint8_t overflow sensors | FIXED |
-| rand() not thread-safe | FIXED |
-| Camera sim sqrt per-pixel | FIXED |
-
-## UI Overhaul (2026-03-11)
+### UI Overhaul
 - 7-tab interface: Dashboard, Telemetry, Camera/VO, MAVLink, Events, Docs, Settings
 - SettingsTab: Simulator config (6 sliders), Runtime info, System Resources, MAVLink, Hardware Sensors, Thread Status, Engine Statistics
 - DocumentationTab: 6 sections (Pi Zero Install 11-step Ukrainian guide, Wiring/GPIO with ASCII pinout, API Reference, Thread Model, File Structure, Hardware)
-- Events prop bug fix in DashboardTab
-- Slider decimal precision fix
+- 3D drone visualization: detailed model (landing gear, camera gimbal, GPS tower, battery, antenna, LEDs), 50% lighter, almost-white (#F8FAFC) background
+
+### P1: Real Sensor Drivers with Auto-Detect
+- C++ sensors (sensors.h/cpp): Added try_hardware() methods for IMU, Baro, GPS
+- Auto-detect flow: probe I2C bus for MPU6050/BMP280, check UART for GPS
+- Backend: /api/hardware endpoint returns sensor detection status
+- WebSocket: sensor_modes field in telemetry (imu, baro, gps, rangefinder, optical_flow)
+- Frontend: SettingsTab shows HW/SIM badges from live telemetry
+
+### P2: Camera Drivers (PI_CSI + USB V4L2)
+- PiCSICamera: V4L2 via /dev/video0, MMAP capture, auto-detect CSI vs USB driver
+- USBCamera: V4L2 YUYV→grayscale, read-based capture
+- CameraPipeline::auto_detect_camera(): CSI → USB → Simulation fallback
+- camera_drivers.cpp with full Linux V4L2 implementation
+
+### P2: MAVLink Serial/UDP Transport
+- MAVTransport enum: SIMULATED, SERIAL, UDP
+- initialize_serial(): UART config (8N1, 921600 baud), /dev/ttyAMA0 
+- initialize_udp(): non-blocking socket, 127.0.0.1:14550
+- auto_detect_transport(): tries serial ports, then UDP
+- send_raw/recv_raw: transport-agnostic I/O
+- MAVLinkStats now includes transport type and transport_info string
 
 ## Testing Status
-- Iteration 6: Backend 100% (43 tests), Frontend 100% (all 7 tabs verified)
-- All new features verified: tabbed UI, settings sliders, docs sections, GPIO wiring table
+- Iteration 7: Backend 100% (48 tests), Frontend 100%
+- All new features verified: hardware endpoint, sensor modes, light 3D theme, settings HW/SIM badges, docs install/wiring
 
 ## Backlog
-### P1
-- Integrate real drivers into sensor update() (auto-detect hardware)
-
 ### P2
-- Real camera drivers (PI_CSI via libcamera, USB via V4L2)
-- Real MAVLink serial/UDP connection
 - Autonomous mission planning (waypoint navigation)
 - recharts ResponsiveContainer width=0 console warning (cosmetic)
+- MAVLink v2 message serialization (currently counting only on real transport)
+- Camera IP_STREAM support (RTSP/HTTP for network cameras)
