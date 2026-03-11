@@ -9,17 +9,33 @@
  */
 
 #include "jt_zero/common.h"
+#include <memory>
 
-// Forward declarations for real drivers (avoid pulling in Linux headers)
+// Forward declarations for real drivers
 namespace jtzero {
 class I2CBus;
 class UARTBus;
+class SPIBus;
 class MPU6050Driver;
 class BMP280Driver;
 class NMEAParser;
 }
 
 namespace jtzero {
+
+// ─── Hardware detection result ───────────────────────────
+
+struct HardwareInfo {
+    bool i2c_available{false};
+    bool imu_detected{false};
+    bool baro_detected{false};
+    bool gps_detected{false};
+    bool spi_available{false};
+    bool uart_available{false};
+    const char* imu_model{"none"};
+    const char* baro_model{"none"};
+    const char* gps_model{"none"};
+};
 
 // ─── Abstract Sensor Interface ───────────────────────────
 
@@ -45,16 +61,21 @@ public:
     
     const IMUData& data() const { return data_; }
     
-    // Simulation control
     void set_simulated(bool sim) { simulated_ = sim; }
     bool is_simulated() const { return simulated_; }
     void inject_data(const IMUData& d) { data_ = d; }
+    
+    // Hardware auto-detect: try to init MPU6050 on I2C bus
+    bool try_hardware(I2CBus& bus);
     
 private:
     IMUData data_;
     bool initialized_{false};
     bool simulated_{true};
     uint64_t update_count_{0};
+    
+    // Real hardware driver (only used if hardware detected)
+    MPU6050Driver* hw_driver_{nullptr};
 };
 
 // ─── Barometer (BMP280 on real hardware) ─────────────────
@@ -71,6 +92,9 @@ public:
     void set_simulated(bool sim) { simulated_ = sim; }
     bool is_simulated() const { return simulated_; }
     
+    // Hardware auto-detect: try to init BMP280 on I2C bus
+    bool try_hardware(I2CBus& bus);
+    
 private:
     BarometerData data_;
     bool initialized_{false};
@@ -78,6 +102,8 @@ private:
     float base_pressure_{1013.25f};
     float target_alt_{0.0f};
     uint64_t update_count_{0};
+    
+    BMP280Driver* hw_driver_{nullptr};
 };
 
 // ─── GPS (NMEA over UART on real hardware) ───────────────
@@ -94,11 +120,16 @@ public:
     void set_simulated(bool sim) { simulated_ = sim; }
     bool is_simulated() const { return simulated_; }
     
+    // Hardware auto-detect: try UART GPS
+    bool try_hardware(UARTBus& uart);
+    
 private:
     GPSData data_;
     bool initialized_{false};
     bool simulated_{true};
     uint64_t update_count_{0};
+    
+    NMEAParser* hw_parser_{nullptr};
 };
 
 // ─── Rangefinder ─────────────────────────────────────────
@@ -142,5 +173,9 @@ private:
     bool simulated_{true};
     uint64_t update_count_{0};
 };
+
+// ─── Hardware Auto-Detect (call once at startup) ─────────
+
+HardwareInfo detect_hardware();
 
 } // namespace jtzero

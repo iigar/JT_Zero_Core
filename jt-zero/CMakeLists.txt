@@ -59,6 +59,7 @@ set(DRIVER_SOURCES
 
 set(CAMERA_SOURCES
     camera/camera_pipeline.cpp
+    camera/camera_drivers.cpp
 )
 
 set(MAVLINK_SOURCES

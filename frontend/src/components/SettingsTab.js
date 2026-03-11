@@ -45,7 +45,7 @@ function SectionCard({ title, icon: Icon, children, testId }) {
   );
 }
 
-export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink }) {
+export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink, sensorModes }) {
   const [config, setConfig] = useState({
     wind_speed: 0, wind_direction: 0,
     sensor_noise: 1, battery_drain: 1,
@@ -184,12 +184,14 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
             <SectionCard title="Hardware Sensors" icon={HardDrive} testId="settings-hardware">
               <div className="space-y-1.5">
                 {[
-                  { name: 'IMU (MPU6050)', bus: 'I2C 0x68', data: state?.imu },
-                  { name: 'Barometer (BMP280)', bus: 'I2C 0x76', data: state?.baro },
-                  { name: 'GPS (NMEA)', bus: 'UART 9600', data: state?.gps },
-                  { name: 'Rangefinder', bus: 'I2C/UART', data: state?.rangefinder },
-                  { name: 'Optical Flow', bus: 'SPI', data: state?.optical_flow },
-                ].map(({ name, bus, data }) => (
+                  { name: 'IMU (MPU6050)', bus: 'I2C 0x68', data: state?.imu, key: 'imu' },
+                  { name: 'Barometer (BMP280)', bus: 'I2C 0x76', data: state?.baro, key: 'baro' },
+                  { name: 'GPS (NMEA)', bus: 'UART 9600', data: state?.gps, key: 'gps' },
+                  { name: 'Rangefinder', bus: 'I2C/UART', data: state?.rangefinder, key: 'rangefinder' },
+                  { name: 'Optical Flow', bus: 'SPI', data: state?.optical_flow, key: 'optical_flow' },
+                ].map(({ name, bus, data, key }) => {
+                  const isHardware = sensorModes?.[key] === 'hardware';
+                  return (
                   <div key={name} className="flex items-center justify-between py-1 border-b border-[#1E293B]/30">
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${data?.valid ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]' : 'bg-slate-700'}`} />
@@ -198,15 +200,16 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
                     <div className="flex items-center gap-2">
                       <span className="text-[8px] text-slate-600 font-mono">{bus}</span>
                       <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm border ${
-                        data?.valid
+                        isHardware
                           ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
-                          : 'text-slate-500 border-slate-600/20 bg-slate-600/5'
-                      }`}>
-                        {data?.valid ? 'ACTIVE' : 'SIM'}
+                          : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
+                      }`} data-testid={`sensor-mode-${key}`}>
+                        {isHardware ? 'HW' : 'SIM'}
                       </span>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <p className="text-[8px] text-slate-600 mt-2">
                 Sensors auto-detect hardware. Missing devices fall back to simulation.

@@ -471,5 +471,63 @@ class TestThreadsAndEnginesEndpoints:
         assert "memory" in data
 
 
+class TestHardwareEndpoint:
+    """Tests for /api/hardware endpoint - sensor detection status (new in iteration 7)"""
+    
+    def test_hardware_returns_200(self):
+        """Hardware endpoint returns 200"""
+        response = requests.get(f"{BASE_URL}/api/hardware")
+        assert response.status_code == 200
+    
+    def test_hardware_bus_availability(self):
+        """Hardware returns bus availability status (i2c, spi, uart)"""
+        response = requests.get(f"{BASE_URL}/api/hardware")
+        data = response.json()
+        assert "i2c_available" in data
+        assert "spi_available" in data
+        assert "uart_available" in data
+        assert isinstance(data["i2c_available"], bool)
+        assert isinstance(data["spi_available"], bool)
+        assert isinstance(data["uart_available"], bool)
+    
+    def test_hardware_sensors_object_structure(self):
+        """Hardware returns sensors object with 5 sensor entries"""
+        response = requests.get(f"{BASE_URL}/api/hardware")
+        data = response.json()
+        assert "sensors" in data
+        sensors = data["sensors"]
+        
+        # Should have exactly 5 sensors
+        expected_sensors = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        for sensor in expected_sensors:
+            assert sensor in sensors, f"Missing sensor: {sensor}"
+        
+        assert len(sensors) == 5, f"Expected 5 sensors, got {len(sensors)}"
+    
+    def test_hardware_sensor_entry_fields(self):
+        """Each sensor has detected, model, mode, bus, address fields"""
+        response = requests.get(f"{BASE_URL}/api/hardware")
+        data = response.json()
+        sensors = data["sensors"]
+        
+        required_fields = ["detected", "model", "mode", "bus", "address"]
+        for sensor_name, sensor_data in sensors.items():
+            for field in required_fields:
+                assert field in sensor_data, f"Sensor {sensor_name} missing field: {field}"
+            
+            # detected should be boolean
+            assert isinstance(sensor_data["detected"], bool)
+            # mode should be 'simulation' or 'hardware'
+            assert sensor_data["mode"] in ["simulation", "hardware"], f"Invalid mode for {sensor_name}"
+    
+    def test_hardware_auto_detect_ran(self):
+        """Hardware returns auto_detect_ran flag"""
+        response = requests.get(f"{BASE_URL}/api/hardware")
+        data = response.json()
+        assert "auto_detect_ran" in data
+        assert isinstance(data["auto_detect_ran"], bool)
+
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

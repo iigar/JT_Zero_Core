@@ -414,13 +414,31 @@ void VisualOdometry::reset() {
 CameraPipeline::CameraPipeline() = default;
 
 bool CameraPipeline::initialize(CameraType type) {
-    switch (type) {
+    // Auto-detect if requested type is SIMULATED or NONE
+    CameraType actual = type;
+    if (type == CameraType::SIMULATED || type == CameraType::NONE) {
+        actual = auto_detect_camera();
+    }
+    
+    switch (actual) {
+        case CameraType::PI_CSI:
+            if (csi_camera_.open()) {
+                active_camera_ = &csi_camera_;
+                break;
+            }
+            // Fall through to USB if CSI fails
+            std::printf("[CameraPipeline] CSI open failed, trying USB...\n");
+            [[fallthrough]];
+        case CameraType::USB:
+            if (usb_camera_.open()) {
+                active_camera_ = &usb_camera_;
+                break;
+            }
+            // Fall through to simulation
+            std::printf("[CameraPipeline] USB open failed, using simulation\n");
+            [[fallthrough]];
         case CameraType::SIMULATED:
-            if (!sim_camera_.open()) return false;
-            active_camera_ = &sim_camera_;
-            break;
         default:
-            // Only simulated camera supported currently
             if (!sim_camera_.open()) return false;
             active_camera_ = &sim_camera_;
             break;

@@ -35,6 +35,7 @@ function App() {
   const [mavlink, setMavlink] = useState(null);
   const [performance, setPerformance] = useState(null);
   const [runtimeMode, setRuntimeMode] = useState('simulator');
+  const [sensorModes, setSensorModes] = useState({});
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
 
@@ -47,6 +48,7 @@ function App() {
       if (data.mavlink) setMavlink(data.mavlink);
       if (data.performance) setPerformance(data.performance);
       if (data.runtime_mode) setRuntimeMode(data.runtime_mode);
+      if (data.sensor_modes) setSensorModes(data.sensor_modes);
       if (data.recent_events) {
         setEvents(prev => {
           const combined = [...prev, ...data.recent_events];
@@ -132,7 +134,7 @@ function App() {
           <DocumentationTab />
         )}
         {activeTab === 'settings' && (
-          <SettingsTab state={state} threads={threads} engines={engines} runtimeMode={runtimeMode} mavlink={mavlink} />
+          <SettingsTab state={state} threads={threads} engines={engines} runtimeMode={runtimeMode} mavlink={mavlink} sensorModes={sensorModes} />
         )}
       </main>
 

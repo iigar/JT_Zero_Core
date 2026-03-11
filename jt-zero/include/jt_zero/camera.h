@@ -119,6 +119,55 @@ private:
     void generate_pattern(uint8_t* data, uint16_t w, uint16_t h, uint32_t frame);
 };
 
+// ─── Pi CSI Camera (via libcamera / V4L2) ────────────────
+// Raspberry Pi Camera Module v2/v3 (CSI interface)
+// Uses V4L2 /dev/video0 with libcamera-bridge
+
+class PiCSICamera : public CameraSource {
+public:
+    bool open() override;
+    bool capture(FrameBuffer& frame) override;
+    void close() override;
+    bool is_open() const override { return open_; }
+    CameraType type() const override { return CameraType::PI_CSI; }
+    const char* name() const override { return "PiCSI_libcamera"; }
+    
+    // Auto-detect: check if /dev/video0 exists and is a CSI camera
+    static bool detect();
+
+private:
+    bool open_{false};
+    int fd_{-1};
+    uint32_t frame_counter_{0};
+    uint64_t last_capture_us_{0};
+    uint8_t* mmap_buf_{nullptr};
+    size_t mmap_len_{0};
+};
+
+// ─── USB Camera (via V4L2) ───────────────────────────────
+// Generic USB webcam using Video4Linux2
+
+class USBCamera : public CameraSource {
+public:
+    explicit USBCamera(const char* device = "/dev/video0") : device_(device) {}
+    
+    bool open() override;
+    bool capture(FrameBuffer& frame) override;
+    void close() override;
+    bool is_open() const override { return open_; }
+    CameraType type() const override { return CameraType::USB; }
+    const char* name() const override { return "USB_V4L2"; }
+    
+    static bool detect(const char* device = "/dev/video0");
+
+private:
+    const char* device_;
+    bool open_{false};
+    int fd_{-1};
+    uint32_t frame_counter_{0};
+    uint64_t last_capture_us_{0};
+};
+
 // ─── FAST Corner Detector ────────────────────────────────
 // Simplified FAST-9 corner detection for embedded use
 
@@ -210,8 +259,11 @@ class CameraPipeline {
 public:
     CameraPipeline();
     
-    // Initialize with camera source
+    // Initialize with camera source (auto-detects if SIMULATED)
     bool initialize(CameraType type = CameraType::SIMULATED);
+    
+    // Auto-detect: try PI_CSI, then USB, fallback to SIMULATED
+    CameraType auto_detect_camera();
     
     // Process one frame (capture + VO)
     bool tick(float ground_distance = 1.0f);
@@ -228,9 +280,10 @@ public:
 
 private:
     SimulatedCamera sim_camera_;
+    PiCSICamera     csi_camera_;
+    USBCamera       usb_camera_;
     CameraSource*   active_camera_{nullptr};
     
-    // Double-buffer frames
     FrameBuffer current_frame_;
     
     VisualOdometry vo_;

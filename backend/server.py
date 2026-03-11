@@ -79,6 +79,27 @@ async def health():
         "uptime": runtime.get_state().get("uptime_sec", 0)
     }
 
+@app.get("/api/hardware")
+async def get_hardware():
+    """Hardware detection status for all sensors."""
+    if hasattr(runtime, 'get_hardware_info'):
+        return runtime.get_hardware_info()
+    # Default: all simulated (no real hardware in this environment)
+    return {
+        "i2c_available": False,
+        "spi_available": False,
+        "uart_available": False,
+        "sensors": {
+            "imu": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x68"},
+            "baro": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x76"},
+            "gps": {"detected": False, "model": "none", "mode": "simulation", "bus": "UART", "address": "9600"},
+            "rangefinder": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C/UART", "address": "-"},
+            "optical_flow": {"detected": False, "model": "none", "mode": "simulation", "bus": "SPI", "address": "CS0"},
+        },
+        "auto_detect_ran": True,
+        "note": "No hardware detected — all sensors using simulation"
+    }
+
 @app.get("/api/state")
 async def get_state():
     return runtime.get_state()
@@ -193,6 +214,13 @@ async def websocket_telemetry(ws: WebSocket):
                 "recent_events": events,
                 "camera": camera,
                 "mavlink": mavlink,
+                "sensor_modes": {
+                    "imu": "hardware" if hasattr(runtime, '_hw_imu') and runtime._hw_imu else "simulation",
+                    "baro": "hardware" if hasattr(runtime, '_hw_baro') and runtime._hw_baro else "simulation",
+                    "gps": "hardware" if hasattr(runtime, '_hw_gps') and runtime._hw_gps else "simulation",
+                    "rangefinder": "simulation",
+                    "optical_flow": "simulation",
+                },
             }
             
             # Add performance data if native
