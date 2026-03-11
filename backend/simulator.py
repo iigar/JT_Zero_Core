@@ -379,11 +379,17 @@ class JTZeroSimulator:
     def _update_state(self, t: float):
         s = self.state
         
-        # Attitude
-        s.roll = math.atan2(s.imu["acc_y"], s.imu["acc_z"]) * 57.2958
-        s.pitch = math.atan2(-s.imu["acc_x"],
-                  math.sqrt(s.imu["acc_y"]**2 + s.imu["acc_z"]**2)) * 57.2958
-        s.yaw = (s.yaw + s.imu["gyro_z"] * 0.05 * 57.2958) % 360
+        # Attitude from accelerometer (stable, no gyro drift)
+        # acc_z = -9.81 when level → negate for correct atan2
+        raw_roll  = math.atan2(s.imu["acc_y"], -s.imu["acc_z"]) * 57.2958
+        raw_pitch = math.atan2(-s.imu["acc_x"],
+                    math.sqrt(s.imu["acc_y"]**2 + s.imu["acc_z"]**2)) * 57.2958
+        
+        # Low-pass filter (smooth, no jitter)
+        lp = 0.15
+        s.roll  = s.roll + lp * (raw_roll - s.roll)
+        s.pitch = s.pitch + lp * (raw_pitch - s.pitch)
+        s.yaw   = (s.yaw + s.imu["gyro_z"] * 0.05 * 57.2958) % 360
         
         s.altitude_agl = s.baro["altitude"]
         s.uptime_sec = int(time.time() - self._start_time)

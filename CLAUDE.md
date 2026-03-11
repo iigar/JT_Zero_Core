@@ -1,120 +1,222 @@
-# CLAUDE.md — JT-Zero Runtime Context
+# CLAUDE.md — JT-Zero Runtime Technical Reference
 
-## Project
-JT-Zero — multi-threaded C++ robotics runtime for Raspberry Pi Zero 2 W drone autonomy.
-Exposed to Python via pybind11, served by FastAPI, visualized in React dashboard.
+## Project Overview
+JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspberry Pi Zero 2 W.
 
-## Architecture
-```
-C++ Runtime (8 threads T0-T7) → pybind11 → FastAPI → WebSocket 10Hz → React Dashboard
-```
+**Architecture:** Multi-threaded C++ core → pybind11 → FastAPI backend → React dashboard
 
-## Thread Model
-| Thread | Function | Rate | Priority |
-|--------|----------|------|----------|
-| T0 | Supervisor | 10 Hz | 90 |
-| T1 | Sensors | 200 Hz | 95 |
-| T2 | Events | 200 Hz | 85 |
-| T3 | Reflex | 200 Hz | 98 (highest) |
-| T4 | Rules | 20 Hz | 70 |
-| T5 | MAVLink | 50 Hz | 80 |
-| T6 | Camera | 15 FPS | 60 |
-| T7 | API Bridge | 30 Hz | 50 |
+**Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-## Key Files
-```
-jt-zero/
-├── include/jt_zero/     # C++ headers (common.h, runtime.h, camera.h, etc.)
-├── core/                # 5 engines: event, reflex, rule, memory, output
-├── sensors/sensors.cpp  # Simulated sensors with xorshift32 PRNG
-├── camera/              # FAST-9 detector + Lucas-Kanade tracker + VO
-├── mavlink/             # MAVLink interface (vision_pos, odometry, optical_flow)
-├── drivers/             # Real hardware: I2C/SPI/UART bus + MPU6050/BMP280/GPS
-├── api/                 # pybind11 bindings (python_bindings.cpp)
-├── CMakeLists.txt       # C++17, -fno-exceptions -fno-rtti, pybind11 module
-├── toolchain-pi-zero.cmake  # Cross-compilation for aarch64
-└── DEPLOYMENT.md
+---
 
-backend/
-├── server.py            # FastAPI: 11 REST + 2 WebSocket endpoints
-├── native_bridge.py     # Auto-detect native C++ or Python fallback
-├── simulator.py         # Pure Python fallback simulator
-└── jtzero_native.*.so   # Compiled C++ module
+## Thread Model (8 threads)
 
-frontend/src/
-├── App.js               # Tab navigation (7 tabs)
-├── components/          # 14+ React panels
-└── hooks/useApi.js      # WebSocket + REST hooks
-```
+| Thread | Name        | Hz    | Function                                           |
+|--------|-------------|-------|-----------------------------------------------------|
+| T0     | Supervisor  | 10    | System health, battery, failsafe, mode transitions  |
+| T1     | Sensors     | 200   | IMU, Baro, GPS, Rangefinder, Optical Flow           |
+| T2     | Events      | 200   | Event queue processing, prioritization              |
+| T3     | Reflex      | 200   | Reflexes — instant reactions (obstacle avoidance)   |
+| T4     | Rules       | 20    | Rules engine — condition-based state transitions    |
+| T5     | MAVLink     | 50    | MAVLink v2 communication with flight controller     |
+| T6     | Camera      | 15    | Frame capture + Visual Odometry (FAST + LK)        |
+| T7     | API Bridge  | 30    | pybind11 ↔ Python data sync                        |
 
-## Build
-```bash
-cd jt-zero/build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j4
-cp jtzero_native.*.so ../backend/
-```
+**Thread communication:** Lock-free SPSC ring buffers between threads.  
+**Memory:** Lock-free O(1) MemoryPool using CAS (Compare-And-Swap).
 
-## Dual-Mode Runtime
-Backend auto-detects `jtzero_native.so`:
-- Found → C++ Native mode (full performance, real threads)
-- Not found → Python Simulator fallback (same API interface)
+---
 
-## Realtime Rules (Embedded)
-- No dynamic allocation in hot paths
-- Lock-free SPSC ring buffer (1024 events)
-- Lock-free MemoryPool with CAS free-list (O(1) alloc/dealloc)
-- Thread-local xorshift32 PRNG (not rand())
-- Fixed memory pools, no heap in RT loops
+## Sensor Hardware Auto-Detection
+
+On startup, the runtime probes hardware interfaces:
+
+| Sensor          | Bus     | Address | Auto-detect Method          |
+|-----------------|---------|---------|------------------------------|
+| MPU6050 (IMU)   | I2C-1   | 0x68    | i2cdetect probe              |
+| BMP280 (Baro)   | I2C-1   | 0x76    | i2cdetect probe              |
+| NMEA GPS        | UART    | 9600    | /dev/ttyS0 availability      |
+| Rangefinder     | I2C/UART| varies  | Bus scan                     |
+| PMW3901 (Flow)  | SPI0    | CS0     | SPI device probe             |
+
+**Fallback:** If no hardware detected → automatic simulation mode. No manual config needed.
+
+---
+
+## Camera Pipeline
+
+**Priority cascade:** PI_CSI → USB → Simulation
+
+| Source    | Interface        | Implementation              |
+|-----------|------------------|-----------------------------|
+| PI_CSI    | /dev/video0      | V4L2 + libcamera, MMAP      |
+| USB       | /dev/videoN      | V4L2 YUYV → grayscale       |
+| Simulated | In-memory        | Test pattern with features   |
+
+**Visual Odometry:** FAST corner detector + Lucas-Kanade optical flow tracker  
+**Resolution:** 320×240 grayscale, 15 FPS target
+
+---
+
+## MAVLink Interface
+
+**Transport cascade:** Serial → UDP → Simulation
+
+| Transport  | Config                    | Use Case                    |
+|-----------|----------------------------|-----------------------------|
+| Serial    | /dev/ttyAMA0 @ 921600     | Direct FC UART connection   |
+| UDP       | 127.0.0.1:14550           | SITL / QGC / MissionPlanner |
+| Simulated | In-memory                 | Development & testing       |
+
+**Messages sent:**
+- `VISION_POSITION_ESTIMATE` (#102) — accumulated VO pose, NED frame
+- `ODOMETRY` (#331) — full 6DOF with quaternion
+- `OPTICAL_FLOW_RAD` (#106) — integrated flow + gyro
+- `HEARTBEAT` (#0) — 1Hz companion computer heartbeat
+
+---
 
 ## API Endpoints
+
+| Method | Path                     | Description                          |
+|--------|--------------------------|--------------------------------------|
+| GET    | /api/health              | Runtime status, mode, build info     |
+| GET    | /api/state               | Full system state (attitude, sensors)|
+| GET    | /api/hardware            | Hardware detection status            |
+| GET    | /api/events              | Recent event log                     |
+| GET    | /api/telemetry/history   | Time-series telemetry data           |
+| GET    | /api/threads             | Thread stats (Hz, CPU, iterations)   |
+| GET    | /api/engines             | Engine stats (events, reflexes, etc) |
+| GET    | /api/camera              | Camera & VO pipeline stats           |
+| GET    | /api/mavlink             | MAVLink connection & message stats   |
+| GET    | /api/performance         | CPU, memory, latency breakdown       |
+| GET    | /api/simulator/config    | Current simulator parameters         |
+| POST   | /api/simulator/config    | Update simulator parameters          |
+| POST   | /api/command             | Send command (arm, takeoff, land)    |
+| WS     | /api/ws/telemetry        | Real-time telemetry @ 10Hz           |
+
+---
+
+## WebSocket Telemetry Payload
+
+```json
+{
+  "type": "telemetry",
+  "timestamp": 1710192000.0,
+  "runtime_mode": "native",
+  "state": { "roll": 0.5, "pitch": -0.3, "yaw": 45.2, "altitude_agl": 7.0, ... },
+  "threads": [ { "name": "T0_Supervisor", "actual_hz": 10.0, "running": true, ... } ],
+  "engines": { "events": {...}, "reflexes": {...}, "rules": {...}, "memory": {...}, "output": {...} },
+  "recent_events": [ { "timestamp": 100.5, "type": "OBSTACLE", "priority": 200, "message": "..." } ],
+  "camera": { "fps_actual": 15.0, "vo_features_tracked": 21, "vo_valid": true, ... },
+  "mavlink": { "state": "CONNECTED", "messages_sent": 779, ... },
+  "sensor_modes": { "imu": "simulation", "baro": "simulation", "gps": "simulation", ... }
+}
 ```
-GET  /api/health, /api/state, /api/events, /api/telemetry
-GET  /api/threads, /api/engines, /api/camera, /api/mavlink
-GET  /api/performance, /api/simulator/config
-POST /api/simulator/config, /api/command
-WS   /api/ws/telemetry (10Hz), /api/ws/events
+
+---
+
+## Key Bug Fixes (from code review)
+
+1. **VO displacement = 0** — Fixed: was using median pixel shift as displacement. Now: `displacement = pixel_shift * (ground_distance / focal_length)`
+2. **MemoryPool race** — Replaced mutex-based pool with lock-free CAS free-list (O(1))
+3. **FAST threshold overflow** — `int t = threshold_` prevents uint8_t subtraction underflow
+4. **MAVLink VISION_POS** — Now uses accumulated VO local pose, not GPS coordinates
+5. **MAVLink ODOMETRY** — Uses accumulated pose, not per-frame delta
+6. **rand() thread safety** — Replaced with per-thread xorshift32 PRNG
+7. **Roll calculation** — Fixed `atan2(acc_y, acc_z)` → `atan2(acc_y, -acc_z)` (acc_z is -9.81 when level)
+
+---
+
+## File Structure
+
+```
+jt-zero/
+├── include/jt_zero/      # Public headers
+│   ├── common.h           # SystemState, sensor data structs, MemoryPool
+│   ├── sensors.h          # Sensor interfaces + auto-detect
+│   ├── camera.h           # Camera sources + VO + Pipeline
+│   └── mavlink_interface.h # MAVLink with Serial/UDP/Sim transport
+├── core/                  # Runtime core
+│   └── runtime.cpp        # Thread management, main loop
+├── sensors/
+│   └── sensors.cpp        # Sensor implementations + hw probing
+├── camera/
+│   ├── camera_pipeline.cpp # VO pipeline + SimulatedCamera
+│   └── camera_drivers.cpp  # PiCSI (V4L2/MMAP) + USB (V4L2)
+├── drivers/
+│   ├── bus.h/cpp          # I2C, SPI, UART HAL
+│   └── sensor_drivers.h/cpp # MPU6050, BMP280, NMEA drivers
+├── mavlink/
+│   └── mavlink_interface.cpp # Serial/UDP/Sim transport
+├── api/
+│   └── python_bindings.cpp # pybind11 module
+├── simulator/             # Test pattern generators
+├── CMakeLists.txt
+└── toolchain-pi-zero.cmake
 ```
 
-## Bug Fixes Applied (from 3 independent code reviews)
-1. VO displacement was always 0 → Added prev_features_ array, computes real flow
-2. FAST threshold uint8_t overflow → int comparison
-3. MemoryPool race condition → lock-free CAS free-list
-4. MAVLink heartbeat double-increment → fixed
-5. MAVLink GPS-as-vision-position → uses VO local pose
-6. MAVLink delta-as-odometry-position → accumulated pose
-7. Sensor uint8_t overflow → clamp
-8. rand() not thread-safe → thread-local xorshift32
-9. Camera sim sqrt per-pixel → squared distance
+---
 
-## Sensor Drivers (Phase 11)
-Real hardware drivers created but sensors currently run in simulated mode:
-- MPU6050 (I2C 0x68): gyro + accel, 14-byte burst read
-- BMP280 (I2C 0x76): pressure + temp, datasheet compensation
-- NMEA GPS (UART 9600): $GPGGA + $GPRMC parsing
-- Auto-detection: if /dev/i2c-1 not available, falls back to simulation
+## FAQ: Running Without External IMU
 
-## Frontend (React Dashboard)
-Tab-based navigation:
-1. Dashboard — 3D drone + telemetry + sensors + mini event log
-2. Telemetry — Charts + performance + detailed sensors
-3. Camera/VO — Camera pipeline + Visual Odometry
-4. MAVLink — Connection status + flight commands
-5. Events — Full event log (fixed container, internal scroll)
-6. Docs — API reference, thread model, file structure, Pi install guide, hardware
-7. Settings — Simulator config + system info + hardware status
+**Q: Чи працюватиме система тільки з Pi Zero + польотний контролер, без зовнішнього IMU?**
 
-## System Constraints
-| Metric | Target | Actual |
-|--------|--------|--------|
-| CPU | <= 65% | ~3% |
-| RAM | <= 300 MB | ~1 MB |
-| Event drops | 0% | 0% |
-| Reflex latency | < 5ms | ~0 us |
+**A: Так, повністю.** Ось як:
 
-## Cross-Compilation (for Pi Zero 2 W from x86 host)
+1. **Сценарій: Pi Zero + FC (ArduPilot/PX4)**
+   - IMU вбудований у польотний контролер (він завжди має свій MPU6050/ICM20948)
+   - JT-Zero отримує дані через MAVLink: `ATTITUDE`, `SCALED_IMU`, `GLOBAL_POSITION_INT`
+   - Зовнішній MPU6050 на Pi НЕ потрібен
+
+2. **Що робить JT-Zero без зовнішнього IMU:**
+   - Камера + Visual Odometry — працює (не залежить від IMU)
+   - MAVLink → FC — працює (передає VO дані польотнику)
+   - Рефлекси та правила — працюють (використовують дані від FC)
+   - IMU канал → автоматично переходить у SIM режим (генерує тестові дані)
+
+3. **Мінімальна конфігурація:**
+   - Pi Zero 2 W
+   - Pi Camera Module v2 (або USB камера)
+   - UART з'єднання з FC: TX→RX, RX→TX, GND
+   - JT-Zero надсилає `VISION_POSITION_ESTIMATE` та `OPTICAL_FLOW_RAD` для fusion у EKF
+
+4. **Оптимальна конфігурація:**
+   - + MPU6050 на I2C (для власного AHRS і VO компенсації)
+   - + BMP280 (незалежна альтиметрія)
+   - + GPS UART (для absolute position backup)
+
+---
+
+## Build & Deploy
+
+### On Pi Zero (native build):
 ```bash
-cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake -DCMAKE_BUILD_TYPE=Release ..
+cd ~/jt-zero/jt-zero && mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
+cp jtzero_native*.so ~/jt-zero/backend/
 ```
 
-## Testing
-5 test iterations completed. Backend 100%, Frontend 100%.
-Test reports: /app/test_reports/iteration_1-5.json
+### Cross-compilation (from x86 host):
+```bash
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+scp jtzero_native*.so pi@jtzero.local:~/jt-zero/backend/
+```
+
+### Run:
+```bash
+cd ~/jt-zero/backend && source venv/bin/activate
+uvicorn server:app --host 0.0.0.0 --port 8001
+```
+
+---
+
+## Session History
+- Phase 1-11: Core runtime, sensors, camera, MAVLink, dashboard
+- Bug fixes: VO displacement, MemoryPool, MAVLink semantics, roll atan2
+- UI overhaul: 7-tab interface, detailed 3D drone, GPIO docs, Settings
+- P1: Sensor auto-detect (I2C/UART probing)
+- P2: Camera drivers (PiCSI V4L2, USB V4L2), MAVLink Serial/UDP transport
+- Test reports: /app/test_reports/iteration_1-7.json

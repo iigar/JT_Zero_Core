@@ -13,9 +13,10 @@ function DroneModel({ roll, pitch, yaw, motors, altitude }) {
       const targetR = (roll || 0) * Math.PI / 180;
       const targetP = (pitch || 0) * Math.PI / 180;
       const targetY = (yaw || 0) * Math.PI / 180;
-      groupRef.current.rotation.z += (targetR - groupRef.current.rotation.z) * 0.15;
-      groupRef.current.rotation.x += (targetP - groupRef.current.rotation.x) * 0.15;
-      groupRef.current.rotation.y += (-targetY - groupRef.current.rotation.y) * 0.15;
+      // Smooth lerp (0.06 = gentle, no jitter)
+      groupRef.current.rotation.z += (targetR - groupRef.current.rotation.z) * 0.06;
+      groupRef.current.rotation.x += (targetP - groupRef.current.rotation.x) * 0.06;
+      groupRef.current.rotation.y += (-targetY - groupRef.current.rotation.y) * 0.06;
     }
     propRefs.forEach((ref, i) => {
       if (ref.current) {
@@ -228,7 +229,7 @@ function Ground({ altitude }) {
       {/* Solid subtle ground plane */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
         <planeGeometry args={[20, 20]} />
-        <meshStandardMaterial color="#F1F5F9" transparent opacity={0.4} />
+        <meshStandardMaterial color="#D5DDD5" transparent opacity={0.4} />
       </mesh>
     </group>
   );
@@ -264,7 +265,7 @@ export default function Drone3DPanel({ state }) {
   return (
     <div className="relative overflow-hidden border border-slate-200/60 rounded-md"
          data-testid="drone-3d-panel"
-         style={{ height: '100%', minHeight: '200px', background: '#F8FAFC' }}>
+         style={{ height: '100%', minHeight: '200px', background: '#E8EDE8' }}>
       <div className="absolute top-2 left-3 z-10">
         <h3 className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">3D View</h3>
       </div>
@@ -300,13 +301,13 @@ export default function Drone3DPanel({ state }) {
         style={{ background: 'transparent' }}
         gl={{ alpha: true, antialias: true }}
       >
-        <color attach="background" args={['#F8FAFC']} />
-        <fog attach="fog" args={['#F8FAFC', 8, 20]} />
+        <color attach="background" args={['#E8EDE8']} />
+        <fog attach="fog" args={['#E8EDE8', 8, 20]} />
         <ambientLight intensity={0.7} />
-        <directionalLight position={[5, 8, 5]} intensity={1.0} color="#F8FAFC" castShadow />
-        <directionalLight position={[-3, 4, -3]} intensity={0.4} color="#E0F2FE" />
+        <directionalLight position={[5, 8, 5]} intensity={1.0} color="#F0F5F0" castShadow />
+        <directionalLight position={[-3, 4, -3]} intensity={0.4} color="#DFE8DF" />
         <pointLight position={[0, 2, 0]} intensity={0.3} color="#0EA5E9" />
-        <hemisphereLight intensity={0.3} color="#F0F9FF" groundColor="#E2E8F0" />
+        <hemisphereLight intensity={0.3} color="#EDF2ED" groundColor="#D5DDD5" />
 
         <DroneModel roll={roll} pitch={pitch} yaw={yaw} motors={motors} altitude={altitude} />
         <Ground altitude={altitude} />

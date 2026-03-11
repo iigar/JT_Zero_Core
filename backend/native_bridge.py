@@ -5,6 +5,7 @@ as the Python simulator, enabling seamless switching.
 """
 
 import time
+import math
 import sys
 import os
 
@@ -51,7 +52,17 @@ class NativeRuntime:
         return self._rt.send_command(cmd, param1, param2)
     
     def get_state(self) -> dict:
-        return dict(self._rt.get_state())
+        state = dict(self._rt.get_state())
+        # Fix roll/pitch: C++ uses atan2(acc_y, acc_z) where acc_z=-9.81 → roll≈180°
+        # Correct: atan2(acc_y, -acc_z) → roll≈0° when level
+        imu = state.get("imu", {})
+        if isinstance(imu, dict):
+            ay = imu.get("acc_y", 0)
+            az = imu.get("acc_z", -9.81)
+            ax = imu.get("acc_x", 0)
+            state["roll"] = math.atan2(ay, -az) * 57.2958
+            state["pitch"] = math.atan2(-ax, math.sqrt(ay**2 + az**2)) * 57.2958
+        return state
     
     def get_events(self, count: int = 50) -> list:
         events = self._rt.get_events(count)
