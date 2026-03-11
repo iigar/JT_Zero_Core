@@ -110,7 +110,7 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} runtimeMode={runtimeMode} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} runtimeMode={runtimeMode} events={events} />
         )}
         {activeTab === 'telemetry' && (
           <TelemetryTab state={state} history={history} performance={performance} runtimeMode={runtimeMode} threads={threads} />
@@ -148,7 +148,7 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, runtimeMode }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, runtimeMode, events }) {
   return (
     <div className="h-full flex overflow-hidden">
       {/* Compact sidebar */}

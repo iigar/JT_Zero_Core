@@ -58,14 +58,39 @@ const FILE_TREE = [
 ];
 
 const PI_INSTALL_STEPS = [
-  { step: 1, title: 'Prepare Pi Zero 2 W', content: 'Flash Raspberry Pi OS Lite (64-bit) on SD card. Enable SSH, I2C, SPI, UART via raspi-config.' },
-  { step: 2, title: 'Install Dependencies', content: 'sudo apt update && sudo apt install -y cmake g++ python3-dev python3-pip python3-venv pybind11-dev' },
-  { step: 3, title: 'Transfer Files', content: 'scp -r jt-zero/ backend/ frontend/ pi@<PI_IP>:~/jt-zero/' },
-  { step: 4, title: 'Build C++ Runtime', content: 'cd ~/jt-zero/jt-zero && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4' },
-  { step: 5, title: 'Install Python', content: 'cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets' },
-  { step: 6, title: 'Copy Native Module', content: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/' },
-  { step: 7, title: 'Run', content: 'cd ~/jt-zero/backend && source venv/bin/activate && uvicorn server:app --host 0.0.0.0 --port 8001' },
-  { step: 8, title: 'Auto-start (systemd)', content: 'Create /etc/systemd/system/jtzero.service, enable and start.' },
+  { step: 1, title: 'Підготовка SD-карти',
+    content: 'Завантажте Raspberry Pi Imager. Виберіть "Raspberry Pi OS Lite (64-bit)" — Bookworm або новіший. В налаштуваннях (Ctrl+Shift+X): увімкніть SSH, задайте hostname "jtzero", Wi-Fi SSID/пароль.',
+    cmd: 'https://www.raspberrypi.com/software/' },
+  { step: 2, title: 'Налаштування інтерфейсів',
+    content: 'Після першого завантаження увімкніть I2C, SPI та Serial Port через raspi-config. Це необхідно для MPU6050, BMP280 та GPS модулів.',
+    cmd: 'sudo raspi-config  # Interface Options → I2C: Yes, SPI: Yes, Serial Port: Yes (login shell: No)' },
+  { step: 3, title: 'Встановлення залежностей',
+    content: 'Встановіть компілятор, CMake, Python та pybind11. libatomic1 потрібен для lock-free операцій на ARMv8.',
+    cmd: 'sudo apt update && sudo apt install -y cmake g++ python3-dev python3-pip python3-venv pybind11-dev libatomic1 i2c-tools' },
+  { step: 4, title: 'Перевірка I2C шини',
+    content: 'Переконайтесь що сенсори підключені правильно. MPU6050 = 0x68, BMP280 = 0x76. Якщо пусто — система автоматично використає симуляцію.',
+    cmd: 'sudo i2cdetect -y 1' },
+  { step: 5, title: 'Перенесення файлів на Pi',
+    content: 'Скопіюйте весь проєкт з хост-машини на Pi через SCP або rsync.',
+    cmd: 'scp -r jt-zero/ backend/ pi@jtzero.local:~/jt-zero/' },
+  { step: 6, title: 'Збірка C++ Runtime (на Pi)',
+    content: 'Збірка безпосередньо на Pi займає ~5-10 хв. Для швидшої збірки використовуйте крос-компіляцію (див. нижче).',
+    cmd: 'cd ~/jt-zero/jt-zero && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4' },
+  { step: 7, title: 'Встановлення Python-середовища',
+    content: 'Створіть віртуальне середовище та встановіть FastAPI + WebSocket сервер.',
+    cmd: 'cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets' },
+  { step: 8, title: 'Копіювання нативного модуля',
+    content: 'Скопіюйте зібрану .so бібліотеку в каталог backend. Сервер автоматично визначить її наявність.',
+    cmd: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/' },
+  { step: 9, title: 'Перевірка нативного модуля',
+    content: 'Переконайтесь що Python може імпортувати C++ модуль. Якщо помилка — система працюватиме в режимі симулятора.',
+    cmd: 'cd ~/jt-zero/backend && source venv/bin/activate && python3 -c "import jtzero_native; print(\'OK\')"' },
+  { step: 10, title: 'Запуск сервера',
+    content: 'Запустіть FastAPI сервер. Dashboard буде доступний на http://<PI_IP>:8001. WebSocket телеметрія — ws://<PI_IP>:8001/api/ws/telemetry',
+    cmd: 'uvicorn server:app --host 0.0.0.0 --port 8001' },
+  { step: 11, title: 'Автозапуск (systemd)',
+    content: 'Створіть systemd сервіс для автоматичного запуску при завантаженні Pi.',
+    cmd: 'sudo systemctl enable jtzero && sudo systemctl start jtzero' },
 ];
 
 const HARDWARE_REQS = [
@@ -83,6 +108,7 @@ export default function DocumentationTab() {
 
   const sections = [
     { id: 'install', label: 'Pi Zero Install', icon: Download },
+    { id: 'wiring', label: 'Wiring / GPIO', icon: Terminal },
     { id: 'api', label: 'API Reference', icon: Server },
     { id: 'threads', label: 'Thread Model', icon: Cpu },
     { id: 'files', label: 'File Structure', icon: FileText },
@@ -113,6 +139,7 @@ export default function DocumentationTab() {
       {/* Content */}
       <div className="flex-1 p-4 overflow-y-auto">
         {section === 'install' && <InstallSection />}
+        {section === 'wiring' && <WiringSection />}
         {section === 'api' && <APISection />}
         {section === 'threads' && <ThreadsSection />}
         {section === 'files' && <FilesSection />}
@@ -126,34 +153,145 @@ function InstallSection() {
   return (
     <div className="max-w-3xl space-y-4" data-testid="install-section">
       <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
-        Pi Zero 2 W Installation Guide
+        Raspberry Pi Zero 2 W — Installation
       </h2>
-      <p className="text-xs text-slate-400">
-        JT-Zero can run on Raspberry Pi Zero 2 W natively. All sensor drivers auto-detect hardware
-        and fall back to simulation if not connected.
+      <p className="text-xs text-slate-400 leading-relaxed">
+        JT-Zero працює на Raspberry Pi Zero 2 W (BCM2710A1, Cortex-A53 quad-core @ 1GHz) нативно.
+        Також сумісний з Pi 3B+, Pi 4, Pi 5. Всі драйвери сенсорів автоматично визначають обладнання
+        і переходять у режим симуляції, якщо датчик не підключено.
       </p>
-      <div className="space-y-3">
-        {PI_INSTALL_STEPS.map(({ step, title, content }) => (
+
+      <div className="space-y-2">
+        {PI_INSTALL_STEPS.map(({ step, title, content, cmd }) => (
           <div key={step} className="flex gap-3 p-3 bg-[#0A0C10] border border-[#1E293B] rounded-sm">
             <div className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-[#00F0FF]/10 text-[#00F0FF] text-[10px] font-bold">
               {step}
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <h4 className="text-[11px] font-bold text-slate-200 uppercase tracking-wider">{title}</h4>
-              <p className="text-[10px] text-slate-400 mt-0.5 font-mono">{content}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{content}</p>
+              {cmd && (
+                <code className="block mt-1.5 text-[9px] text-cyan-400 font-mono bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50 break-all">
+                  {cmd}
+                </code>
+              )}
             </div>
           </div>
         ))}
       </div>
-      <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm">
-        <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mb-1">Cross-Compilation (from x86 host)</p>
-        <code className="text-[9px] text-slate-400 font-mono block">
-          cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
+
+      {/* Cross-compilation */}
+      <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm space-y-2">
+        <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider">
+          Крос-компіляція (з x86 хоста — набагато швидше)
+        </p>
+        <p className="text-[9px] text-slate-400">
+          Замість збірки на Pi (крок 6), можна зібрати на потужному x86 комп'ютері та скопіювати результат:
+        </p>
+        <code className="text-[9px] text-cyan-400 font-mono block bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50">
+          sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu{'\n'}
+          cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake -DCMAKE_BUILD_TYPE=Release ..{'\n'}
+          make -j$(nproc){'\n'}
+          scp jtzero_native*.so pi@jtzero.local:~/jt-zero/backend/
         </code>
+      </div>
+
+      {/* systemd service */}
+      <div className="p-3 bg-[#0A0C10] border border-[#1E293B] rounded-sm space-y-2">
+        <p className="text-[10px] text-slate-300 font-semibold uppercase tracking-wider">
+          systemd Service File
+        </p>
+        <code className="text-[9px] text-slate-400 font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`[Unit]
+Description=JT-Zero Runtime
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/jt-zero/backend
+Environment=PYTHONPATH=/home/pi/jt-zero
+ExecStart=/home/pi/jt-zero/backend/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target`
+        }</code>
+        <p className="text-[8px] text-slate-600">
+          Зберегти як /etc/systemd/system/jtzero.service
+        </p>
       </div>
     </div>
   );
 }
+
+const GPIO_WIRING = [
+  { sensor: 'MPU6050 (IMU)', pin_sda: 'GPIO 2 (Pin 3)', pin_scl: 'GPIO 3 (Pin 5)', pin_extra: 'VCC: 3.3V (Pin 1), GND: Pin 6', bus: 'I2C-1', addr: '0x68' },
+  { sensor: 'BMP280 (Baro)', pin_sda: 'GPIO 2 (Pin 3)', pin_scl: 'GPIO 3 (Pin 5)', pin_extra: 'VCC: 3.3V (Pin 1), GND: Pin 9', bus: 'I2C-1', addr: '0x76' },
+  { sensor: 'GPS (NMEA)', pin_sda: 'TX→GPIO 15 (Pin 10)', pin_scl: 'RX→GPIO 14 (Pin 8)', pin_extra: 'VCC: 3.3V, GND', bus: 'UART0', addr: '9600 baud' },
+  { sensor: 'PMW3901 (Flow)', pin_sda: 'MOSI: GPIO 10 (Pin 19)', pin_scl: 'MISO: GPIO 9 (Pin 21)', pin_extra: 'SCLK: GPIO 11 (Pin 23), CS: GPIO 8 (Pin 24)', bus: 'SPI0', addr: 'CS0' },
+];
+
+function WiringSection() {
+  return (
+    <div className="max-w-4xl space-y-4" data-testid="wiring-section">
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">GPIO Wiring Guide</h2>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        Підключення сенсорів до Raspberry Pi Zero 2 W. Всі сенсори працюють від 3.3V.
+        I2C пристрої можна підключати до однієї шини (SDA/SCL спільні).
+      </p>
+
+      <div className="border border-[#1E293B] rounded-sm overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-[#0A0C10] text-[9px] text-slate-500 uppercase tracking-wider">
+              <th className="text-left px-3 py-2">Sensor</th>
+              <th className="text-left px-3 py-2">Data Lines</th>
+              <th className="text-left px-3 py-2">Clock / RX</th>
+              <th className="text-left px-3 py-2">Extra</th>
+              <th className="text-left px-3 py-2">Bus</th>
+              <th className="text-left px-3 py-2">Address</th>
+            </tr>
+          </thead>
+          <tbody>
+            {GPIO_WIRING.map(({ sensor, pin_sda, pin_scl, pin_extra, bus, addr }) => (
+              <tr key={sensor} className="border-t border-[#1E293B]/50">
+                <td className="px-3 py-1.5 text-[10px] text-slate-200 font-semibold">{sensor}</td>
+                <td className="px-3 py-1.5 text-[9px] text-cyan-400 font-mono">{pin_sda}</td>
+                <td className="px-3 py-1.5 text-[9px] text-cyan-400 font-mono">{pin_scl}</td>
+                <td className="px-3 py-1.5 text-[9px] text-slate-500 font-mono">{pin_extra}</td>
+                <td className="px-3 py-1.5 text-[9px] text-amber-400 font-bold">{bus}</td>
+                <td className="px-3 py-1.5 text-[9px] text-emerald-400 font-mono">{addr}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ASCII diagram */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">Pi Zero 2 W — GPIO Header (Pin 1-10)</h4>
+        <pre className="text-[9px] text-slate-400 font-mono leading-relaxed">{
+`  3V3  (1) (2)  5V
+  SDA  (3) (4)  5V        ← I2C: MPU6050 + BMP280
+  SCL  (5) (6)  GND
+  GP4  (7) (8)  TX (UART) ← GPS RX
+  GND  (9) (10) RX (UART) ← GPS TX`
+        }</pre>
+      </div>
+
+      <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm">
+        <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mb-1">Auto-detection</p>
+        <p className="text-[9px] text-slate-400">
+          JT-Zero автоматично сканує I2C шину при запуску. Якщо сенсор не знайдено —
+          відповідний канал переходить у режим симуляції. Жодного налаштування не потрібно.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 
 function APISection() {
   return (
