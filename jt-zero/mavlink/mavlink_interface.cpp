@@ -68,7 +68,7 @@ bool MAVLinkInterface::send_heartbeat() {
     if (state_ != MAVLinkState::CONNECTED && state_ != MAVLinkState::CONNECTING) return false;
     
     last_heartbeat_us_ = now_us();
-    heartbeat_count_++;
+    // heartbeat_count_ is managed by tick(), not here
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     
     if (simulated_) {
@@ -85,17 +85,18 @@ MAVVisionPositionEstimate MAVLinkInterface::build_vision_position(
     
     MAVVisionPositionEstimate msg;
     msg.usec = now_us();
-    msg.x = state.gps.lat * 111320.0f;  // Approximate conversion
-    msg.y = state.gps.lon * 111320.0f * std::cos(state.gps.lat * 0.0174533f);
+    // Use accumulated VO local pose (NED frame), NOT GPS coordinates
+    // Vision position should be relative to home/origin
+    msg.x = vo_pose_x_;
+    msg.y = vo_pose_y_;
     msg.z = -state.altitude_agl;         // NED: down is positive
     msg.roll  = state.roll * 0.0174533f;  // deg to rad
     msg.pitch = state.pitch * 0.0174533f;
     msg.yaw   = state.yaw * 0.0174533f;
     
-    // Add VO deltas
-    msg.x += vo.dx;
-    msg.y += vo.dy;
-    msg.z += vo.dz;
+    // Accumulate VO deltas into local pose
+    vo_pose_x_ += vo.dx;
+    vo_pose_y_ += vo.dy;
     
     return msg;
 }
@@ -105,9 +106,10 @@ MAVOdometry MAVLinkInterface::build_odometry(
     
     MAVOdometry msg;
     msg.time_usec = now_us();
-    msg.x = vo.dx;
-    msg.y = vo.dy;
-    msg.z = vo.dz;
+    // Accumulated local pose (NED), not per-frame delta
+    msg.x = vo_pose_x_;
+    msg.y = vo_pose_y_;
+    msg.z = -state.altitude_agl;
     msg.vx = state.vx + vo.vx;
     msg.vy = state.vy + vo.vy;
     msg.vz = state.vz + vo.vz;

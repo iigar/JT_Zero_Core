@@ -164,6 +164,10 @@ private:
     uint64_t last_vision_us_{0};
     uint32_t heartbeat_count_{0};
     
+    // Accumulated VO local pose (NED frame, relative to home)
+    float vo_pose_x_{0};
+    float vo_pose_y_{0};
+    
     // Simulated FC state
     uint8_t fc_system_id_{1};
     bool    fc_armed_{false};

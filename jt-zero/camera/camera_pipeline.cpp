@@ -17,6 +17,16 @@
 
 namespace jtzero {
 
+// Thread-local xorshift32 PRNG for camera thread
+static thread_local uint32_t cam_prng_state_ = 67890;
+
+static inline uint8_t fast_noise(uint8_t range) {
+    cam_prng_state_ ^= cam_prng_state_ << 13;
+    cam_prng_state_ ^= cam_prng_state_ >> 17;
+    cam_prng_state_ ^= cam_prng_state_ << 5;
+    return static_cast<uint8_t>(cam_prng_state_ % range);
+}
+
 // ═══════════════════════════════════════════════════════════
 // Simulated Camera
 // ═══════════════════════════════════════════════════════════
@@ -82,14 +92,17 @@ void SimulatedCamera::generate_pattern(uint8_t* data, uint16_t w, uint16_t h, ui
             for (int i = 0; i < 8; ++i) {
                 float cx = 40.0f + i * 35.0f + drift_x * 0.5f;
                 float cy = 30.0f + (i % 3) * 70.0f + drift_y * 0.5f;
-                float dist = std::sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy));
-                if (dist < 4.0f) {
-                    val += 100.0f * (1.0f - dist / 4.0f);
+                float dx = fx - cx;
+                float dy = fy - cy;
+                float dist_sq = dx * dx + dy * dy;
+                constexpr float radius_sq = 16.0f; // 4.0^2
+                if (dist_sq < radius_sq) {
+                    val += 100.0f * (1.0f - dist_sq / radius_sq);
                 }
             }
             
-            // Add noise
-            val += static_cast<float>(rand() % 10) - 5.0f;
+            // Add noise (thread-safe xorshift)
+            val += static_cast<float>(fast_noise(10)) - 5.0f;
             
             // Clamp
             if (val < 0) val = 0;
@@ -117,13 +130,15 @@ bool FASTDetector::is_corner(const uint8_t* frame, uint16_t width,
     };
     
     const uint8_t center = frame[y * width + x];
-    const uint8_t hi = center + threshold;
-    const uint8_t lo = (center > threshold) ? center - threshold : 0;
+    // Use int to prevent uint8_t overflow (center + threshold > 255)
+    const int center_i = static_cast<int>(center);
+    const int hi = std::min(255, center_i + threshold);
+    const int lo = std::max(0, center_i - threshold);
     
     // Quick test: at least 3 of positions 0,4,8,12 must be brighter or darker
     int bright_count = 0, dark_count = 0;
     for (int i = 0; i < 16; i += 4) {
-        uint8_t px = frame[(y + offsets[i][1]) * width + (x + offsets[i][0])];
+        int px = static_cast<int>(frame[(y + offsets[i][1]) * width + (x + offsets[i][0])]);
         if (px > hi) bright_count++;
         if (px < lo) dark_count++;
     }
@@ -137,7 +152,7 @@ bool FASTDetector::is_corner(const uint8_t* frame, uint16_t width,
     // Check twice around to handle wrap-around
     for (int pass = 0; pass < 2; ++pass) {
         for (int i = 0; i < 16; ++i) {
-            uint8_t px = frame[(y + offsets[i][1]) * width + (x + offsets[i][0])];
+            int px = static_cast<int>(frame[(y + offsets[i][1]) * width + (x + offsets[i][0])]);
             
             if (px > hi) {
                 cur_bright++;
@@ -292,6 +307,7 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
 VisualOdometry::VisualOdometry() {
     std::memset(prev_frame_, 0, FRAME_SIZE);
     features_.fill({});
+    prev_features_.fill({});
 }
 
 VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance) {
@@ -313,19 +329,33 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         return result;
     }
     
-    // Track existing features
+    // Save previous feature positions BEFORE tracking updates them in-place
+    for (size_t i = 0; i < active_count_; ++i) {
+        prev_features_[i] = features_[i];
+    }
+    
+    // Track existing features (updates features_ positions in-place)
     int tracked_count = tracker_.track(
         prev_frame_, frame.data,
         frame.info.width, frame.info.height,
         features_.data(), active_count_);
     
-    // Compute flow statistics
-    float avg_flow_x = 0, avg_flow_y = 0;
+    // Compute mean displacement from tracked features
+    float sum_flow_x = 0, sum_flow_y = 0;
     int valid_flow = 0;
     
-    // We need original positions, so we detect new features and compare
-    // For simplicity, compute mean displacement of tracked features
-    // (Real implementation would use the prev positions stored separately)
+    for (size_t i = 0; i < active_count_; ++i) {
+        if (features_[i].tracked) {
+            float dx_px = features_[i].x - prev_features_[i].x;
+            float dy_px = features_[i].y - prev_features_[i].y;
+            sum_flow_x += dx_px;
+            sum_flow_y += dy_px;
+            valid_flow++;
+        }
+    }
+    
+    float avg_flow_x = (valid_flow > 0) ? sum_flow_x / static_cast<float>(valid_flow) : 0;
+    float avg_flow_y = (valid_flow > 0) ? sum_flow_y / static_cast<float>(valid_flow) : 0;
     
     result.features_tracked = static_cast<uint16_t>(tracked_count);
     result.tracking_quality = (active_count_ > 0) ? 
@@ -344,18 +374,25 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
     if (dt <= 0 || dt > 1.0f) dt = 0.066f; // Default ~15 FPS
     
-    // Estimate velocity from optical flow (simplified)
-    // Real implementation: decompose essential matrix
-    float scale = ground_distance * 0.001f; // Approximate scale from ground distance
-    result.vx = avg_flow_x * scale / dt;
-    result.vy = avg_flow_y * scale / dt;
-    result.vz = 0;
+    // Convert pixel displacement to meters using ground distance and FOV
+    // Approximate: pixel_to_meter = ground_distance / (focal_length_px)
+    // For 320x240 with ~60deg HFOV: focal_length ~= 160 / tan(30deg) ~= 277 px
+    constexpr float focal_length_px = 277.0f;
+    float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal_length_px : 0;
     
-    result.dx = result.vx * dt;
-    result.dy = result.vy * dt;
+    result.dx = avg_flow_x * pixel_to_meter;
+    result.dy = avg_flow_y * pixel_to_meter;
     result.dz = 0;
     
-    result.valid = tracked_count >= 5;
+    result.vx = (dt > 0) ? result.dx / dt : 0;
+    result.vy = (dt > 0) ? result.dy / dt : 0;
+    result.vz = 0;
+    
+    // Accumulate local pose
+    pose_x_ += result.dx;
+    pose_y_ += result.dy;
+    
+    result.valid = valid_flow >= 5;
     
     // Update state
     std::memcpy(prev_frame_, frame.data, FRAME_SIZE);

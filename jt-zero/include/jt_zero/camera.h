@@ -177,9 +177,13 @@ private:
     alignas(64) uint8_t prev_frame_[FRAME_SIZE]{};
     bool has_prev_frame_{false};
     
-    // Feature buffers
+    // Feature buffers (current + previous for displacement)
     std::array<FeaturePoint, MAX_FEATURES> features_;
+    std::array<FeaturePoint, MAX_FEATURES> prev_features_;
     size_t active_count_{0};
+    
+    // Accumulated local pose (NED frame)
+    float pose_x_{0}, pose_y_{0}, pose_z_{0};
     
     uint64_t prev_timestamp_us_{0};
 };

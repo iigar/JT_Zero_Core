@@ -392,6 +392,54 @@ core/runtime.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/core/runtime.cpp.s
 .PHONY : core/runtime.cpp.s
 
+drivers/bus.o: drivers/bus.cpp.o
+.PHONY : drivers/bus.o
+
+# target to build an object file
+drivers/bus.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/bus.cpp.o
+.PHONY : drivers/bus.cpp.o
+
+drivers/bus.i: drivers/bus.cpp.i
+.PHONY : drivers/bus.i
+
+# target to preprocess a source file
+drivers/bus.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/bus.cpp.i
+.PHONY : drivers/bus.cpp.i
+
+drivers/bus.s: drivers/bus.cpp.s
+.PHONY : drivers/bus.s
+
+# target to generate assembly for a file
+drivers/bus.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/bus.cpp.s
+.PHONY : drivers/bus.cpp.s
+
+drivers/sensor_drivers.o: drivers/sensor_drivers.cpp.o
+.PHONY : drivers/sensor_drivers.o
+
+# target to build an object file
+drivers/sensor_drivers.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/sensor_drivers.cpp.o
+.PHONY : drivers/sensor_drivers.cpp.o
+
+drivers/sensor_drivers.i: drivers/sensor_drivers.cpp.i
+.PHONY : drivers/sensor_drivers.i
+
+# target to preprocess a source file
+drivers/sensor_drivers.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/sensor_drivers.cpp.i
+.PHONY : drivers/sensor_drivers.cpp.i
+
+drivers/sensor_drivers.s: drivers/sensor_drivers.cpp.s
+.PHONY : drivers/sensor_drivers.s
+
+# target to generate assembly for a file
+drivers/sensor_drivers.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/jtzero_core.dir/build.make CMakeFiles/jtzero_core.dir/drivers/sensor_drivers.cpp.s
+.PHONY : drivers/sensor_drivers.cpp.s
+
 main.o: main.cpp.o
 .PHONY : main.o
 
@@ -503,6 +551,12 @@ help:
 	@echo "... core/runtime.o"
 	@echo "... core/runtime.i"
 	@echo "... core/runtime.s"
+	@echo "... drivers/bus.o"
+	@echo "... drivers/bus.i"
+	@echo "... drivers/bus.s"
+	@echo "... drivers/sensor_drivers.o"
+	@echo "... drivers/sensor_drivers.i"
+	@echo "... drivers/sensor_drivers.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"

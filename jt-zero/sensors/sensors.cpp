@@ -10,9 +10,22 @@
 
 namespace jtzero {
 
-// ─── Noise helper ────────────────────────────────────────
+// ─── Thread-local xorshift32 PRNG (fast, deterministic per-thread) ───
+static thread_local uint32_t prng_state_ = 12345;
+
 static float noise(float amplitude) {
-    return amplitude * (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 2.0f;
+    // xorshift32 - fast, no global state, thread-safe
+    prng_state_ ^= prng_state_ << 13;
+    prng_state_ ^= prng_state_ >> 17;
+    prng_state_ ^= prng_state_ << 5;
+    float normalized = static_cast<float>(prng_state_) / 4294967295.0f; // 0..1
+    return amplitude * (normalized - 0.5f) * 2.0f;
+}
+
+// ─── Clamp helper ────────────────────────────────────────
+template<typename T>
+static T clamp_val(T val, T lo, T hi) {
+    return (val < lo) ? lo : (val > hi) ? hi : val;
 }
 
 // ─── IMU ─────────────────────────────────────────────────
@@ -108,7 +121,8 @@ bool GPSSensor::update() {
         data_.lon = 30.5234 + 0.0001 * std::cos(t * 0.015);
         data_.alt = 150.0f + 5.0f * std::sin(t * 0.05f) + noise(0.3f);
         data_.speed = 2.0f + noise(0.5f);
-        data_.satellites = 12 + static_cast<uint8_t>(noise(2.0f));
+        int sats = 12 + static_cast<int>(noise(2.0f));
+        data_.satellites = static_cast<uint8_t>(clamp_val(sats, 4, 24));
         data_.fix_type = 3;
         data_.valid = true;
     }
@@ -169,7 +183,8 @@ bool OpticalFlowSensor::update() {
         data_.timestamp_us = now_us();
         data_.flow_x = 0.05f * std::sin(t * 0.3f) + noise(0.01f);
         data_.flow_y = 0.03f * std::cos(t * 0.2f) + noise(0.01f);
-        data_.quality = static_cast<uint8_t>(200 + noise(30.0f));
+        int quality = 200 + static_cast<int>(noise(30.0f));
+        data_.quality = static_cast<uint8_t>(clamp_val(quality, 0, 255));
         data_.ground_distance = 3.0f + noise(0.1f);
         data_.valid = true;
     }

@@ -1,10 +1,23 @@
 #pragma once
 /**
  * JT-Zero Sensor Interfaces
- * Abstract sensor interfaces with simulated implementations
+ * 
+ * Abstract sensor interfaces with simulated AND real hardware implementations.
+ * Each sensor auto-detects hardware; falls back to simulation if not found.
+ * 
+ * Real drivers: MPU6050 (I2C), BMP280 (I2C), NMEA GPS (UART)
  */
 
 #include "jt_zero/common.h"
+
+// Forward declarations for real drivers (avoid pulling in Linux headers)
+namespace jtzero {
+class I2CBus;
+class UARTBus;
+class MPU6050Driver;
+class BMP280Driver;
+class NMEAParser;
+}
 
 namespace jtzero {
 
@@ -20,7 +33,7 @@ public:
     virtual uint32_t update_rate_hz() const = 0;
 };
 
-// ─── IMU Sensor ──────────────────────────────────────────
+// ─── IMU Sensor (MPU6050 on real hardware) ───────────────
 
 class IMUSensor : public SensorBase {
 public:
@@ -34,6 +47,7 @@ public:
     
     // Simulation control
     void set_simulated(bool sim) { simulated_ = sim; }
+    bool is_simulated() const { return simulated_; }
     void inject_data(const IMUData& d) { data_ = d; }
     
 private:
@@ -43,7 +57,7 @@ private:
     uint64_t update_count_{0};
 };
 
-// ─── Barometer ───────────────────────────────────────────
+// ─── Barometer (BMP280 on real hardware) ─────────────────
 
 class BarometerSensor : public SensorBase {
 public:
@@ -55,6 +69,7 @@ public:
     
     const BarometerData& data() const { return data_; }
     void set_simulated(bool sim) { simulated_ = sim; }
+    bool is_simulated() const { return simulated_; }
     
 private:
     BarometerData data_;
@@ -65,7 +80,7 @@ private:
     uint64_t update_count_{0};
 };
 
-// ─── GPS ─────────────────────────────────────────────────
+// ─── GPS (NMEA over UART on real hardware) ───────────────
 
 class GPSSensor : public SensorBase {
 public:
@@ -77,6 +92,7 @@ public:
     
     const GPSData& data() const { return data_; }
     void set_simulated(bool sim) { simulated_ = sim; }
+    bool is_simulated() const { return simulated_; }
     
 private:
     GPSData data_;
@@ -97,6 +113,7 @@ public:
     
     const RangefinderData& data() const { return data_; }
     void set_simulated(bool sim) { simulated_ = sim; }
+    bool is_simulated() const { return simulated_; }
     
 private:
     RangefinderData data_;
@@ -117,6 +134,7 @@ public:
     
     const OpticalFlowData& data() const { return data_; }
     void set_simulated(bool sim) { simulated_ = sim; }
+    bool is_simulated() const { return simulated_; }
     
 private:
     OpticalFlowData data_;

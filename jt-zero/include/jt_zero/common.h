@@ -95,38 +95,59 @@ public:
     }
 };
 
-// ─── Fixed Memory Pool ───────────────────────────────────
-// Pre-allocated pool for realtime-safe allocation
+// ─── Fixed Memory Pool (Lock-Free Free-List) ─────────────
+// O(1) allocate/deallocate, thread-safe via atomic CAS
 template<typename T, size_t PoolSize>
 class MemoryPool {
     struct Block {
         T data;
-        bool used{false};
+        alignas(64) std::atomic<int32_t> next{-1}; // index of next free block
     };
 
     std::array<Block, PoolSize> pool_{};
+    alignas(64) std::atomic<int32_t> free_head_{0}; // head of free list
     std::atomic<size_t> alloc_count_{0};
 
 public:
-    T* allocate() noexcept {
-        for (size_t i = 0; i < PoolSize; ++i) {
-            if (!pool_[i].used) {
-                pool_[i].used = true;
-                alloc_count_.fetch_add(1, std::memory_order_relaxed);
-                return &pool_[i].data;
-            }
+    MemoryPool() {
+        // Initialize free list: 0 -> 1 -> 2 -> ... -> PoolSize-1 -> -1
+        for (size_t i = 0; i < PoolSize - 1; ++i) {
+            pool_[i].next.store(static_cast<int32_t>(i + 1), std::memory_order_relaxed);
         }
-        return nullptr;
+        pool_[PoolSize - 1].next.store(-1, std::memory_order_relaxed);
+    }
+
+    T* allocate() noexcept {
+        int32_t head = free_head_.load(std::memory_order_acquire);
+        while (head >= 0) {
+            int32_t next = pool_[head].next.load(std::memory_order_relaxed);
+            if (free_head_.compare_exchange_weak(head, next,
+                    std::memory_order_acq_rel, std::memory_order_acquire)) {
+                alloc_count_.fetch_add(1, std::memory_order_relaxed);
+                return &pool_[head].data;
+            }
+            // CAS failed, head was updated by another thread, retry
+        }
+        return nullptr; // Pool exhausted
     }
 
     void deallocate(T* ptr) noexcept {
-        for (size_t i = 0; i < PoolSize; ++i) {
-            if (&pool_[i].data == ptr) {
-                pool_[i].used = false;
-                alloc_count_.fetch_sub(1, std::memory_order_relaxed);
-                return;
-            }
-        }
+        // Find block index from pointer
+        auto* base = reinterpret_cast<char*>(&pool_[0]);
+        auto* target = reinterpret_cast<char*>(ptr);
+        size_t byte_offset = static_cast<size_t>(target - base);
+        size_t block_size = sizeof(Block);
+        size_t idx = byte_offset / block_size;
+        
+        if (idx >= PoolSize) return; // Invalid pointer
+        
+        int32_t old_head = free_head_.load(std::memory_order_acquire);
+        do {
+            pool_[idx].next.store(old_head, std::memory_order_relaxed);
+        } while (!free_head_.compare_exchange_weak(old_head, static_cast<int32_t>(idx),
+                    std::memory_order_acq_rel, std::memory_order_acquire));
+        
+        alloc_count_.fetch_sub(1, std::memory_order_relaxed);
     }
 
     size_t used() const noexcept {
