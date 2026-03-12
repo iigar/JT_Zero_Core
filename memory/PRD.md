@@ -10,30 +10,38 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 - UI overhaul: 7-tab interface, detailed 3D drone, gray-green background
 - P1: Sensor auto-detect (I2C/UART probing, HW/SIM badges)
 - P2: Camera drivers (PiCSI V4L2, USB V4L2), MAVLink Serial/UDP
-- **Layout fix (2026-03-12):** Fixed panel overflow (fixed heights 240/220/150px + overflow-hidden)
-- **Event dedup (2026-03-12):** _filter_events() groups same events with (xN), filters IMU_UPDATE/SYS_HEARTBEAT noise
-- **CLAUDE.md:** Full technical reference with FAQ about IMU-less operation
-- **Camera Setup Docs (2026-03-12):** Complete documentation for Pi Camera (CSI) and USB camera setup, libcamera installation, boot config, troubleshooting, auto-detection flow
-- **Matek H743-SLIM V3 Detailed Docs (2026-03-12):** Board layout diagram, UART6 wiring table, ArduPilot parameters, JT-Zero config, verification steps, Pixhawk TELEM2 pinout, safety guidelines, full drone wiring diagram
-- **DEPLOYMENT.md Camera Section (2026-03-12):** Added Etap 11 with camera setup (CSI/USB), libcamera install, boot config, troubleshooting for Pi Zero 2W
+- Layout fix: Fixed panel overflow (fixed heights 240/220/150px + overflow-hidden)
+- Event dedup: _filter_events() groups same events with (xN)
+- Camera Setup Docs: Complete guide for Pi Camera (CSI/USB), libcamera → rpicam, troubleshooting
+- Matek H743-SLIM V3 Detailed Docs: Board layout, UART6 wiring, ArduPilot params, full drone diagram
+- DEPLOYMENT.md Camera Section: Etap 11 with camera setup, rpicam commands
+
+### 2026-03-13 Critical Fixes:
+- **native_bridge.py**: Fixed `set_simulator_mode(True)` → auto-detect (Pi = hardware mode)
+- **camera_drivers.cpp**: Fixed 320x240 → 640x480 capture (OV5647 minimum), multi-device scan
+- **camera_drivers.cpp**: Added rpicam-vid subprocess approach for libcamera compatibility
+- **camera.h**: Updated PiCSICamera class for rpicam-vid pipe-based capture
+- **RESULT**: Pi Camera OV5647 working! PI_CSI detected, 15fps, real VO features from camera!
 
 ## Testing
-- Iteration 9: Backend 100% (51 tests), Frontend 100% (all docs sections verified)
+- Iteration 9: Backend 100% (51 tests), Frontend 100%
 
-## Active Issues
-### P0 - Pi Deployment
-- Real data not showing on Pi deployment (stuck in simulator mode)
-- User needs to install libcamera-apps and configure camera
-- Awaiting user feedback from their Raspberry Pi
+## Current Status
+- Camera: WORKING (PI_CSI, OV5647, 15fps, real VO)
+- Sensors: Simulation (no physical I2C/SPI sensors connected)
+- MAVLink: Not connected (no FC connected yet)
+- Dashboard: Serving from static files on Pi
 
 ## Backlog
 ### P1
-- Implement real camera drivers (full libcamera/V4L2 integration with VO pipeline)
-- Implement real MAVLink connection (Serial/UDP transport with real FC)
+- Connect Matek H743-SLIM V3 via UART6 (MAVLink)
+- Enable I2C/SPI on Pi for direct sensor access
+- Implement real MAVLink connection (Serial/UDP transport)
 
 ### P2
-- Autonomous mission planning (waypoint navigation / Mission Planner tab)
+- Autonomous mission planning (waypoint navigation)
 - MAVLink v2 full message serialization
 - Camera IP_STREAM (RTSP/HTTP)
-- recharts console chart dimension warnings (cosmetic)
+- Thermal camera support (FLIR Lepton, MLX90640)
 - Performance optimization (ARM NEON intrinsics)
+- recharts console warnings (cosmetic)
