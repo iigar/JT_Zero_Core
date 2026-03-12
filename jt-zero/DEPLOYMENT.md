@@ -311,7 +311,120 @@ sudo systemctl status jtzero
 
 ---
 
-## Етап 11: Підключення сенсорів (GPIO)
+## Етап 11: Налаштування камери
+
+Pi Camera Module (v2/v3) підключається через CSI шлейф. На Pi Zero 2 W використовується **міні-CSI** роз'єм (22-pin), тому потрібен правильний адаптер-шлейф (22-pin → 15-pin).
+
+### 11.1. Підключення камери
+
+1. **Вимкніть Pi** повністю (відключіть живлення)
+2. Знайдіть на Pi Zero 2W маленький білий роз'єм — це міні-CSI
+3. Акуратно підніміть фіксатор роз'єму (чорна планка)
+4. Вставте шлейф контактами вниз (до плати), синьою стороною вгору
+5. Закрийте фіксатор
+6. Увімкніть Pi
+
+**ВАЖЛИВО:** Pi Zero 2W має **22-pin** міні-CSI роз'єм. Стандартний шлейф від Pi 3/4 (15-pin) НЕ підходить! Потрібен перехідник або спеціальний шлейф "Pi Zero Camera Cable".
+
+### 11.2. Встановлення libcamera
+
+На нових версіях Pi OS (Bookworm) утиліта `libcamera-hello` може бути не встановлена за замовчуванням:
+
+```bash
+sudo apt update && sudo apt install -y libcamera-apps libcamera-dev
+```
+
+### 11.3. Перевірка конфігурації boot
+
+```bash
+# Перевірити наявний конфіг:
+grep -i camera /boot/firmware/config.txt
+
+# Якщо нічого не знайдено або файл в іншому місці:
+grep -i camera /boot/config.txt
+```
+
+Переконайтесь що є рядок:
+```
+camera_auto_detect=1
+```
+
+Якщо його немає — додайте:
+```bash
+# Для Bookworm (Pi OS 12):
+echo "camera_auto_detect=1" | sudo tee -a /boot/firmware/config.txt
+
+# Для Bullseye (Pi OS 11):
+echo "camera_auto_detect=1" | sudo tee -a /boot/config.txt
+```
+
+Перезавантажте:
+```bash
+sudo reboot
+```
+
+### 11.4. Перевірка камери
+
+Після перезавантаження:
+
+```bash
+# Чи бачить GPU камеру:
+vcgencmd get_camera
+
+# Очікуваний результат:
+# supported=1 detected=1, libcamera interfaces=1
+
+# Тест камери (показує картинку на 2 секунди):
+libcamera-hello --timeout 2000
+
+# Якщо все працює, зробити фото:
+libcamera-still -o test.jpg
+ls -la test.jpg
+```
+
+### 11.5. Якщо камера не виявлена
+
+```bash
+# 1. Перевірте версію ОС:
+cat /etc/os-release
+
+# 2. Перевірте DToverlay:
+cat /boot/firmware/config.txt | grep dtoverlay
+
+# 3. Для конкретних моделей камер може знадобитися:
+#    Pi Camera v3 (IMX708):
+#    dtoverlay=imx708
+#
+#    Pi Camera v2 (IMX219):
+#    dtoverlay=imx219
+#
+#    Додайте в /boot/firmware/config.txt і перезавантажте
+
+# 4. Перевірте dmesg на помилки камери:
+dmesg | grep -i camera
+dmesg | grep -i csi
+dmesg | grep -i imx
+```
+
+### 11.6. USB веб-камера (альтернатива)
+
+Якщо CSI камера не працює або ви використовуєте USB камеру:
+
+```bash
+# Підключіть USB камеру через OTG адаптер
+# Перевірте що камера визначена:
+ls /dev/video*
+
+# Маєте побачити /dev/video0 або /dev/video1
+# Перевірте деталі:
+v4l2-ctl --list-devices
+```
+
+JT-Zero автоматично визначає тип камери при запуску: спочатку шукає CSI, потім USB, і лише потім переходить у режим симуляції.
+
+---
+
+## Етап 12: Підключення сенсорів (GPIO)
 
 ### Схема підключення (3.3V логіка!)
 
