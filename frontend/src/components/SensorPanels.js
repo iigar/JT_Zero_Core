@@ -1,15 +1,16 @@
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
+import { LineChart, Line, YAxis } from 'recharts';
+import SafeChart from './SafeChart';
 
 function MiniChart({ data, dataKey, color = '#00F0FF', height = 32 }) {
   if (!data || data.length < 2) return <div style={{ height }} className="bg-black/30 rounded-sm" />;
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <SafeChart height={`${height}px`}>
       <LineChart data={data}>
         <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.5} dot={false} />
         <YAxis domain={['auto', 'auto']} hide />
       </LineChart>
-    </ResponsiveContainer>
+    </SafeChart>
   );
 }
 
@@ -27,9 +28,9 @@ function TelemetryRow({ label, value, unit, color }) {
 
 export default function SensorPanels({ state, history }) {
   return (
-    <div className="grid grid-cols-2 gap-2" data-testid="sensor-panels">
+    <div className="grid grid-cols-2 gap-2 h-full" data-testid="sensor-panels">
       {/* IMU Panel */}
-      <div className="panel-glass p-3 relative corner-bracket" data-testid="imu-panel">
+      <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="imu-panel">
         <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">IMU</h3>
         <div className="grid grid-cols-2 gap-x-4">
           <div>
@@ -51,7 +52,7 @@ export default function SensorPanels({ state, history }) {
       </div>
 
       {/* Barometer Panel */}
-      <div className="panel-glass p-3 relative corner-bracket" data-testid="baro-panel">
+      <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="baro-panel">
         <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Barometer</h3>
         <TelemetryRow label="PRESS" value={state?.baro?.pressure?.toFixed(2)} unit="hPa" />
         <TelemetryRow label="ALT" value={state?.baro?.altitude?.toFixed(2)} unit="m" />
@@ -62,7 +63,7 @@ export default function SensorPanels({ state, history }) {
       </div>
 
       {/* GPS Panel */}
-      <div className="panel-glass p-3 relative corner-bracket" data-testid="gps-panel">
+      <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="gps-panel">
         <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">GPS</h3>
         <TelemetryRow label="LAT" value={state?.gps?.lat?.toFixed(6)} unit="deg" />
         <TelemetryRow label="LON" value={state?.gps?.lon?.toFixed(6)} unit="deg" />
@@ -75,7 +76,7 @@ export default function SensorPanels({ state, history }) {
       </div>
 
       {/* Rangefinder + Flow Panel */}
-      <div className="panel-glass p-3 relative corner-bracket" data-testid="range-flow-panel">
+      <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="range-flow-panel">
         <div className="mb-2">
           <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">Rangefinder</h3>
           <TelemetryRow label="DIST" value={state?.rangefinder?.distance?.toFixed(2)} unit="m" />

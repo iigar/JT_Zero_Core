@@ -116,6 +116,7 @@ private:
     std::thread t4_rules_;
     std::thread t5_mavlink_;
     std::thread t6_camera_;
+    std::thread t7_api_;
     
     // Thread stats (lock-free access)
     static constexpr int NUM_THREADS = 8;
@@ -136,6 +137,7 @@ private:
     void rule_loop();           // T4: 20 Hz
     void mavlink_loop();        // T5: 50 Hz
     void camera_loop();         // T6: 15 FPS
+    void api_bridge_loop();     // T7: 30 Hz
     
     // Setup default rules
     void setup_default_reflexes();

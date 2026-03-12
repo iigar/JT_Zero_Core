@@ -7,9 +7,12 @@ Auto-detects native C++ runtime, falls back to Python simulator.
 import os
 import asyncio
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -79,13 +82,73 @@ async def health():
         "uptime": runtime.get_state().get("uptime_sec", 0)
     }
 
+@app.get("/api/hardware")
+async def get_hardware():
+    """Hardware detection status for all sensors."""
+    if hasattr(runtime, 'get_hardware_info'):
+        return runtime.get_hardware_info()
+    # Default: all simulated (no real hardware in this environment)
+    return {
+        "i2c_available": False,
+        "spi_available": False,
+        "uart_available": False,
+        "sensors": {
+            "imu": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x68"},
+            "baro": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x76"},
+            "gps": {"detected": False, "model": "none", "mode": "simulation", "bus": "UART", "address": "9600"},
+            "rangefinder": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C/UART", "address": "-"},
+            "optical_flow": {"detected": False, "model": "none", "mode": "simulation", "bus": "SPI", "address": "CS0"},
+        },
+        "auto_detect_ran": True,
+        "note": "No hardware detected — all sensors using simulation"
+    }
+
 @app.get("/api/state")
 async def get_state():
     return runtime.get_state()
 
 @app.get("/api/events")
 async def get_events(count: int = 50):
-    return runtime.get_events(count)
+    raw = runtime.get_events(200)
+    return _filter_events(raw, count)
+
+
+def _filter_events(events: list, max_count: int = 50) -> list:
+    """Filter & deduplicate events:
+    - Remove noise (empty messages, IMU_UPDATE, SYS_HEARTBEAT)
+    - Group same type+message, show latest timestamp with (xN)
+    """
+    if not events:
+        return events
+
+    # Filter noise
+    skip_types = {"IMU_UPDATE", "SYS_HEARTBEAT"}
+    filtered = [ev for ev in events if ev.get("message") and ev.get("type") not in skip_types]
+
+    # Group by (type, message) — preserve order of first occurrence
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for ev in filtered:
+        key = (ev.get("type", ""), ev.get("message", ""))
+        if key not in groups:
+            groups[key] = {"event": ev, "count": 1}
+        else:
+            groups[key]["count"] += 1
+            groups[key]["event"] = ev  # keep latest timestamp
+
+    deduped = []
+    for (etype, msg), g in groups.items():
+        entry = {
+            "timestamp": g["event"].get("timestamp", 0),
+            "priority": g["event"].get("priority", 0),
+            "type": etype,
+            "message": msg + (f" (x{g['count']})" if g["count"] > 1 else ""),
+        }
+        deduped.append(entry)
+
+    # Sort by timestamp desc, take latest max_count
+    deduped.sort(key=lambda e: e["timestamp"])
+    return deduped[-max_count:]
 
 @app.get("/api/telemetry")
 async def get_telemetry():
@@ -179,7 +242,7 @@ async def websocket_telemetry(ws: WebSocket):
             state = runtime.get_state()
             threads = runtime.get_thread_stats()
             engines = runtime.get_engine_stats()
-            events = runtime.get_events(10)
+            events = _filter_events(runtime.get_events(60), 10)
             camera = runtime.get_camera_stats()
             mavlink = runtime.get_mavlink_stats()
             
@@ -193,6 +256,13 @@ async def websocket_telemetry(ws: WebSocket):
                 "recent_events": events,
                 "camera": camera,
                 "mavlink": mavlink,
+                "sensor_modes": {
+                    "imu": "hardware" if hasattr(runtime, '_hw_imu') and runtime._hw_imu else "simulation",
+                    "baro": "hardware" if hasattr(runtime, '_hw_baro') and runtime._hw_baro else "simulation",
+                    "gps": "hardware" if hasattr(runtime, '_hw_gps') and runtime._hw_gps else "simulation",
+                    "rangefinder": "simulation",
+                    "optical_flow": "simulation",
+                },
             }
             
             # Add performance data if native
@@ -225,3 +295,29 @@ async def websocket_events(ws: WebSocket):
         pass
     except Exception:
         pass
+
+
+
+# ─── Static Files (Dashboard) ────────────────────────────
+# Serve built React frontend from /static directory
+# This is used when running standalone on Pi (no separate frontend server)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="static-assets")
+
+    # Catch-all: serve index.html for any non-API route (React SPA routing)
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        # Try to serve exact file first (favicon.ico, manifest.json, etc.)
+        file_path = STATIC_DIR / path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        # Otherwise serve index.html (React handles routing)
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    print(f"[JT-Zero API] Serving Dashboard from {STATIC_DIR}")
+else:
+    print(f"[JT-Zero API] No Dashboard found at {STATIC_DIR} — API-only mode")

@@ -52,8 +52,14 @@ set(SENSOR_SOURCES
     sensors/sensors.cpp
 )
 
+set(DRIVER_SOURCES
+    drivers/bus.cpp
+    drivers/sensor_drivers.cpp
+)
+
 set(CAMERA_SOURCES
     camera/camera_pipeline.cpp
+    camera/camera_drivers.cpp
 )
 
 set(MAVLINK_SOURCES
@@ -64,6 +70,7 @@ set(MAVLINK_SOURCES
 add_library(jtzero_core STATIC
     ${CORE_SOURCES}
     ${SENSOR_SOURCES}
+    ${DRIVER_SOURCES}
     ${CAMERA_SOURCES}
     ${MAVLINK_SOURCES}
 )
@@ -73,6 +80,7 @@ set_target_properties(jtzero_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(jtzero_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/drivers
 )
 
 target_link_libraries(jtzero_core

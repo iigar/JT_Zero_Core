@@ -17,7 +17,7 @@ export default function MAVLinkPanel({ mavlink }) {
   };
 
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="mavlink-panel">
+    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="mavlink-panel">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-slate-500" />

@@ -8,6 +8,7 @@
 #include "jt_zero/runtime.h"
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <chrono>

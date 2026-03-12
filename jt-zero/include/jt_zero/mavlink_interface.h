@@ -6,7 +6,10 @@
  * Sends: VISION_POSITION_ESTIMATE, ODOMETRY, OPTICAL_FLOW_RAD
  * Receives: HEARTBEAT, ATTITUDE, GPS, etc.
  * 
- * In simulator mode, generates realistic MAVLink-like telemetry.
+ * Transport options:
+ *   - SERIAL: /dev/ttyAMA0 or /dev/serial0 (hardware UART on Pi)
+ *   - UDP: localhost:14550 (for SITL / network FC)
+ *   - SIMULATED: in-memory (development/testing)
  */
 
 #include "jt_zero/common.h"
@@ -70,6 +73,23 @@ inline const char* mavstate_str(MAVLinkState s) {
     }
 }
 
+// ─── MAVLink Transport ───────────────────────────────────
+
+enum class MAVTransport : uint8_t {
+    SIMULATED = 0,
+    SERIAL,      // Hardware UART (/dev/ttyAMA0, /dev/serial0)
+    UDP,         // UDP socket (SITL or network FC)
+};
+
+inline const char* mavtransport_str(MAVTransport t) {
+    switch(t) {
+        case MAVTransport::SIMULATED: return "SIMULATED";
+        case MAVTransport::SERIAL: return "SERIAL";
+        case MAVTransport::UDP: return "UDP";
+        default: return "UNKNOWN";
+    }
+}
+
 // ─── MAVLink Messages ────────────────────────────────────
 
 struct MAVVisionPositionEstimate {
@@ -108,6 +128,7 @@ struct MAVOpticalFlowRad {
 
 struct MAVLinkStats {
     MAVLinkState state{MAVLinkState::DISCONNECTED};
+    MAVTransport transport{MAVTransport::SIMULATED};
     uint32_t messages_sent{0};
     uint32_t messages_received{0};
     uint32_t errors{0};
@@ -121,6 +142,7 @@ struct MAVLinkStats {
     uint8_t  fc_type{0};                 // MAV_TYPE
     bool     fc_armed{false};
     char     fc_firmware[32]{};
+    char     transport_info[64]{};       // e.g. "/dev/ttyAMA0@921600" or "127.0.0.1:14550"
 };
 
 // ─── MAVLink Interface ──────────────────────────────────
@@ -131,6 +153,14 @@ public:
     
     // Lifecycle
     bool initialize(bool simulated = true);
+    
+    // Real transport initialization
+    bool initialize_serial(const char* device = "/dev/ttyAMA0", int baudrate = 921600);
+    bool initialize_udp(const char* host = "127.0.0.1", int port = 14550);
+    
+    // Auto-detect: try serial first, then UDP, fallback to simulation
+    MAVTransport auto_detect_transport();
+    
     void shutdown();
     
     // Send messages to FC
@@ -149,12 +179,30 @@ public:
     
     // State
     MAVLinkState connection_state() const { return state_; }
+    MAVTransport transport() const { return transport_; }
     MAVLinkStats get_stats() const;
     bool is_connected() const { return state_ == MAVLinkState::CONNECTED; }
 
 private:
     MAVLinkState state_{MAVLinkState::DISCONNECTED};
+    MAVTransport transport_{MAVTransport::SIMULATED};
     bool simulated_{true};
+    
+    // Serial transport
+    int serial_fd_{-1};
+    int serial_baud_{921600};
+    
+    // UDP transport
+    int udp_fd_{-1};
+    char udp_host_[64]{};
+    int udp_port_{14550};
+    
+    // Transport info string
+    char transport_info_[64]{};
+    
+    // Raw send/receive (transport-agnostic)
+    bool send_raw(const uint8_t* data, size_t len);
+    int recv_raw(uint8_t* buf, size_t max_len);
     
     // Stats
     std::atomic<uint32_t> msgs_sent_{0};
@@ -163,6 +211,10 @@ private:
     uint64_t last_heartbeat_us_{0};
     uint64_t last_vision_us_{0};
     uint32_t heartbeat_count_{0};
+    
+    // Accumulated VO local pose (NED frame, relative to home)
+    float vo_pose_x_{0};
+    float vo_pose_y_{0};
     
     // Simulated FC state
     uint8_t fc_system_id_{1};

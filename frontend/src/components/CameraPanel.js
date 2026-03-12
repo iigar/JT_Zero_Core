@@ -64,7 +64,7 @@ export default function CameraPanel({ camera }) {
                        (camera?.vo_tracking_quality || 0) > 0.3 ? 'text-amber-400' : 'text-red-400';
 
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="camera-panel">
+    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="camera-panel">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Camera className="w-3.5 h-3.5 text-slate-500" />

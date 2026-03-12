@@ -22,7 +22,7 @@ CMAKE_AR:FILEPATH=/usr/bin/ar
 
 //Choose the type of build, options are: None Debug Release RelWithDebInfo
 // MinSizeRel ...
-CMAKE_BUILD_TYPE:STRING=
+CMAKE_BUILD_TYPE:STRING=Release
 
 //Enable/Disable color output during build.
 CMAKE_COLOR_MAKEFILE:BOOL=ON
@@ -223,8 +223,8 @@ jt-zero_IS_TOP_LEVEL:STATIC=ON
 //Value Computed by CMake
 jt-zero_SOURCE_DIR:STATIC=/app/jt-zero
 
-//No help, variable specified on the command line.
-pybind11_DIR:UNINITIALIZED=/root/.venv/lib/python3.11/site-packages/pybind11/share/cmake/pybind11
+//The directory containing a CMake configuration file for pybind11.
+pybind11_DIR:PATH=/root/.venv/share/cmake/pybind11
 
 
 ########################
@@ -381,5 +381,5 @@ _CMAKE_LINKER_PUSHPOP_STATE_SUPPORTED:INTERNAL=TRUE
 _PYBIND11_CROSSCOMPILING:INTERNAL=OFF
 _Python:INTERNAL=PYTHON
 //Directories where pybind11 and possibly Python headers are located
-pybind11_INCLUDE_DIRS:INTERNAL=/root/.venv/lib/python3.11/site-packages/pybind11/include;/usr/local/include/python3.11
+pybind11_INCLUDE_DIRS:INTERNAL=/root/.venv/include;/usr/local/include/python3.11
 
