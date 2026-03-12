@@ -130,22 +130,18 @@ public:
     void close() override;
     bool is_open() const override { return open_; }
     CameraType type() const override { return CameraType::PI_CSI; }
-    const char* name() const override { return "PiCSI_libcamera"; }
+    const char* name() const override { return "PiCSI_rpicam"; }
     
-    // Auto-detect: check if /dev/video0 exists and is a CSI camera
+    // Auto-detect: check if rpicam-hello can see a camera
     static bool detect();
 
 private:
     bool open_{false};
-    int fd_{-1};
-    uint32_t frame_counter_{0};
-    uint64_t last_capture_us_{0};
-    uint8_t* mmap_buf_{nullptr};
-    size_t mmap_len_{0};
-    // Actual capture resolution (sensor may not support 320x240)
+    FILE* pipe_{nullptr};  // rpicam-vid subprocess pipe
     uint16_t cap_w_{0};
     uint16_t cap_h_{0};
-    uint32_t cap_pixfmt_{0};
+    uint32_t frame_counter_{0};
+    uint64_t last_capture_us_{0};
 };
 
 // ─── USB Camera (via V4L2) ───────────────────────────────

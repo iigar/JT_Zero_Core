@@ -1,15 +1,15 @@
 /**
  * JT-Zero Real Camera Driver Implementations
  * 
- * PiCSICamera: Raspberry Pi Camera Module via libcamera/V4L2
+ * PiCSICamera: Raspberry Pi Camera Module via rpicam-vid (libcamera)
  * USBCamera:   Generic USB webcam via V4L2
  * 
- * Both drivers capture frames in YUYV or grayscale format,
- * convert to 320x240 grayscale for the VO pipeline.
+ * PiCSI captures via rpicam-vid subprocess (YUV420 → grayscale 320x240).
+ * USB captures via V4L2 (YUYV → grayscale 320x240).
  * 
  * Auto-detection flow:
- *   1. Check /dev/video0 for CSI camera
- *   2. Check /dev/video1+ for USB cameras
+ *   1. rpicam-hello --list-cameras for CSI camera
+ *   2. Check /dev/video* for USB cameras  
  *   3. Fall back to simulated camera
  */
 
@@ -30,181 +30,64 @@
 namespace jtzero {
 
 // ═══════════════════════════════════════════════════════════
-// Pi CSI Camera (libcamera/V4L2)
+// Pi CSI Camera (via rpicam-vid subprocess)
+// On modern Pi OS (Bookworm/Trixie), libcamera owns the camera.
+// Direct V4L2 access fails. We use rpicam-vid for frame capture.
 // ═══════════════════════════════════════════════════════════
 
 bool PiCSICamera::detect() {
 #ifdef __linux__
-    // On newer Pi OS (Trixie/Bookworm), CSI camera may not be /dev/video0
-    // Try rpicam-hello --list-cameras first (most reliable)
+    // Run rpicam-hello --list-cameras to check for CSI cameras
     FILE* pipe = popen("rpicam-hello --list-cameras 2>&1", "r");
-    if (pipe) {
-        char line[256];
-        bool found = false;
-        while (fgets(line, sizeof(line), pipe)) {
-            if (strstr(line, "ov5647") || strstr(line, "imx219") || 
-                strstr(line, "imx477") || strstr(line, "imx708") ||
-                strstr(line, "Available cameras")) {
-                if (strstr(line, "ov") || strstr(line, "imx")) {
-                    found = true;
-                    std::printf("[Camera] CSI camera detected via rpicam: %s", line);
-                }
-            }
+    if (!pipe) return false;
+    
+    char line[512];
+    bool found = false;
+    while (fgets(line, sizeof(line), pipe)) {
+        // Look for sensor names in the output
+        if (strstr(line, "ov5647") || strstr(line, "imx219") || 
+            strstr(line, "imx477") || strstr(line, "imx708") ||
+            strstr(line, "ov9281") || strstr(line, "ov7251")) {
+            found = true;
+            // Trim newline
+            size_t len = strlen(line);
+            if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+            std::printf("[Camera] CSI detected: %s\n", line);
         }
-        pclose(pipe);
-        if (found) return true;
+    }
+    int status = pclose(pipe);
+    
+    if (!found && status == 0) {
+        // rpicam-hello ran but no camera found
+        std::printf("[Camera] rpicam-hello ran but no CSI camera detected\n");
     }
     
-    // Fallback: check V4L2 devices for CSI/unicam driver
-    const char* devices[] = {"/dev/video0", "/dev/video10", "/dev/video13"};
-    for (const char* dev : devices) {
-        struct stat st;
-        if (stat(dev, &st) != 0 || !S_ISCHR(st.st_mode)) continue;
-        
-        int fd = ::open(dev, O_RDWR);
-        if (fd < 0) continue;
-        
-        struct v4l2_capability cap;
-        if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            if (strstr(reinterpret_cast<const char*>(cap.driver), "bcm") ||
-                strstr(reinterpret_cast<const char*>(cap.driver), "unicam") ||
-                strstr(reinterpret_cast<const char*>(cap.driver), "libcamera")) {
-                std::printf("[Camera] CSI camera detected: %s (%s) on %s\n", 
-                           cap.card, cap.driver, dev);
-                ::close(fd);
-                return true;
-            }
-        }
-        ::close(fd);
-    }
-#endif
+    return found;
+#else
     return false;
+#endif
 }
 
 bool PiCSICamera::open() {
 #ifdef __linux__
-    // On newer Pi OS, the CSI capture device may not be /dev/video0
-    // Try multiple devices to find one with unicam/bcm driver
-    const char* devices[] = {"/dev/video0", "/dev/video10", "/dev/video13"};
-    for (const char* dev : devices) {
-        int try_fd = ::open(dev, O_RDWR);
-        if (try_fd < 0) continue;
-        
-        struct v4l2_capability cap;
-        if (ioctl(try_fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            if ((cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) &&
-                (strstr(reinterpret_cast<const char*>(cap.driver), "bcm") ||
-                 strstr(reinterpret_cast<const char*>(cap.driver), "unicam"))) {
-                fd_ = try_fd;
-                std::printf("[PiCSI] Using device %s (%s)\n", dev, cap.driver);
-                break;
-            }
-        }
-        ::close(try_fd);
-    }
+    // Use rpicam-vid to output raw YUV420 frames to stdout
+    // 640x480 at 15fps, no preview window, indefinite duration
+    const char* cmd = "rpicam-vid --width 640 --height 480 "
+                      "--codec yuv420 --framerate 15 "
+                      "-t 0 --nopreview -o - 2>/dev/null";
     
-    if (fd_ < 0) {
-        // Last resort: try /dev/video0
-        fd_ = ::open("/dev/video0", O_RDWR);
-        if (fd_ < 0) {
-            std::printf("[PiCSI] Failed to open any video device\n");
-            return false;
-        }
-    }
-    
-    // OV5647 and many CSI sensors don't support 320x240 directly.
-    // Capture at 640x480 (minimum supported) and downscale in software.
-    static const uint16_t CAPTURE_SIZES[][2] = {
-        {640, 480}, {1296, 972}, {1920, 1080}
-    };
-    
-    bool format_set = false;
-    struct v4l2_format fmt{};
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
-    // Try each resolution until one works
-    for (const auto& sz : CAPTURE_SIZES) {
-        fmt.fmt.pix.width = sz[0];
-        fmt.fmt.pix.height = sz[1];
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-        fmt.fmt.pix.field = V4L2_FIELD_NONE;
-        
-        if (ioctl(fd_, VIDIOC_S_FMT, &fmt) >= 0) {
-            cap_w_ = fmt.fmt.pix.width;
-            cap_h_ = fmt.fmt.pix.height;
-            cap_pixfmt_ = fmt.fmt.pix.pixelformat;
-            format_set = true;
-            std::printf("[PiCSI] Capture format: %ux%u YUYV\n", cap_w_, cap_h_);
-            break;
-        }
-        
-        // Try grayscale
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_GREY;
-        if (ioctl(fd_, VIDIOC_S_FMT, &fmt) >= 0) {
-            cap_w_ = fmt.fmt.pix.width;
-            cap_h_ = fmt.fmt.pix.height;
-            cap_pixfmt_ = fmt.fmt.pix.pixelformat;
-            format_set = true;
-            std::printf("[PiCSI] Capture format: %ux%u GREY\n", cap_w_, cap_h_);
-            break;
-        }
-    }
-    
-    if (!format_set) {
-        std::printf("[PiCSI] Failed to set any capture format\n");
-        close();
+    pipe_ = popen(cmd, "r");
+    if (!pipe_) {
+        std::printf("[PiCSI] Failed to start rpicam-vid\n");
         return false;
     }
     
-    // Request buffer (single buffer, mmap)
-    struct v4l2_requestbuffers req{};
-    req.count = 1;
-    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req.memory = V4L2_MEMORY_MMAP;
-    
-    if (ioctl(fd_, VIDIOC_REQBUFS, &req) < 0) {
-        std::printf("[PiCSI] Failed to request buffers\n");
-        close();
-        return false;
-    }
-    
-    // Map buffer
-    struct v4l2_buffer buf{};
-    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
-    buf.index = 0;
-    
-    if (ioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
-        close();
-        return false;
-    }
-    
-    mmap_len_ = buf.length;
-    mmap_buf_ = static_cast<uint8_t*>(mmap(nullptr, mmap_len_, 
-                                            PROT_READ | PROT_WRITE,
-                                            MAP_SHARED, fd_, buf.m.offset));
-    if (mmap_buf_ == MAP_FAILED) {
-        mmap_buf_ = nullptr;
-        close();
-        return false;
-    }
-    
-    // Queue buffer and start streaming
-    if (ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
-        close();
-        return false;
-    }
-    
-    enum v4l2_buf_type stream_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (ioctl(fd_, VIDIOC_STREAMON, &stream_type) < 0) {
-        close();
-        return false;
-    }
-    
+    cap_w_ = 640;
+    cap_h_ = 480;
     open_ = true;
     frame_counter_ = 0;
     last_capture_us_ = now_us();
-    std::printf("[PiCSI] Camera opened: capture %ux%u → output %ux%u\n",
+    std::printf("[PiCSI] Camera opened via rpicam-vid: %ux%u YUV420 → %ux%u gray\n",
                 cap_w_, cap_h_, FRAME_WIDTH, FRAME_HEIGHT);
     return true;
 #else
@@ -214,41 +97,40 @@ bool PiCSICamera::open() {
 
 bool PiCSICamera::capture(FrameBuffer& frame) {
 #ifdef __linux__
-    if (!open_ || fd_ < 0) return false;
+    if (!open_ || !pipe_) return false;
     
-    struct v4l2_buffer buf{};
-    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    // YUV420 frame layout:
+    //   Y plane:  cap_w * cap_h bytes (luminance - this is our grayscale)
+    //   U plane:  (cap_w/2) * (cap_h/2) bytes
+    //   V plane:  (cap_w/2) * (cap_h/2) bytes
+    const size_t y_size = static_cast<size_t>(cap_w_) * cap_h_;
+    const size_t uv_size = y_size / 2;  // U + V combined
     
-    // Dequeue (get filled buffer)
-    if (ioctl(fd_, VIDIOC_DQBUF, &buf) < 0) return false;
+    // Read Y plane into temporary buffer
+    // Stack allocation for 640x480 = 307200 bytes — acceptable
+    uint8_t y_buf[640 * 480];
+    size_t read_y = fread(y_buf, 1, y_size, pipe_);
+    if (read_y != y_size) {
+        std::printf("[PiCSI] Short read: got %zu of %zu Y bytes\n", read_y, y_size);
+        return false;
+    }
     
-    // Convert captured frame to 320x240 grayscale
-    if (cap_w_ == FRAME_WIDTH && cap_h_ == FRAME_HEIGHT && cap_pixfmt_ == V4L2_PIX_FMT_GREY) {
-        // Direct copy — perfect match
-        size_t copy_len = (buf.bytesused < FRAME_SIZE) ? buf.bytesused : FRAME_SIZE;
-        std::memcpy(frame.data, mmap_buf_, copy_len);
-    } else {
-        // Need to extract Y channel (from YUYV) and/or downscale
-        // YUYV: [Y0 U0 Y1 V0] per 2 pixels → stride = cap_w * 2
-        // GREY: [Y0 Y1 ...] → stride = cap_w
-        const bool is_yuyv = (cap_pixfmt_ == V4L2_PIX_FMT_YUYV);
-        const uint16_t src_stride = is_yuyv ? (cap_w_ * 2) : cap_w_;
-        
-        // Nearest-neighbor downscale with Y extraction
-        for (uint16_t dy = 0; dy < FRAME_HEIGHT; ++dy) {
-            const uint16_t sy = (dy * cap_h_) / FRAME_HEIGHT;
-            const uint8_t* src_row = mmap_buf_ + sy * src_stride;
-            
-            for (uint16_t dx = 0; dx < FRAME_WIDTH; ++dx) {
-                const uint16_t sx = (dx * cap_w_) / FRAME_WIDTH;
-                if (is_yuyv) {
-                    // Y channel in YUYV is at even byte positions
-                    frame.data[dy * FRAME_WIDTH + dx] = src_row[sx * 2];
-                } else {
-                    frame.data[dy * FRAME_WIDTH + dx] = src_row[sx];
-                }
-            }
+    // Skip U+V planes (we only need grayscale)
+    uint8_t skip_buf[1024];
+    size_t remaining = uv_size;
+    while (remaining > 0) {
+        size_t chunk = (remaining < sizeof(skip_buf)) ? remaining : sizeof(skip_buf);
+        size_t got = fread(skip_buf, 1, chunk, pipe_);
+        if (got == 0) return false;
+        remaining -= got;
+    }
+    
+    // Downscale 640x480 → 320x240 (2x2 nearest neighbor)
+    for (uint16_t dy = 0; dy < FRAME_HEIGHT; ++dy) {
+        const uint16_t sy = dy * 2;
+        for (uint16_t dx = 0; dx < FRAME_WIDTH; ++dx) {
+            const uint16_t sx = dx * 2;
+            frame.data[dy * FRAME_WIDTH + dx] = y_buf[sy * cap_w_ + sx];
         }
     }
     
@@ -264,10 +146,6 @@ bool PiCSICamera::capture(FrameBuffer& frame) {
     frame.info.valid = true;
     
     last_capture_us_ = current_us;
-    
-    // Re-queue buffer
-    ioctl(fd_, VIDIOC_QBUF, &buf);
-    
     return true;
 #else
     return false;
@@ -276,17 +154,9 @@ bool PiCSICamera::capture(FrameBuffer& frame) {
 
 void PiCSICamera::close() {
 #ifdef __linux__
-    if (fd_ >= 0) {
-        enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ioctl(fd_, VIDIOC_STREAMOFF, &type);
-        
-        if (mmap_buf_ && mmap_buf_ != MAP_FAILED) {
-            munmap(mmap_buf_, mmap_len_);
-            mmap_buf_ = nullptr;
-        }
-        
-        ::close(fd_);
-        fd_ = -1;
+    if (pipe_) {
+        pclose(pipe_);
+        pipe_ = nullptr;
     }
 #endif
     open_ = false;

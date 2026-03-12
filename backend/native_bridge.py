@@ -28,7 +28,23 @@ class NativeRuntime:
             raise RuntimeError("jtzero_native module not found")
         
         self._rt = _native.Runtime()
-        self._rt.set_simulator_mode(True)
+        
+        # Auto-detect: use real hardware on Pi, simulator elsewhere
+        # Override with JT_ZERO_SIMULATE=1 to force simulation
+        force_sim = os.environ.get("JT_ZERO_SIMULATE", "").lower() in ("1", "true", "yes")
+        if force_sim:
+            self._rt.set_simulator_mode(True)
+            print("[JT-Zero] Forced SIMULATOR mode (JT_ZERO_SIMULATE=1)")
+        else:
+            # Check if we're on a Raspberry Pi
+            is_pi = os.path.exists("/sys/firmware/devicetree/base/model")
+            if is_pi:
+                self._rt.set_simulator_mode(False)
+                print("[JT-Zero] Running on Pi — HARDWARE mode (auto-detect sensors)")
+            else:
+                self._rt.set_simulator_mode(True)
+                print("[JT-Zero] Not on Pi — SIMULATOR mode")
+        
         self._start_time = time.time()
         self.running = False
     
