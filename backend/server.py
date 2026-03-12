@@ -106,7 +106,46 @@ async def get_state():
 
 @app.get("/api/events")
 async def get_events(count: int = 50):
-    return runtime.get_events(count)
+    raw = runtime.get_events(200)
+    return _filter_events(raw, count)
+
+
+def _filter_events(events: list, max_count: int = 50) -> list:
+    """Filter & deduplicate events:
+    - Remove noise (empty messages, IMU_UPDATE, SYS_HEARTBEAT)
+    - Group same type+message, show latest timestamp with (xN)
+    """
+    if not events:
+        return events
+
+    # Filter noise
+    skip_types = {"IMU_UPDATE", "SYS_HEARTBEAT"}
+    filtered = [ev for ev in events if ev.get("message") and ev.get("type") not in skip_types]
+
+    # Group by (type, message) — preserve order of first occurrence
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for ev in filtered:
+        key = (ev.get("type", ""), ev.get("message", ""))
+        if key not in groups:
+            groups[key] = {"event": ev, "count": 1}
+        else:
+            groups[key]["count"] += 1
+            groups[key]["event"] = ev  # keep latest timestamp
+
+    deduped = []
+    for (etype, msg), g in groups.items():
+        entry = {
+            "timestamp": g["event"].get("timestamp", 0),
+            "priority": g["event"].get("priority", 0),
+            "type": etype,
+            "message": msg + (f" (x{g['count']})" if g["count"] > 1 else ""),
+        }
+        deduped.append(entry)
+
+    # Sort by timestamp desc, take latest max_count
+    deduped.sort(key=lambda e: e["timestamp"])
+    return deduped[-max_count:]
 
 @app.get("/api/telemetry")
 async def get_telemetry():
@@ -200,7 +239,7 @@ async def websocket_telemetry(ws: WebSocket):
             state = runtime.get_state()
             threads = runtime.get_thread_stats()
             engines = runtime.get_engine_stats()
-            events = runtime.get_events(10)
+            events = _filter_events(runtime.get_events(60), 10)
             camera = runtime.get_camera_stats()
             mavlink = runtime.get_mavlink_stats()
             

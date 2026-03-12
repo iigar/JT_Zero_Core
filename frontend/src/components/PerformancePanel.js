@@ -23,7 +23,7 @@ export default function PerformancePanel({ performance, runtimeMode }) {
   const totalCpu = performance?.total_cpu_percent || 0;
 
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="performance-panel">
+    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="performance-panel">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Gauge className="w-3.5 h-3.5 text-slate-500" />

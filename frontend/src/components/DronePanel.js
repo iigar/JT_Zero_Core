@@ -36,7 +36,7 @@ function AttitudeIndicator({ roll, pitch }) {
 
 export default function DronePanel({ state, history }) {
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="drone-panel">
+    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="drone-panel">
       <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-3 font-semibold">
         Drone Telemetry
       </h3>

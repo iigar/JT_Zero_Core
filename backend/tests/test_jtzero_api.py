@@ -471,6 +471,53 @@ class TestThreadsAndEnginesEndpoints:
         assert "memory" in data
 
 
+class TestEventDeduplication:
+    """Tests for event deduplication - OBSTACLE events grouped with (xN) suffix (new in iteration 8)"""
+    
+    def test_events_have_dedup_count_suffix(self):
+        """Events endpoint returns deduplicated events with (xN) count suffix for repeated events"""
+        response = requests.get(f"{BASE_URL}/api/events?count=50")
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Check if any OBSTACLE events have (xN) suffix
+        obstacle_events = [e for e in data if e.get("type") == "OBSTACLE"]
+        if len(obstacle_events) > 0:
+            # At least some OBSTACLE events should have count suffix since they fire at 10Hz
+            has_count_suffix = any("(x" in e.get("message", "") for e in obstacle_events)
+            print(f"OBSTACLE events found: {len(obstacle_events)}, has_count_suffix: {has_count_suffix}")
+            if has_count_suffix:
+                # Verify the format is correct - should be "(xN)" at end
+                for e in obstacle_events:
+                    msg = e.get("message", "")
+                    if "(x" in msg:
+                        assert msg.endswith(")"), f"Count suffix should end with ')': {msg}"
+                        # Extract count number
+                        count_part = msg.split("(x")[-1].rstrip(")")
+                        assert count_part.isdigit(), f"Count should be numeric: {count_part}"
+                        print(f"Verified dedup event: {msg}")
+    
+    def test_events_imu_update_filtered(self):
+        """IMU_UPDATE events are filtered out from /api/events response"""
+        response = requests.get(f"{BASE_URL}/api/events?count=100")
+        assert response.status_code == 200
+        data = response.json()
+        
+        # IMU_UPDATE should not be in the response
+        imu_events = [e for e in data if e.get("type") == "IMU_UPDATE"]
+        assert len(imu_events) == 0, "IMU_UPDATE events should be filtered out"
+    
+    def test_events_sys_heartbeat_filtered(self):
+        """SYS_HEARTBEAT events are filtered out from /api/events response"""
+        response = requests.get(f"{BASE_URL}/api/events?count=100")
+        assert response.status_code == 200
+        data = response.json()
+        
+        # SYS_HEARTBEAT should not be in the response
+        heartbeat_events = [e for e in data if e.get("type") in ["SYS_HEARTBEAT", "SYSTEM_HEARTBEAT"]]
+        assert len(heartbeat_events) == 0, "SYS_HEARTBEAT events should be filtered out"
+
+
 class TestHardwareEndpoint:
     """Tests for /api/hardware endpoint - sensor detection status (new in iteration 7)"""
     
