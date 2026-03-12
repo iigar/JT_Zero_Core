@@ -108,6 +108,7 @@ export default function DocumentationTab() {
 
   const sections = [
     { id: 'install', label: 'Pi Zero Install', icon: Download },
+    { id: 'fc', label: 'Flight Controller', icon: ExternalLink },
     { id: 'wiring', label: 'Wiring / GPIO', icon: Terminal },
     { id: 'api', label: 'API Reference', icon: Server },
     { id: 'threads', label: 'Thread Model', icon: Cpu },
@@ -139,6 +140,7 @@ export default function DocumentationTab() {
       {/* Content */}
       <div className="flex-1 p-4 overflow-y-auto">
         {section === 'install' && <InstallSection />}
+        {section === 'fc' && <FCSection />}
         {section === 'wiring' && <WiringSection />}
         {section === 'api' && <APISection />}
         {section === 'threads' && <ThreadsSection />}
@@ -287,6 +289,127 @@ function WiringSection() {
           JT-Zero автоматично сканує I2C шину при запуску. Якщо сенсор не знайдено —
           відповідний канал переходить у режим симуляції. Жодного налаштування не потрібно.
         </p>
+      </div>
+    </div>
+  );
+}
+
+
+const FC_CONFIGS = [
+  { fc: 'Matek H743-SLIM V3', uart: 'UART6', pins: 'TX6 / RX6', serial: 'SERIAL6', rec: true },
+  { fc: 'SpeedyBee F405 V4', uart: 'UART4', pins: 'TX4 / RX4', serial: 'SERIAL4', rec: false },
+  { fc: 'Pixhawk 2.4.8', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
+  { fc: 'Cube Orange+', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
+];
+
+const ARDUPILOT_PARAMS = [
+  { param: 'SERIALx_PROTOCOL', value: '2', desc: 'MAVLink2 протокол' },
+  { param: 'SERIALx_BAUD', value: '921', desc: '921600 бод' },
+  { param: 'VISO_TYPE', value: '1', desc: 'MAVLink vision position' },
+  { param: 'EK3_SRC1_POSXY', value: '6', desc: 'ExternalNav (Visual Odometry)' },
+  { param: 'EK3_SRC1_VELXY', value: '6', desc: 'ExternalNav velocity' },
+  { param: 'EK3_SRC1_POSZ', value: '1', desc: 'Barometer (висота)' },
+  { param: 'FLOW_TYPE', value: '1', desc: 'MAVLink optical flow' },
+];
+
+function FCSection() {
+  return (
+    <div className="max-w-4xl space-y-4" data-testid="fc-section">
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
+        Flight Controller Connection
+      </h2>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        JT-Zero працює як companion computer. З'єднується з FC через UART (MAVLink2).
+        Pi відправляє Visual Odometry та Optical Flow дані в EKF польотника.
+      </p>
+
+      {/* Wiring diagram */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">
+          Підключення (3 дроти)
+        </h4>
+        <pre className="text-[9px] font-mono leading-relaxed">{
+`  Pi Zero 2W                 Flight Controller
+  ──────────                 ─────────────────
+  `}<span className="text-emerald-400">{`Pin 8  (GPIO14, TX) ──────► RX  (UART порт FC)`}</span>{`
+  `}<span className="text-amber-400">{`Pin 10 (GPIO15, RX) ◄────── TX  (UART порт FC)`}</span>{`
+  `}<span className="text-slate-500">{`Pin 6  (GND)        ─────── GND (будь-який GND)`}</span>
+        </pre>
+        <p className="text-[8px] text-red-400 mt-2 font-semibold">
+          TX Pi → RX FC (перехресно!). НЕ підключайте 5V між Pi та FC.
+        </p>
+      </div>
+
+      {/* FC table */}
+      <div className="border border-[#1E293B] rounded-sm overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-[#0A0C10] text-[9px] text-slate-500 uppercase tracking-wider">
+              <th className="text-left px-3 py-2">Контролер</th>
+              <th className="text-left px-3 py-2">UART порт</th>
+              <th className="text-left px-3 py-2">Піни на платі</th>
+              <th className="text-left px-3 py-2">ArduPilot Serial</th>
+            </tr>
+          </thead>
+          <tbody>
+            {FC_CONFIGS.map(({ fc, uart, pins, serial, rec }) => (
+              <tr key={fc} className="border-t border-[#1E293B]/50">
+                <td className="px-3 py-1.5 text-[10px] text-slate-200 font-semibold">
+                  {fc} {rec && <span className="text-[8px] text-emerald-400 ml-1">(рекоменд.)</span>}
+                </td>
+                <td className="px-3 py-1.5 text-[9px] text-cyan-400 font-mono">{uart}</td>
+                <td className="px-3 py-1.5 text-[9px] text-slate-400 font-mono">{pins}</td>
+                <td className="px-3 py-1.5 text-[9px] text-amber-400 font-bold">{serial}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ArduPilot params */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">
+          Параметри ArduPilot (Mission Planner → Full Parameter List)
+        </h4>
+        <p className="text-[8px] text-slate-600">
+          Замініть "x" на номер вашого Serial (6 для Matek, 4 для SpeedyBee, 2 для Pixhawk)
+        </p>
+        <div className="space-y-0.5">
+          {ARDUPILOT_PARAMS.map(({ param, value, desc }) => (
+            <div key={param} className="flex items-center gap-2 py-0.5">
+              <code className="text-[9px] text-cyan-400 font-mono w-36">{param}</code>
+              <span className="text-[9px] text-amber-400 font-bold w-8">{value}</span>
+              <span className="text-[8px] text-slate-500">{desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Pi .env config */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">
+          Налаштування JT-Zero на Pi
+        </h4>
+        <code className="text-[9px] text-slate-400 font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`# /home/pi/jt-zero/backend/.env
+MAVLINK_TRANSPORT=serial
+MAVLINK_DEVICE=/dev/ttyAMA0
+MAVLINK_BAUD=921600`
+        }</code>
+        <code className="text-[9px] text-cyan-400 font-mono block mt-1">
+          sudo systemctl restart jtzero
+        </code>
+      </div>
+
+      {/* Safety */}
+      <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-sm space-y-1">
+        <p className="text-[10px] text-red-400 font-semibold uppercase tracking-wider">Безпека</p>
+        <ul className="text-[9px] text-slate-400 space-y-0.5 list-disc pl-4">
+          <li>Перший тест — БЕЗ пропелерів, з USB живленням</li>
+          <li>ЗАВЖДИ майте RC пульт для екстренного перемикання в STABILIZE</li>
+          <li>Не підключайте 5V між Pi та FC</li>
+          <li>Перевіряйте мультиметром що UART працює на 3.3V</li>
+        </ul>
       </div>
     </div>
   );

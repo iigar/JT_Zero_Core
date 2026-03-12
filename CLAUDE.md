@@ -219,4 +219,36 @@ uvicorn server:app --host 0.0.0.0 --port 8001
 - UI overhaul: 7-tab interface, detailed 3D drone, GPIO docs, Settings
 - P1: Sensor auto-detect (I2C/UART probing)
 - P2: Camera drivers (PiCSI V4L2, USB V4L2), MAVLink Serial/UDP transport
-- Test reports: /app/test_reports/iteration_1-7.json
+- Deployment: Successfully deployed on real Pi Zero 2W with native C++ runtime
+- FC Connection guide: Matek H743-SLIM V3, SpeedyBee F405 V4, Pixhawk 2.4.8, Cube Orange+
+- Test reports: /app/test_reports/iteration_1-8.json
+
+---
+
+## Flight Controller Connection (Quick Reference)
+
+### Підключення Pi → FC (3 дроти):
+```
+Pi Pin 8  (TX)  ──► FC RX (UART порт)
+Pi Pin 10 (RX)  ◄── FC TX
+Pi Pin 6  (GND) ─── FC GND
+```
+
+### ArduPilot параметри:
+```
+SERIALx_PROTOCOL = 2    (MAVLink2)
+SERIALx_BAUD = 921      (921600)
+VISO_TYPE = 1            (MAVLink vision)
+EK3_SRC1_POSXY = 6      (ExternalNav)
+EK3_SRC1_VELXY = 6      (ExternalNav)
+```
+
+### UART порти по контролерах:
+| FC | UART | Serial |
+|----|------|--------|
+| Matek H743-SLIM V3 | UART6 | SERIAL6 |
+| SpeedyBee F405 V4 | UART4 | SERIAL4 |
+| Pixhawk 2.4.8 | TELEM2 | SERIAL2 |
+| Cube Orange+ | TELEM2 | SERIAL2 |
+
+Детальна інструкція: /jt-zero/FC_CONNECTION.md
