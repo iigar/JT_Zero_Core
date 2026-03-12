@@ -368,19 +368,21 @@ sudo reboot
 Після перезавантаження:
 
 ```bash
-# Чи бачить GPU камеру:
-vcgencmd get_camera
-
-# Очікуваний результат:
-# supported=1 detected=1, libcamera interfaces=1
+# Перевірка чи libcamera бачить камеру:
+rpicam-hello --list-cameras
 
 # Тест камери (показує картинку на 2 секунди):
-libcamera-hello --timeout 2000
+rpicam-hello --timeout 2000
 
 # Якщо все працює, зробити фото:
-libcamera-still -o test.jpg
+rpicam-still -o test.jpg
 ls -la test.jpg
 ```
+
+**Увага!** На Pi OS Trixie/Bookworm команди `libcamera-*` були перейменовані на `rpicam-*`:
+- `libcamera-hello` → `rpicam-hello`
+- `libcamera-still` → `rpicam-still`
+- `libcamera-vid` → `rpicam-vid`
 
 ### 11.5. Якщо камера не виявлена
 

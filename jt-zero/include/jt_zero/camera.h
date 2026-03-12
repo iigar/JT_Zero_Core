@@ -142,6 +142,10 @@ private:
     uint64_t last_capture_us_{0};
     uint8_t* mmap_buf_{nullptr};
     size_t mmap_len_{0};
+    // Actual capture resolution (sensor may not support 320x240)
+    uint16_t cap_w_{0};
+    uint16_t cap_h_{0};
+    uint32_t cap_pixfmt_{0};
 };
 
 // ─── USB Camera (via V4L2) ───────────────────────────────

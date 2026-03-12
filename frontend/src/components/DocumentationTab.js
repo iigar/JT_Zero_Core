@@ -244,15 +244,15 @@ const CAMERA_STEPS = [
     content: "Після зміни boot config потрібне перезавантаження.",
     cmd: "sudo reboot" },
   { step: 5, title: "Перевірка камери",
-    content: "Перевірте що GPU бачить камеру і libcamera працює.",
-    cmd: "vcgencmd get_camera\n# Очікувано: supported=1 detected=1\nlibcamera-hello --timeout 2000" },
+    content: "Перевірте що libcamera бачить камеру. На Pi OS Trixie/Bookworm команди починаються з rpicam- (не libcamera-).",
+    cmd: "rpicam-hello --list-cameras\n# Маєте побачити список камер (ov5647/imx219/imx708)\nrpicam-hello --timeout 2000" },
   { step: 6, title: "Тестове фото",
-    content: "Якщо libcamera-hello працює — зробіть фото для перевірки якості.",
-    cmd: "libcamera-still -o test.jpg && ls -la test.jpg" },
+    content: "Якщо rpicam-hello працює — зробіть фото для перевірки якості.",
+    cmd: "rpicam-still -o test.jpg && ls -la test.jpg" },
 ];
 
 const CAMERA_TROUBLESHOOT = [
-  { problem: "libcamera-hello: command not found", solution: "sudo apt install -y libcamera-apps" },
+  { problem: "libcamera-hello: command not found", solution: "На Pi OS Trixie/Bookworm команди перейменовані: rpicam-hello, rpicam-still, rpicam-vid" },
   { problem: "vcgencmd get_camera → detected=0", solution: "Перевірте шлейф і boot config. Для Pi Camera v3: додайте dtoverlay=imx708 в config.txt" },
   { problem: "Немає /dev/video0", solution: "Камера не підключена або шлейф пошкоджений. Перевірте: dmesg | grep -i camera" },
   { problem: "raspi-config не має пункту Camera", solution: "Це нормально для Bookworm. Камера увімкнена через camera_auto_detect=1 в config.txt" },
