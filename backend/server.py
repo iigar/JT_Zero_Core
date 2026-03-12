@@ -7,9 +7,12 @@ Auto-detects native C++ runtime, falls back to Python simulator.
 import os
 import asyncio
 import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -292,3 +295,29 @@ async def websocket_events(ws: WebSocket):
         pass
     except Exception:
         pass
+
+
+
+# ─── Static Files (Dashboard) ────────────────────────────
+# Serve built React frontend from /static directory
+# This is used when running standalone on Pi (no separate frontend server)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="static-assets")
+
+    # Catch-all: serve index.html for any non-API route (React SPA routing)
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        # Try to serve exact file first (favicon.ico, manifest.json, etc.)
+        file_path = STATIC_DIR / path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        # Otherwise serve index.html (React handles routing)
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    print(f"[JT-Zero API] Serving Dashboard from {STATIC_DIR}")
+else:
+    print(f"[JT-Zero API] No Dashboard found at {STATIC_DIR} — API-only mode")
