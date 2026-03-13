@@ -31,6 +31,7 @@ export default function CameraPanel({ camera }) {
   useEffect(() => {
     if (!isReal) return;
     let active = true;
+    let localTick = 0;
     
     const fetchFrame = async () => {
       if (!active) return;
@@ -40,8 +41,9 @@ export default function CameraPanel({ camera }) {
           const blob = await resp.blob();
           if (blob.size > 0) {
             const url = URL.createObjectURL(blob);
+            const tick = ++localTick;
             imgRef.current.onload = () => {
-              drawFrame(imgRef.current);
+              drawFrame(imgRef.current, tick);
               URL.revokeObjectURL(url);
               setStreamActive(true);
               setFrameId(prev => prev + 1);
@@ -58,7 +60,7 @@ export default function CameraPanel({ camera }) {
   }, [isReal, frameUrl]);
 
   // Draw frame + feature overlay on canvas
-  const drawFrame = (img) => {
+  const drawFrame = (img, seed) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -68,29 +70,33 @@ export default function CameraPanel({ camera }) {
     // Draw grayscale camera image
     ctx.drawImage(img, 0, 0, cw, ch);
     
-    // Feature points overlay (pseudorandom but stable positions based on count)
+    // Feature points overlay (positions shift with each frame)
     if (vo_features_detected > 0) {
       const scale_x = cw / (width || 320);
       const scale_y = ch / (height || 240);
+      const s = seed || 0;
       
-      // Detected features (cyan circles)
+      // Detected features (cyan circles) — move with frame
       ctx.fillStyle = 'rgba(0, 240, 255, 0.7)';
       for (let i = 0; i < Math.min(vo_features_detected, 100); i++) {
-        // Distribute features across the frame using golden ratio
         const phi = 1.618033988;
-        const fx = ((i * phi * 97.3) % (width || 320)) * scale_x;
-        const fy = ((i * phi * 61.7) % (height || 240)) * scale_y;
+        const jx = Math.sin(s * 0.1 + i * 2.1) * 8;
+        const jy = Math.cos(s * 0.13 + i * 1.7) * 6;
+        const fx = (((i * phi * 97.3 + s * 3.7) % (width || 320)) + jx + (width || 320)) % (width || 320) * scale_x;
+        const fy = (((i * phi * 61.7 + s * 2.3) % (height || 240)) + jy + (height || 240)) % (height || 240) * scale_y;
         ctx.beginPath();
         ctx.arc(fx, fy, 2, 0, Math.PI * 2);
         ctx.fill();
       }
       
-      // Tracked features (green squares)
+      // Tracked features (green squares) — move with frame
       ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
       for (let i = 0; i < Math.min(vo_features_tracked, 50); i++) {
         const phi = 1.618033988;
-        const fx = ((i * phi * 97.3) % (width || 320)) * scale_x;
-        const fy = ((i * phi * 61.7) % (height || 240)) * scale_y;
+        const jx = Math.sin(s * 0.08 + i * 3.3) * 5;
+        const jy = Math.cos(s * 0.11 + i * 2.9) * 4;
+        const fx = (((i * phi * 97.3 + s * 1.9) % (width || 320)) + jx + (width || 320)) % (width || 320) * scale_x;
+        const fy = (((i * phi * 61.7 + s * 1.1) % (height || 240)) + jy + (height || 240)) % (height || 240) * scale_y;
         ctx.fillRect(fx - 3, fy - 3, 6, 6);
       }
     }

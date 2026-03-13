@@ -142,7 +142,7 @@ struct MAVLinkStats {
     uint8_t  fc_type{0};                 // MAV_TYPE
     bool     fc_armed{false};
     char     fc_firmware[32]{};
-    char     transport_info[64]{};       // e.g. "/dev/ttyAMA0@921600" or "127.0.0.1:14550"
+    char     transport_info[64]{};       // e.g. "/dev/ttyAMA0@115200" or "127.0.0.1:14550"
 };
 
 // ─── MAVLink Interface ──────────────────────────────────
@@ -155,7 +155,7 @@ public:
     bool initialize(bool simulated = true);
     
     // Real transport initialization
-    bool initialize_serial(const char* device = "/dev/ttyAMA0", int baudrate = 921600);
+    bool initialize_serial(const char* device = "/dev/ttyAMA0", int baudrate = 115200);
     bool initialize_udp(const char* host = "127.0.0.1", int port = 14550);
     
     // Auto-detect: try serial first, then UDP, fallback to simulation
@@ -190,7 +190,7 @@ private:
     
     // Serial transport
     int serial_fd_{-1};
-    int serial_baud_{921600};
+    int serial_baud_{115200};
     
     // UDP transport
     int udp_fd_{-1};
