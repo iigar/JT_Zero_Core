@@ -275,6 +275,19 @@ bool MAVLinkInterface::send_optical_flow_rad(const MAVOpticalFlowRad& msg) {
 bool MAVLinkInterface::send_heartbeat() {
     if (state_ != MAVLinkState::CONNECTED && state_ != MAVLinkState::CONNECTING) return false;
     
+    // Build and send our heartbeat to FC
+    if (!simulated_ && (serial_fd_ >= 0 || udp_fd_ >= 0)) {
+        // MAVLink v2 HEARTBEAT (msg_id=0, CRC_EXTRA=50)
+        uint8_t payload[9] = {0};
+        // custom_mode = 0
+        payload[4] = 18;  // MAV_TYPE_ONBOARD_CONTROLLER
+        payload[5] = 0;   // MAV_AUTOPILOT_GENERIC
+        payload[6] = 0;   // base_mode
+        payload[7] = 0;   // system_status = uninit
+        payload[8] = 3;   // mavlink_version = 2
+        send_mavlink_v2(0, payload, 9, 50);
+    }
+    
     last_heartbeat_us_ = now_us();
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     
@@ -282,11 +295,92 @@ bool MAVLinkInterface::send_heartbeat() {
         msgs_received_.fetch_add(1, std::memory_order_relaxed);
         fc_armed_ = false;
     } else {
-        // Process all incoming data (parses MAVLink frames)
         process_incoming();
     }
     
     return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAVLink v2 Frame Serializer
+// ═══════════════════════════════════════════════════════════
+
+// CRC-16/MCRF4XX (X.25)
+static uint16_t mavlink_crc(const uint8_t* buf, size_t len) {
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t tmp = buf[i] ^ static_cast<uint8_t>(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8) 
+              ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+    }
+    return crc;
+}
+
+static void mavlink_crc_accumulate(uint16_t& crc, uint8_t byte) {
+    uint8_t tmp = byte ^ static_cast<uint8_t>(crc & 0xFF);
+    tmp ^= (tmp << 4);
+    crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+          ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+}
+
+bool MAVLinkInterface::send_mavlink_v2(uint32_t msg_id, const uint8_t* payload, uint8_t len, uint8_t crc_extra) {
+    uint8_t frame[280];
+    frame[0] = 0xFD;           // MAVLink v2 STX
+    frame[1] = len;            // payload length
+    frame[2] = 0;              // incompat_flags
+    frame[3] = 0;              // compat_flags
+    frame[4] = seq_++;         // sequence
+    frame[5] = 1;              // system_id (us)
+    frame[6] = 191;            // component_id (MAV_COMP_ID_ONBOARD_COMPUTER)
+    frame[7] = msg_id & 0xFF;
+    frame[8] = (msg_id >> 8) & 0xFF;
+    frame[9] = (msg_id >> 16) & 0xFF;
+    
+    std::memcpy(frame + 10, payload, len);
+    
+    // CRC over bytes 1..end_of_payload, then accumulate crc_extra
+    uint16_t crc = mavlink_crc(frame + 1, 9 + len);
+    mavlink_crc_accumulate(crc, crc_extra);
+    
+    frame[10 + len] = crc & 0xFF;
+    frame[11 + len] = (crc >> 8) & 0xFF;
+    
+    return send_raw(frame, 12 + len);
+}
+
+void MAVLinkInterface::request_data_streams() {
+    if (simulated_) return;
+    
+    // REQUEST_DATA_STREAM (msg_id=66, CRC_EXTRA=148)
+    // Request specific streams from FC at given Hz
+    struct { uint8_t stream_id; uint16_t rate_hz; } streams[] = {
+        { 1,  2 },  // RAW_SENSORS (SCALED_IMU, SCALED_PRESSURE)
+        { 2,  2 },  // EXTENDED_STATUS (SYS_STATUS)
+        { 6,  2 },  // POSITION (GLOBAL_POSITION_INT, GPS_RAW_INT)
+        { 10, 4 },  // EXTRA1 (ATTITUDE)
+        { 11, 2 },  // EXTRA2 (VFR_HUD)
+    };
+    
+    for (auto& s : streams) {
+        uint8_t payload[6];
+        // uint16_t req_message_rate (little-endian)
+        payload[0] = s.rate_hz & 0xFF;
+        payload[1] = (s.rate_hz >> 8) & 0xFF;
+        // uint8_t target_system
+        payload[2] = fc_system_id_;
+        // uint8_t target_component
+        payload[3] = 1;  // MAV_COMP_ID_AUTOPILOT1
+        // uint8_t req_stream_id
+        payload[4] = s.stream_id;
+        // uint8_t start_stop (1=start)
+        payload[5] = 1;
+        
+        send_mavlink_v2(66, payload, 6, 148);
+        msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+    }
+    
+    std::printf("[MAVLink] Requested data streams (5 types) from FC sysid=%d\n", fc_system_id_);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -576,6 +670,12 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     // Always process incoming data (parse MAVLink frames)
     if (!simulated_) {
         process_incoming();
+        
+        // Request data streams once after connection is established
+        if (state_ == MAVLinkState::CONNECTED && !streams_requested_ && fc_telem_.heartbeat_valid) {
+            request_data_streams();
+            streams_requested_ = true;
+        }
     }
     
     check_connection();

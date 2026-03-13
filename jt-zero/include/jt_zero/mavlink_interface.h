@@ -294,12 +294,20 @@ private:
     uint8_t rx_buf_[RX_BUF_SIZE]{};
     size_t  rx_head_{0};
     size_t  rx_tail_{0};
+    uint8_t seq_{0};               // MAVLink frame sequence counter
+    bool    streams_requested_{false};  // Have we requested data streams?
     
     // Process incoming bytes: parse MAVLink frames and update fc_telem_
     void process_incoming();
     
     // Parse a single MAVLink frame payload by message ID
     void handle_message(uint32_t msg_id, const uint8_t* payload, uint8_t len, uint8_t sysid);
+    
+    // Send a MAVLink v2 frame with CRC
+    bool send_mavlink_v2(uint32_t msg_id, const uint8_t* payload, uint8_t len, uint8_t crc_extra);
+    
+    // Request data streams from FC (called once after connection)
+    void request_data_streams();
     
     // Connection monitoring
     static constexpr uint64_t HEARTBEAT_TIMEOUT_US = 3'000'000; // 3 seconds
