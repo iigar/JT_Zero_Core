@@ -207,6 +207,12 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
     
     // Add FC telemetry if available
     if (fc.heartbeat_valid) {
+        // Get diagnostic msg IDs
+        py::list msg_ids;
+        for (size_t i = 0; i < rt.mavlink().diag_unique_count_; i++) {
+            msg_ids.append(static_cast<int>(rt.mavlink().diag_msg_ids_[i]));
+        }
+        
         result["fc_telemetry"] = py::dict(
             "attitude_valid"_a = fc.attitude_valid,
             "imu_valid"_a = fc.imu_valid,
@@ -218,7 +224,8 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
             "battery_voltage"_a = fc.battery_voltage,
             "battery_remaining"_a = static_cast<int>(fc.battery_remaining),
             "gps_fix"_a = static_cast<int>(fc.gps_fix),
-            "gps_sats"_a = static_cast<int>(fc.gps_sats)
+            "gps_sats"_a = static_cast<int>(fc.gps_sats),
+            "detected_msg_ids"_a = msg_ids
         );
     }
     

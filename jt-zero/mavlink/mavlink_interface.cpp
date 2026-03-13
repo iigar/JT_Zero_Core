@@ -381,6 +381,22 @@ void MAVLinkInterface::request_data_streams() {
     }
     
     std::printf("[MAVLink] Requested data streams (5 types) from FC sysid=%d\n", fc_system_id_);
+    std::fflush(stdout);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Diagnostic: message ID tracking
+// ═══════════════════════════════════════════════════════════
+
+void MAVLinkInterface::log_msg_id(uint32_t msg_id) {
+    // Log first 20 unique message IDs for debugging
+    if (diag_unique_count_ >= 32) return;
+    for (size_t i = 0; i < diag_unique_count_; i++) {
+        if (diag_msg_ids_[i] == msg_id) return;  // already logged
+    }
+    diag_msg_ids_[diag_unique_count_++] = msg_id;
+    std::printf("[MAVLink] New msg_id=%u (total unique: %zu)\n", msg_id, diag_unique_count_);
+    std::fflush(stdout);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -484,100 +500,118 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
     fc_system_id_ = sysid;
     fc_telem_.last_update_us = now_us();
     fc_telem_.msg_count++;
+    log_msg_id(msg_id);
+    
+    // Helper: safe read — returns 0 for bytes beyond payload (MAVLink v2 trims trailing zeros)
+    auto safe_f32 = [&](size_t off) -> float { 
+        if (off + 4 > len) return 0.0f;
+        float v; std::memcpy(&v, p + off, 4); return v;
+    };
+    auto safe_u32 = [&](size_t off) -> uint32_t {
+        if (off + 4 > len) return 0;
+        uint32_t v; std::memcpy(&v, p + off, 4); return v;
+    };
+    auto safe_i32 = [&](size_t off) -> int32_t {
+        if (off + 4 > len) return 0;
+        int32_t v; std::memcpy(&v, p + off, 4); return v;
+    };
+    auto safe_u16 = [&](size_t off) -> uint16_t {
+        if (off + 2 > len) return 0;
+        uint16_t v; std::memcpy(&v, p + off, 2); return v;
+    };
+    auto safe_i16 = [&](size_t off) -> int16_t {
+        if (off + 2 > len) return 0;
+        int16_t v; std::memcpy(&v, p + off, 2); return v;
+    };
+    auto safe_u8 = [&](size_t off) -> uint8_t {
+        if (off >= len) return 0;
+        return p[off];
+    };
     
     switch (msg_id) {
         
-    case 0: {  // HEARTBEAT (9 bytes)
-        if (len < 9) break;
-        fc_telem_.custom_mode  = read_u32(p);
-        fc_telem_.fc_type      = p[4];
-        fc_telem_.fc_autopilot = p[5];
-        fc_telem_.base_mode    = p[6];
-        fc_telem_.system_status = p[7];
-        fc_telem_.armed        = (p[6] & 0x80) != 0;  // MAV_MODE_FLAG_SAFETY_ARMED
+    case 0: {  // HEARTBEAT — min 7 bytes (custom_mode + type + autopilot + base_mode)
+        if (len < 7) break;
+        fc_telem_.custom_mode  = safe_u32(0);
+        fc_telem_.fc_type      = safe_u8(4);
+        fc_telem_.fc_autopilot = safe_u8(5);
+        fc_telem_.base_mode    = safe_u8(6);
+        fc_telem_.system_status = safe_u8(7);
+        fc_telem_.armed        = (safe_u8(6) & 0x80) != 0;
         fc_telem_.heartbeat_valid = true;
         fc_armed_ = fc_telem_.armed;
         break;
     }
     
-    case 1: {  // SYS_STATUS (31 bytes)
-        if (len < 31) break;
-        // bytes 0-11: sensors present/enabled/health (3x uint32)
-        fc_telem_.battery_voltage   = read_u16(p + 14) * 0.001f;  // mV → V
-        fc_telem_.battery_current   = read_i16(p + 16) * 0.01f;   // cA → A
-        fc_telem_.battery_remaining = static_cast<int8_t>(p[30]);  // %
+    case 1: {  // SYS_STATUS — need at least bytes 14-17 for voltage/current
+        if (len < 18) break;
+        fc_telem_.battery_voltage   = safe_u16(14) * 0.001f;
+        fc_telem_.battery_current   = safe_i16(16) * 0.01f;
+        fc_telem_.battery_remaining = static_cast<int8_t>(safe_u8(30));
         fc_telem_.status_valid = true;
         break;
     }
     
-    case 24: {  // GPS_RAW_INT (30+ bytes)
-        if (len < 30) break;
-        // uint64_t time_usec at p+0
-        fc_telem_.gps_lat   = read_i32(p + 8) * 1.0e-7;   // degE7 → deg
-        fc_telem_.gps_lon   = read_i32(p + 12) * 1.0e-7;
-        fc_telem_.gps_alt   = read_i32(p + 16) * 0.001f;   // mm → m
-        // eph at p+20, epv at p+22
-        fc_telem_.gps_speed = read_u16(p + 24) * 0.01f;    // cm/s → m/s
-        // cog at p+26
-        fc_telem_.gps_fix   = p[28];
-        fc_telem_.gps_sats  = p[29];
+    case 24: {  // GPS_RAW_INT — need at least offset 16 for lat/lon/alt
+        if (len < 18) break;
+        fc_telem_.gps_lat   = safe_i32(8) * 1.0e-7;
+        fc_telem_.gps_lon   = safe_i32(12) * 1.0e-7;
+        fc_telem_.gps_alt   = safe_i32(16) * 0.001f;
+        fc_telem_.gps_speed = safe_u16(24) * 0.01f;
+        fc_telem_.gps_fix   = safe_u8(28);
+        fc_telem_.gps_sats  = safe_u8(29);
         fc_telem_.gps_valid = (fc_telem_.gps_fix >= 2);
         break;
     }
     
-    case 26: {  // SCALED_IMU (22+ bytes)
-        if (len < 22) break;
-        // uint32_t time_boot_ms at p+0
-        fc_telem_.acc_x  = read_i16(p + 4) * 0.00981f;   // mG → m/s² (mG * 9.81/1000)
-        fc_telem_.acc_y  = read_i16(p + 6) * 0.00981f;
-        fc_telem_.acc_z  = read_i16(p + 8) * 0.00981f;
-        fc_telem_.gyro_x = read_i16(p + 10) * 0.001f;     // mrad/s → rad/s
-        fc_telem_.gyro_y = read_i16(p + 12) * 0.001f;
-        fc_telem_.gyro_z = read_i16(p + 14) * 0.001f;
-        fc_telem_.mag_x  = read_i16(p + 16) * 0.001f;     // mgauss → gauss
-        fc_telem_.mag_y  = read_i16(p + 18) * 0.001f;
-        fc_telem_.mag_z  = read_i16(p + 20) * 0.001f;
+    case 26: {  // SCALED_IMU — need at least offset 4 for acc data
+        if (len < 10) break;
+        fc_telem_.acc_x  = safe_i16(4) * 0.00981f;
+        fc_telem_.acc_y  = safe_i16(6) * 0.00981f;
+        fc_telem_.acc_z  = safe_i16(8) * 0.00981f;
+        fc_telem_.gyro_x = safe_i16(10) * 0.001f;
+        fc_telem_.gyro_y = safe_i16(12) * 0.001f;
+        fc_telem_.gyro_z = safe_i16(14) * 0.001f;
+        fc_telem_.mag_x  = safe_i16(16) * 0.001f;
+        fc_telem_.mag_y  = safe_i16(18) * 0.001f;
+        fc_telem_.mag_z  = safe_i16(20) * 0.001f;
         fc_telem_.imu_valid = true;
         break;
     }
     
-    case 29: {  // SCALED_PRESSURE (14 bytes)
-        if (len < 14) break;
-        // uint32_t time_boot_ms at p+0
-        fc_telem_.pressure    = read_f32(p + 4);            // hPa
-        // press_diff at p+8
-        fc_telem_.temperature = read_i16(p + 12) * 0.01f;   // cdeg → deg C
+    case 29: {  // SCALED_PRESSURE — need press_abs at offset 4
+        if (len < 8) break;
+        fc_telem_.pressure    = safe_f32(4);
+        fc_telem_.temperature = safe_i16(12) * 0.01f;
         fc_telem_.baro_valid = true;
         break;
     }
     
-    case 30: {  // ATTITUDE (28 bytes)
-        if (len < 28) break;
-        // uint32_t time_boot_ms at p+0
-        fc_telem_.roll       = read_f32(p + 4);    // rad
-        fc_telem_.pitch      = read_f32(p + 8);    // rad
-        fc_telem_.yaw        = read_f32(p + 12);   // rad
-        fc_telem_.rollspeed  = read_f32(p + 16);   // rad/s
-        fc_telem_.pitchspeed = read_f32(p + 20);   // rad/s
-        fc_telem_.yawspeed   = read_f32(p + 24);   // rad/s
+    case 30: {  // ATTITUDE — need at least roll/pitch/yaw at offset 4-16
+        if (len < 16) break;
+        fc_telem_.roll       = safe_f32(4);
+        fc_telem_.pitch      = safe_f32(8);
+        fc_telem_.yaw        = safe_f32(12);
+        fc_telem_.rollspeed  = safe_f32(16);
+        fc_telem_.pitchspeed = safe_f32(20);
+        fc_telem_.yawspeed   = safe_f32(24);
         fc_telem_.attitude_valid = true;
         break;
     }
     
-    case 74: {  // VFR_HUD (20 bytes)
-        if (len < 20) break;
-        fc_telem_.airspeed    = read_f32(p);
-        fc_telem_.groundspeed = read_f32(p + 4);
-        fc_telem_.heading     = read_i16(p + 8);
-        fc_telem_.throttle    = read_u16(p + 10);
-        fc_telem_.alt         = read_f32(p + 12);
-        fc_telem_.climb       = read_f32(p + 16);
+    case 74: {  // VFR_HUD — need at least offset 0-12
+        if (len < 12) break;
+        fc_telem_.airspeed    = safe_f32(0);
+        fc_telem_.groundspeed = safe_f32(4);
+        fc_telem_.heading     = safe_i16(8);
+        fc_telem_.throttle    = safe_u16(10);
+        fc_telem_.alt         = safe_f32(12);
+        fc_telem_.climb       = safe_f32(16);
         fc_telem_.hud_valid = true;
         break;
     }
     
     default:
-        // Unknown message — ignore
         break;
     }
 }

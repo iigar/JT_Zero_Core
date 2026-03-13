@@ -247,7 +247,11 @@ public:
     // Parsed FC telemetry (thread-safe read)
     FCTelemetry get_fc_telemetry() const;
     bool has_fc_data() const { return fc_telem_.heartbeat_valid; }
-
+    
+    // Diagnostic: track unique message IDs (public for API access)
+    uint32_t diag_msg_ids_[32]{};
+    size_t   diag_unique_count_{0};
+    
 private:
     MAVLinkState state_{MAVLinkState::DISCONNECTED};
     MAVTransport transport_{MAVTransport::SIMULATED};
@@ -308,6 +312,9 @@ private:
     
     // Request data streams from FC (called once after connection)
     void request_data_streams();
+    
+    // Diagnostic: track unique message IDs
+    void log_msg_id(uint32_t msg_id);
     
     // Connection monitoring
     static constexpr uint64_t HEARTBEAT_TIMEOUT_US = 3'000'000; // 3 seconds
