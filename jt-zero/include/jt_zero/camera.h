@@ -274,6 +274,7 @@ public:
     // Access results
     const FrameInfo& last_frame_info() const { return current_frame_.info; }
     const VOResult&  last_vo_result() const  { return vo_result_; }
+    const FrameBuffer& current_frame() const { return current_frame_; }
     CameraPipelineStats get_stats() const;
     
     bool is_running() const { return running_; }

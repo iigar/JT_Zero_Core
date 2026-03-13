@@ -7,12 +7,14 @@ Auto-detects native C++ runtime, falls back to Python simulator.
 import os
 import asyncio
 import time
+import struct
+import zlib
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 
@@ -178,6 +180,54 @@ async def get_camera():
 @app.get("/api/mavlink")
 async def get_mavlink():
     return runtime.get_mavlink_stats()
+
+# ─── Camera Frame Endpoint ──────────────────────────────────
+# Returns latest camera frame as PNG (pure Python, no Pillow needed)
+
+def _grayscale_to_png(data: bytes, width: int, height: int) -> bytes:
+    """Encode raw grayscale bytes to PNG using only stdlib."""
+    raw = b''.join(b'\x00' + data[y*width:(y+1)*width] for y in range(height))
+    compressed = zlib.compress(raw, 1)  # Fast compression
+    
+    def chunk(tag, d):
+        c = tag + d
+        crc = zlib.crc32(c) & 0xffffffff
+        return struct.pack('>I', len(d)) + c + struct.pack('>I', crc)
+    
+    ihdr = struct.pack('>IIBBBBB', width, height, 8, 0, 0, 0, 0)
+    return (b'\x89PNG\r\n\x1a\n' +
+            chunk(b'IHDR', ihdr) +
+            chunk(b'IDAT', compressed) +
+            chunk(b'IEND', b''))
+
+_frame_cache = {"png": b'', "frame_id": -1}
+
+@app.get("/api/camera/frame")
+async def get_camera_frame():
+    """Return latest camera frame as PNG image."""
+    if not hasattr(runtime, 'get_frame_data'):
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    frame_data = runtime.get_frame_data()
+    if not frame_data or len(frame_data) == 0:
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    # Cache: only re-encode if frame changed
+    cam = runtime.get_camera_stats()
+    fid = cam.get("frame_count", 0)
+    if fid != _frame_cache["frame_id"]:
+        w = cam.get("width", 320) or 320
+        h = cam.get("height", 240) or 240
+        expected = w * h
+        if len(frame_data) >= expected:
+            _frame_cache["png"] = _grayscale_to_png(frame_data[:expected], w, h)
+            _frame_cache["frame_id"] = fid
+    
+    return Response(
+        content=_frame_cache["png"],
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache", "X-Frame-Id": str(fid)}
+    )
 
 @app.get("/api/performance")
 async def get_performance():

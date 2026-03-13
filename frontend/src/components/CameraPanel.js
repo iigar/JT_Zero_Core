@@ -1,139 +1,230 @@
-import React from 'react';
-import { Camera, Eye, Crosshair, Activity } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Camera, Eye, Crosshair, Zap } from 'lucide-react';
 
-function FeatureMap({ detected, tracked, quality }) {
-  // Simple visualization of feature detection
-  const points = [];
-  const count = Math.min(detected || 0, 40);
-  for (let i = 0; i < count; i++) {
-    const isTracked = i < (tracked || 0);
-    points.push(
-      <circle
-        key={i}
-        cx={15 + (i % 10) * 27 + (Math.sin(i * 1.7) * 8)}
-        cy={15 + Math.floor(i / 10) * 25 + (Math.cos(i * 2.3) * 6)}
-        r={isTracked ? 2.5 : 1.5}
-        fill={isTracked ? '#00F0FF' : '#64748B'}
-        opacity={isTracked ? 0.9 : 0.4}
-      />
-    );
-    // Draw flow vectors for tracked features
-    if (isTracked) {
-      const angle = (i * 0.5) + quality * 3;
-      const len = 4 + Math.sin(i) * 2;
-      points.push(
-        <line
-          key={`v${i}`}
-          x1={15 + (i % 10) * 27 + (Math.sin(i * 1.7) * 8)}
-          y1={15 + Math.floor(i / 10) * 25 + (Math.cos(i * 2.3) * 6)}
-          x2={15 + (i % 10) * 27 + (Math.sin(i * 1.7) * 8) + Math.cos(angle) * len}
-          y2={15 + Math.floor(i / 10) * 25 + (Math.cos(i * 2.3) * 6) + Math.sin(angle) * len}
-          stroke="#00F0FF"
-          strokeWidth="0.8"
-          opacity="0.5"
-        />
-      );
+const API = process.env.REACT_APP_BACKEND_URL;
+
+export default function CameraPanel({ cameraData = {} }) {
+  const canvasRef = useRef(null);
+  const imgRef = useRef(new Image());
+  const [streamActive, setStreamActive] = useState(false);
+  const [frameId, setFrameId] = useState(0);
+  const frameUrl = `${API}/api/camera/frame`;
+  
+  const {
+    camera_type = 'SIMULATED',
+    camera_open = false,
+    frame_count = 0,
+    fps_actual = 0,
+    width = 320,
+    height = 240,
+    vo_features_detected = 0,
+    vo_features_tracked = 0,
+    vo_tracking_quality = 0,
+    vo_dx = 0,
+    vo_dy = 0,
+    vo_valid = false,
+  } = cameraData;
+
+  const isReal = camera_type !== 'SIMULATED' && camera_open;
+
+  // Poll camera frames at ~3fps
+  useEffect(() => {
+    if (!isReal) return;
+    let active = true;
+    
+    const fetchFrame = async () => {
+      if (!active) return;
+      try {
+        const resp = await fetch(`${frameUrl}?t=${Date.now()}`);
+        if (resp.ok && resp.status === 200) {
+          const blob = await resp.blob();
+          if (blob.size > 0) {
+            const url = URL.createObjectURL(blob);
+            imgRef.current.onload = () => {
+              drawFrame(imgRef.current);
+              URL.revokeObjectURL(url);
+              setStreamActive(true);
+              setFrameId(prev => prev + 1);
+            };
+            imgRef.current.src = url;
+          }
+        }
+      } catch (e) { /* ignore */ }
+      if (active) setTimeout(fetchFrame, 333); // ~3fps
+    };
+    
+    fetchFrame();
+    return () => { active = false; };
+  }, [isReal, frameUrl]);
+
+  // Draw frame + feature overlay on canvas
+  const drawFrame = (img) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    
+    // Draw grayscale camera image
+    ctx.drawImage(img, 0, 0, cw, ch);
+    
+    // Feature points overlay (pseudorandom but stable positions based on count)
+    if (vo_features_detected > 0) {
+      const scale_x = cw / (width || 320);
+      const scale_y = ch / (height || 240);
+      
+      // Detected features (cyan circles)
+      ctx.fillStyle = 'rgba(0, 240, 255, 0.7)';
+      for (let i = 0; i < Math.min(vo_features_detected, 100); i++) {
+        // Distribute features across the frame using golden ratio
+        const phi = 1.618033988;
+        const fx = ((i * phi * 97.3) % (width || 320)) * scale_x;
+        const fy = ((i * phi * 61.7) % (height || 240)) * scale_y;
+        ctx.beginPath();
+        ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Tracked features (green squares)
+      ctx.fillStyle = 'rgba(0, 255, 100, 0.8)';
+      for (let i = 0; i < Math.min(vo_features_tracked, 50); i++) {
+        const phi = 1.618033988;
+        const fx = ((i * phi * 97.3) % (width || 320)) * scale_x;
+        const fy = ((i * phi * 61.7) % (height || 240)) * scale_y;
+        ctx.fillRect(fx - 3, fy - 3, 6, 6);
+      }
     }
-  }
+    
+    // VO displacement vector
+    if (vo_valid) {
+      const cx = cw / 2;
+      const cy = ch / 2;
+      const vx = vo_dx * 5000;
+      const vy = vo_dy * 5000;
+      ctx.strokeStyle = '#FF3366';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + vx, cy + vy);
+      ctx.stroke();
+      // Arrowhead
+      ctx.fillStyle = '#FF3366';
+      ctx.beginPath();
+      ctx.arc(cx + vx, cy + vy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // Crosshair
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cw / 2, 0);
+    ctx.lineTo(cw / 2, ch);
+    ctx.moveTo(0, ch / 2);
+    ctx.lineTo(cw, ch / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+
+  // Simulated view (when no real camera)
+  const drawSimulated = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    
+    ctx.fillStyle = '#0A0C10';
+    ctx.fillRect(0, 0, cw, ch);
+    
+    // Grid
+    ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < cw; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
+    for (let y = 0; y < ch; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
+    
+    // Simulated features
+    ctx.fillStyle = 'rgba(0, 240, 255, 0.4)';
+    for (let i = 0; i < vo_features_detected; i++) {
+      const phi = 1.618033988;
+      const fx = (i * phi * 97.3) % cw;
+      const fy = (i * phi * 61.7) % ch;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    
+    // "NO CAMERA" label
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SIMULATED', cw / 2, ch / 2 - 8);
+    ctx.fillText(`${vo_features_detected} features`, cw / 2, ch / 2 + 8);
+  };
+
+  useEffect(() => {
+    if (!isReal) drawSimulated();
+  }, [isReal, vo_features_detected, vo_features_tracked]);
+
+  const isCSI = camera_type === 'PI_CSI';
+  const typeColor = isCSI ? 'text-emerald-400' : camera_type === 'USB' ? 'text-amber-400' : 'text-slate-500';
+  const qualityPct = (vo_tracking_quality * 100).toFixed(0);
 
   return (
-    <div className="relative bg-black/60 border border-[#1E293B] rounded-sm overflow-hidden">
-      <svg viewBox="0 0 280 120" className="w-full h-auto">
-        {/* Grid overlay */}
-        <line x1="0" y1="60" x2="280" y2="60" stroke="#1E293B" strokeWidth="0.3" />
-        <line x1="140" y1="0" x2="140" y2="120" stroke="#1E293B" strokeWidth="0.3" />
-        <line x1="0" y1="30" x2="280" y2="30" stroke="#1E293B" strokeWidth="0.2" strokeDasharray="2" />
-        <line x1="0" y1="90" x2="280" y2="90" stroke="#1E293B" strokeWidth="0.2" strokeDasharray="2" />
-        <line x1="70" y1="0" x2="70" y2="120" stroke="#1E293B" strokeWidth="0.2" strokeDasharray="2" />
-        <line x1="210" y1="0" x2="210" y2="120" stroke="#1E293B" strokeWidth="0.2" strokeDasharray="2" />
-        {/* Feature points + flow vectors */}
-        {points}
-        {/* Camera crosshair */}
-        <circle cx="140" cy="60" r="12" fill="none" stroke="#1E293B" strokeWidth="0.5" />
-        <line x1="135" y1="60" x2="145" y2="60" stroke="#00F0FF" strokeWidth="0.5" opacity="0.5" />
-        <line x1="140" y1="55" x2="140" y2="65" stroke="#00F0FF" strokeWidth="0.5" opacity="0.5" />
-      </svg>
-      {/* Resolution label */}
-      <div className="absolute bottom-0.5 right-1 text-[8px] text-slate-700">320x240 SIM</div>
-    </div>
-  );
-}
-
-export default function CameraPanel({ camera }) {
-  const qualityColor = (camera?.vo_tracking_quality || 0) > 0.6 ? 'text-emerald-400' :
-                       (camera?.vo_tracking_quality || 0) > 0.3 ? 'text-amber-400' : 'text-red-400';
-
-  return (
-    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="camera-panel">
-      <div className="flex items-center justify-between mb-2">
+    <div className="h-full flex flex-col bg-[#080A0E] border border-[#1E293B] rounded-sm overflow-hidden" data-testid="camera-panel">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[#0A0C10] border-b border-[#1E293B]/50 shrink-0">
         <div className="flex items-center gap-2">
-          <Camera className="w-3.5 h-3.5 text-slate-500" />
-          <h3 className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Camera / Visual Odometry</h3>
+          <Camera className="w-3.5 h-3.5 text-[#00F0FF]" />
+          <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Camera / VO</span>
+          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm ${
+            isReal ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                   : 'bg-slate-700/30 text-slate-500 border border-slate-600/30'
+          }`}>
+            {isReal ? (isCSI ? 'CSI' : 'USB') : 'SIM'}
+          </span>
+          {streamActive && (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
+              LIVE
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${
-            camera?.camera_open ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]' : 'bg-red-500'
-          }`} />
-          <span className="text-[9px] text-slate-600">{camera?.camera_type || 'N/A'}</span>
-        </div>
-      </div>
-
-      {/* Feature map visualization */}
-      <FeatureMap 
-        detected={camera?.vo_features_detected} 
-        tracked={camera?.vo_features_tracked}
-        quality={camera?.vo_tracking_quality || 0}
-      />
-
-      <div className="grid grid-cols-2 gap-x-4 mt-2">
-        {/* Camera stats */}
-        <div>
-          <span className="text-[8px] text-slate-700 uppercase block mb-1">Camera</span>
-          <Row label="FPS" value={camera?.fps_actual?.toFixed(1) || '0'} />
-          <Row label="FRAMES" value={camera?.frame_count || 0} />
-          <Row label="RES" value={`${camera?.width || 0}x${camera?.height || 0}`} />
-        </div>
-        {/* VO stats */}
-        <div>
-          <span className="text-[8px] text-slate-700 uppercase block mb-1">Visual Odometry</span>
-          <Row label="FEAT" value={`${camera?.vo_features_tracked || 0}/${camera?.vo_features_detected || 0}`} />
-          <Row label="QUAL" value={`${((camera?.vo_tracking_quality || 0) * 100).toFixed(0)}%`} color={qualityColor} />
-          <Row label="VALID" value={camera?.vo_valid ? 'YES' : 'NO'} 
-               color={camera?.vo_valid ? 'text-emerald-400' : 'text-red-400'} />
+        <div className="flex items-center gap-3 text-[9px] text-slate-500">
+          <span>{fps_actual.toFixed(1)} fps</span>
+          <span>#{frame_count}</span>
         </div>
       </div>
 
-      {/* VO motion estimates */}
-      <div className="mt-2 border-t border-[#1E293B]/30 pt-1">
-        <span className="text-[8px] text-slate-700 uppercase">VO Delta (m)</span>
-        <div className="flex gap-4 mt-0.5">
-          <div className="flex gap-1 items-center">
-            <span className="text-[9px] text-slate-600">dX</span>
-            <span className="text-[10px] text-[#00F0FF] font-bold tabular-nums">{(camera?.vo_dx || 0).toFixed(4)}</span>
-          </div>
-          <div className="flex gap-1 items-center">
-            <span className="text-[9px] text-slate-600">dY</span>
-            <span className="text-[10px] text-[#00F0FF] font-bold tabular-nums">{(camera?.vo_dy || 0).toFixed(4)}</span>
-          </div>
-          <div className="flex gap-1 items-center">
-            <span className="text-[9px] text-slate-600">Vx</span>
-            <span className="text-[10px] text-cyan-300 font-bold tabular-nums">{(camera?.vo_vx || 0).toFixed(3)}</span>
-          </div>
-          <div className="flex gap-1 items-center">
-            <span className="text-[9px] text-slate-600">Vy</span>
-            <span className="text-[10px] text-cyan-300 font-bold tabular-nums">{(camera?.vo_vy || 0).toFixed(3)}</span>
-          </div>
-        </div>
+      {/* Canvas */}
+      <div className="flex-1 relative min-h-0">
+        <canvas
+          ref={canvasRef}
+          width={320}
+          height={240}
+          className="absolute inset-0 w-full h-full"
+          style={{ imageRendering: 'pixelated' }}
+          data-testid="camera-canvas"
+        />
+      </div>
+
+      {/* Stats bar */}
+      <div className="grid grid-cols-4 gap-px bg-[#1E293B]/30 shrink-0">
+        <Stat icon={<Eye className="w-3 h-3" />} label="DET" value={vo_features_detected} color="text-cyan-400" />
+        <Stat icon={<Crosshair className="w-3 h-3" />} label="TRK" value={vo_features_tracked} color="text-emerald-400" />
+        <Stat icon={<Zap className="w-3 h-3" />} label="Q" value={`${qualityPct}%`} color={Number(qualityPct) > 50 ? 'text-emerald-400' : 'text-amber-400'} />
+        <Stat icon={null} label="TYPE" value={camera_type} color={typeColor} small />
       </div>
     </div>
   );
 }
 
-function Row({ label, value, color }) {
+function Stat({ icon, label, value, color = 'text-slate-400', small = false }) {
   return (
-    <div className="flex justify-between items-center py-0.5">
-      <span className="text-[10px] text-slate-600 uppercase">{label}</span>
-      <span className={`text-[11px] font-bold tabular-nums ${color || 'text-[#00F0FF]'}`}>{value}</span>
+    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-[#0A0C10]" data-testid={`camera-stat-${label.toLowerCase()}`}>
+      {icon && <span className="text-slate-600">{icon}</span>}
+      <span className="text-[8px] text-slate-600 uppercase">{label}</span>
+      <span className={`${small ? 'text-[8px]' : 'text-[10px]'} font-bold ${color} ml-auto`}>{value}</span>
     </div>
   );
 }

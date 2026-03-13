@@ -309,6 +309,13 @@ PYBIND11_MODULE(jtzero_native, m) {
             return camera_stats_to_dict(self);
         }, "Get camera pipeline stats as dict")
         
+        .def("get_frame_data", [](const jtzero::Runtime& self) {
+            const auto& frame = self.camera().current_frame();
+            if (!frame.info.valid) return py::bytes();
+            return py::bytes(reinterpret_cast<const char*>(frame.data),
+                             static_cast<size_t>(frame.info.width) * frame.info.height);
+        }, "Get latest camera frame as raw grayscale bytes")
+        
         .def("get_mavlink", [](const jtzero::Runtime& self) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")

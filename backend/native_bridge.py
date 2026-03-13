@@ -97,6 +97,13 @@ class NativeRuntime:
     def get_camera_stats(self) -> dict:
         return dict(self._rt.get_camera())
     
+    def get_frame_data(self) -> bytes:
+        """Get latest camera frame as raw grayscale bytes (320x240)."""
+        try:
+            return self._rt.get_frame_data()
+        except Exception:
+            return b''
+    
     def get_mavlink_stats(self) -> dict:
         return dict(self._rt.get_mavlink())
     

@@ -10,6 +10,7 @@ const API_ENDPOINTS = [
   { method: 'GET', path: '/api/threads', desc: 'Thread statistics (8 threads)' },
   { method: 'GET', path: '/api/engines', desc: 'Engine statistics (event, reflex, rule, memory, output)' },
   { method: 'GET', path: '/api/camera', desc: 'Camera pipeline + Visual Odometry' },
+  { method: 'GET', path: '/api/camera/frame', desc: 'Latest camera frame as PNG image' },
   { method: 'GET', path: '/api/mavlink', desc: 'MAVLink connection state' },
   { method: 'GET', path: '/api/performance', desc: 'CPU, memory, latency metrics' },
   { method: 'GET', path: '/api/simulator/config', desc: 'Current simulator parameters' },
