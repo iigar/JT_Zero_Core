@@ -3,7 +3,7 @@ import { Camera, Eye, Crosshair, Zap } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-export default function CameraPanel({ cameraData = {} }) {
+export default function CameraPanel({ camera }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
   const [streamActive, setStreamActive] = useState(false);
@@ -23,9 +23,9 @@ export default function CameraPanel({ cameraData = {} }) {
     vo_dx = 0,
     vo_dy = 0,
     vo_valid = false,
-  } = cameraData;
+  } = camera || {};
 
-  const isReal = camera_type !== 'SIMULATED' && camera_open;
+  const isReal = !['SIMULATED', 'SIM', 'NONE', ''].includes(camera_type) && camera_open;
 
   // Poll camera frames at ~3fps
   useEffect(() => {
