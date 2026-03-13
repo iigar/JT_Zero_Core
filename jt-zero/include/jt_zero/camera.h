@@ -217,6 +217,10 @@ public:
     
     // Get current feature state
     size_t active_features() const { return active_count_; }
+    
+    // Get feature positions (read-only access)
+    const std::array<FeaturePoint, MAX_FEATURES>& features() const { return features_; }
+    size_t feature_count() const { return active_count_; }
 
 private:
     FASTDetector detector_;
@@ -278,6 +282,9 @@ public:
     CameraPipelineStats get_stats() const;
     
     bool is_running() const { return running_; }
+    
+    // Get current VO feature positions
+    const VisualOdometry& vo() const { return vo_; }
 
 private:
     SimulatedCamera sim_camera_;

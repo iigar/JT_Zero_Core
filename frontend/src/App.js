@@ -34,6 +34,7 @@ function App() {
   const [camera, setCamera] = useState(null);
   const [mavlink, setMavlink] = useState(null);
   const [performance, setPerformance] = useState(null);
+  const [features, setFeatures] = useState([]);
   const [runtimeMode, setRuntimeMode] = useState('simulator');
   const [sensorModes, setSensorModes] = useState({});
   const historyRef = useRef([]);
@@ -47,6 +48,7 @@ function App() {
       if (data.camera) setCamera(data.camera);
       if (data.mavlink) setMavlink(data.mavlink);
       if (data.performance) setPerformance(data.performance);
+      if (data.features) setFeatures(data.features);
       if (data.runtime_mode) setRuntimeMode(data.runtime_mode);
       if (data.sensor_modes) setSensorModes(data.sensor_modes);
       if (data.recent_events) {
@@ -112,14 +114,14 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} runtimeMode={runtimeMode} events={events} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} runtimeMode={runtimeMode} events={events} features={features} />
         )}
         {activeTab === 'telemetry' && (
           <TelemetryTab state={state} history={history} performance={performance} runtimeMode={runtimeMode} threads={threads} />
         )}
         {activeTab === 'camera' && (
           <div className="h-full p-3">
-            <CameraPanel camera={camera} />
+            <CameraPanel camera={camera} features={features} />
           </div>
         )}
         {activeTab === 'mavlink' && (
@@ -150,7 +152,7 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, runtimeMode, events }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, runtimeMode, events, features }) {
   return (
     <div className="h-full flex overflow-hidden">
       {/* Compact sidebar */}
@@ -202,7 +204,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
         </div>
         {/* Row 2: Camera + MAVLink + Performance */}
         <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '220px' }}>
-          <div className="col-span-4 overflow-hidden"><CameraPanel camera={camera} /></div>
+          <div className="col-span-4 overflow-hidden"><CameraPanel camera={camera} features={features} /></div>
           <div className="col-span-4 overflow-hidden"><MAVLinkPanel mavlink={mavlink} /></div>
           <div className="col-span-4 overflow-hidden"><PerformancePanel performance={performance} runtimeMode={runtimeMode} /></div>
         </div>

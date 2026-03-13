@@ -104,6 +104,13 @@ class NativeRuntime:
         except Exception:
             return b''
     
+    def get_features(self) -> list:
+        """Get current VO feature positions [{x, y, tracked, response}, ...]."""
+        try:
+            return [dict(f) for f in self._rt.get_features()]
+        except Exception:
+            return []
+    
     def get_mavlink_stats(self) -> dict:
         return dict(self._rt.get_mavlink())
     

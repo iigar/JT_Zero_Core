@@ -177,6 +177,13 @@ async def get_engines():
 async def get_camera():
     return runtime.get_camera_stats()
 
+@app.get("/api/camera/features")
+async def get_camera_features():
+    """Get current VO feature positions."""
+    if hasattr(runtime, 'get_features'):
+        return runtime.get_features()
+    return []
+
 @app.get("/api/mavlink")
 async def get_mavlink():
     return runtime.get_mavlink_stats()
@@ -295,6 +302,7 @@ async def websocket_telemetry(ws: WebSocket):
             events = _filter_events(runtime.get_events(60), 10)
             camera = runtime.get_camera_stats()
             mavlink = runtime.get_mavlink_stats()
+            features = runtime.get_features() if hasattr(runtime, 'get_features') else []
             
             payload = {
                 "type": "telemetry",
@@ -306,6 +314,7 @@ async def websocket_telemetry(ws: WebSocket):
                 "recent_events": events,
                 "camera": camera,
                 "mavlink": mavlink,
+                "features": features,
                 "sensor_modes": {
                     "imu": "hardware" if hasattr(runtime, '_hw_imu') and runtime._hw_imu else "simulation",
                     "baro": "hardware" if hasattr(runtime, '_hw_baro') and runtime._hw_baro else "simulation",

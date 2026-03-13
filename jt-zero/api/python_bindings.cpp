@@ -316,6 +316,22 @@ PYBIND11_MODULE(jtzero_native, m) {
                              static_cast<size_t>(frame.info.width) * frame.info.height);
         }, "Get latest camera frame as raw grayscale bytes")
         
+        .def("get_features", [](const jtzero::Runtime& self) {
+            const auto& vo = self.camera().vo();
+            const auto& feats = vo.features();
+            size_t count = vo.feature_count();
+            py::list result;
+            for (size_t i = 0; i < count && i < jtzero::MAX_FEATURES; ++i) {
+                result.append(py::dict(
+                    "x"_a = feats[i].x,
+                    "y"_a = feats[i].y,
+                    "tracked"_a = feats[i].tracked,
+                    "response"_a = feats[i].response
+                ));
+            }
+            return result;
+        }, "Get current VO feature positions as list of dicts")
+        
         .def("get_mavlink", [](const jtzero::Runtime& self) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")
