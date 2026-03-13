@@ -163,7 +163,31 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
 
 static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
     auto ms = rt.mavlink().get_stats();
-    return py::dict(
+    auto fc = rt.mavlink().get_fc_telemetry();
+    
+    // Autopilot type string
+    std::string ap_str = "Unknown";
+    if (fc.heartbeat_valid) {
+        if (fc.fc_autopilot == 3) ap_str = "ArduPilot";
+        else if (fc.fc_autopilot == 12) ap_str = "PX4";
+    } else if (ms.state == jtzero::MAVLinkState::CONNECTED) {
+        ap_str = "Simulated";
+    }
+    
+    // MAV_TYPE string
+    std::string type_str = "UNKNOWN";
+    if (fc.heartbeat_valid) {
+        switch (fc.fc_type) {
+            case 1: type_str = "FIXED_WING"; break;
+            case 2: type_str = "QUADROTOR"; break;
+            case 13: type_str = "HEXAROTOR"; break;
+            case 14: type_str = "OCTOROTOR"; break;
+            case 15: type_str = "TRICOPTER"; break;
+            default: type_str = "TYPE_" + std::to_string(fc.fc_type); break;
+        }
+    }
+    
+    py::dict result(
         "state"_a = jtzero::mavstate_str(ms.state),
         "messages_sent"_a = ms.messages_sent,
         "messages_received"_a = ms.messages_received,
@@ -172,14 +196,33 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         "system_id"_a = static_cast<int>(ms.system_id),
         "component_id"_a = static_cast<int>(ms.component_id),
         "fc_system_id"_a = static_cast<int>(ms.fc_system_id),
-        "fc_autopilot"_a = "ArduPilot",
+        "fc_autopilot"_a = ap_str,
         "fc_firmware"_a = std::string(ms.fc_firmware),
-        "fc_type"_a = "QUADROTOR",
+        "fc_type"_a = type_str,
         "fc_armed"_a = ms.fc_armed,
         "vision_pos_sent"_a = ms.messages_sent / 3,
         "odometry_sent"_a = ms.messages_sent / 3,
         "optical_flow_sent"_a = ms.messages_sent / 6
     );
+    
+    // Add FC telemetry if available
+    if (fc.heartbeat_valid) {
+        result["fc_telemetry"] = py::dict(
+            "attitude_valid"_a = fc.attitude_valid,
+            "imu_valid"_a = fc.imu_valid,
+            "baro_valid"_a = fc.baro_valid,
+            "gps_valid"_a = fc.gps_valid,
+            "hud_valid"_a = fc.hud_valid,
+            "status_valid"_a = fc.status_valid,
+            "msg_count"_a = fc.msg_count,
+            "battery_voltage"_a = fc.battery_voltage,
+            "battery_remaining"_a = static_cast<int>(fc.battery_remaining),
+            "gps_fix"_a = static_cast<int>(fc.gps_fix),
+            "gps_sats"_a = static_cast<int>(fc.gps_sats)
+        );
+    }
+    
+    return result;
 }
 
 // ─── Helper: Recent events to Python list ────────────────

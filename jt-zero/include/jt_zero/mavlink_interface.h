@@ -145,6 +145,67 @@ struct MAVLinkStats {
     char     transport_info[64]{};       // e.g. "/dev/ttyAMA0@115200" or "127.0.0.1:14550"
 };
 
+// ─── Parsed FC Telemetry ─────────────────────────────────
+
+struct FCTelemetry {
+    // HEARTBEAT (msg 0)
+    uint8_t  fc_type{0};          // MAV_TYPE (2=QUADROTOR)
+    uint8_t  fc_autopilot{0};     // MAV_AUTOPILOT (3=ArduPilot)
+    uint8_t  base_mode{0};
+    uint32_t custom_mode{0};
+    uint8_t  system_status{0};
+    bool     armed{false};
+    bool     heartbeat_valid{false};
+    
+    // ATTITUDE (msg 30)
+    float roll{0};                // rad
+    float pitch{0};               // rad
+    float yaw{0};                 // rad
+    float rollspeed{0};           // rad/s
+    float pitchspeed{0};          // rad/s
+    float yawspeed{0};            // rad/s
+    bool  attitude_valid{false};
+    
+    // SCALED_IMU (msg 26)
+    float acc_x{0}, acc_y{0}, acc_z{0};     // m/s^2
+    float gyro_x{0}, gyro_y{0}, gyro_z{0};  // rad/s
+    float mag_x{0}, mag_y{0}, mag_z{0};     // gauss
+    bool  imu_valid{false};
+    
+    // SCALED_PRESSURE (msg 29)
+    float pressure{0};            // hPa
+    float temperature{0};         // Celsius
+    bool  baro_valid{false};
+    
+    // GPS_RAW_INT (msg 24)
+    double gps_lat{0};            // degrees
+    double gps_lon{0};            // degrees
+    float  gps_alt{0};            // m
+    float  gps_speed{0};          // m/s
+    uint8_t gps_fix{0};           // 0=none, 2=2D, 3=3D
+    uint8_t gps_sats{0};
+    bool   gps_valid{false};
+    
+    // VFR_HUD (msg 74)
+    float airspeed{0};            // m/s
+    float groundspeed{0};         // m/s
+    float alt{0};                 // m
+    float climb{0};               // m/s
+    int16_t heading{0};           // deg (0-360)
+    uint16_t throttle{0};         // %
+    bool  hud_valid{false};
+    
+    // SYS_STATUS (msg 1)
+    float battery_voltage{0};     // V
+    float battery_current{0};     // A
+    int8_t battery_remaining{-1}; // %
+    bool  status_valid{false};
+    
+    // Counters
+    uint32_t msg_count{0};
+    uint64_t last_update_us{0};
+};
+
 // ─── MAVLink Interface ──────────────────────────────────
 
 class MAVLinkInterface {
@@ -182,6 +243,10 @@ public:
     MAVTransport transport() const { return transport_; }
     MAVLinkStats get_stats() const;
     bool is_connected() const { return state_ == MAVLinkState::CONNECTED; }
+    
+    // Parsed FC telemetry (thread-safe read)
+    FCTelemetry get_fc_telemetry() const;
+    bool has_fc_data() const { return fc_telem_.heartbeat_valid; }
 
 private:
     MAVLinkState state_{MAVLinkState::DISCONNECTED};
@@ -219,6 +284,22 @@ private:
     // Simulated FC state
     uint8_t fc_system_id_{1};
     bool    fc_armed_{false};
+    
+    // Parsed FC telemetry
+    FCTelemetry fc_telem_;
+    mutable std::atomic<bool> telem_lock_{false};  // spinlock for copy
+    
+    // MAVLink frame parser
+    static constexpr size_t RX_BUF_SIZE = 2048;
+    uint8_t rx_buf_[RX_BUF_SIZE]{};
+    size_t  rx_head_{0};
+    size_t  rx_tail_{0};
+    
+    // Process incoming bytes: parse MAVLink frames and update fc_telem_
+    void process_incoming();
+    
+    // Parse a single MAVLink frame payload by message ID
+    void handle_message(uint32_t msg_id, const uint8_t* payload, uint8_t len, uint8_t sysid);
     
     // Connection monitoring
     static constexpr uint64_t HEARTBEAT_TIMEOUT_US = 3'000'000; // 3 seconds

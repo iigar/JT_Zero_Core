@@ -638,7 +638,76 @@ void Runtime::mavlink_loop() {
         VOResult vo = camera_.last_vo_result();
         
         // MAVLink tick: sends heartbeat, vision position, odometry, optical flow
+        // Also calls process_incoming() which parses FC responses
         mavlink_.tick(state_, vo);
+        
+        // If FC telemetry is available, feed it into system state
+        if (mavlink_.has_fc_data() && !simulator_mode_) {
+            FCTelemetry fc = mavlink_.get_fc_telemetry();
+            
+            // Attitude from FC (rad → degrees)
+            if (fc.attitude_valid) {
+                state_.roll  = fc.roll  * 57.2957795f;
+                state_.pitch = fc.pitch * 57.2957795f;
+                state_.yaw   = fc.yaw   * 57.2957795f;
+            }
+            
+            // IMU from FC
+            if (fc.imu_valid) {
+                state_.imu.acc_x  = fc.acc_x;
+                state_.imu.acc_y  = fc.acc_y;
+                state_.imu.acc_z  = fc.acc_z;
+                state_.imu.gyro_x = fc.gyro_x;
+                state_.imu.gyro_y = fc.gyro_y;
+                state_.imu.gyro_z = fc.gyro_z;
+                state_.imu.valid  = true;
+                state_.imu.timestamp_us = now_us();
+            }
+            
+            // Barometer from FC
+            if (fc.baro_valid) {
+                state_.baro.pressure    = fc.pressure;
+                state_.baro.temperature = fc.temperature;
+                // Altitude from pressure (ISA model)
+                state_.baro.altitude = 44330.0f * (1.0f - std::pow(fc.pressure / 1013.25f, 0.1903f));
+                state_.baro.valid = true;
+                state_.baro.timestamp_us = now_us();
+            }
+            
+            // GPS from FC
+            if (fc.gps_valid) {
+                state_.gps.lat        = fc.gps_lat;
+                state_.gps.lon        = fc.gps_lon;
+                state_.gps.alt        = fc.gps_alt;
+                state_.gps.speed      = fc.gps_speed;
+                state_.gps.fix_type   = fc.gps_fix;
+                state_.gps.satellites = fc.gps_sats;
+                state_.gps.valid      = true;
+                state_.gps.timestamp_us = now_us();
+            }
+            
+            // VFR HUD — altitude & speed
+            if (fc.hud_valid) {
+                state_.altitude_agl = fc.alt;
+                state_.vx = fc.groundspeed;
+            }
+            
+            // Battery from FC
+            if (fc.status_valid) {
+                state_.battery_voltage = fc.battery_voltage;
+                if (fc.battery_remaining >= 0) {
+                    state_.battery_percent = static_cast<float>(fc.battery_remaining);
+                }
+            }
+            
+            // Armed state
+            state_.armed = fc.armed;
+            if (fc.armed && state_.flight_mode == FlightMode::IDLE) {
+                state_.flight_mode = FlightMode::ARMED;
+            } else if (!fc.armed && state_.flight_mode == FlightMode::ARMED) {
+                state_.flight_mode = FlightMode::IDLE;
+            }
+        }
         
         // Emit MAVLink heartbeat event periodically
         if (thread_stats_[5].loop_count.load(std::memory_order_relaxed) % 50 == 0) {

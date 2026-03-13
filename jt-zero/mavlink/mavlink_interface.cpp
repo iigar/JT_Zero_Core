@@ -282,19 +282,214 @@ bool MAVLinkInterface::send_heartbeat() {
         msgs_received_.fetch_add(1, std::memory_order_relaxed);
         fc_armed_ = false;
     } else {
-        // On real transport, check for incoming heartbeat response
-        uint8_t buf[280];
-        int n = recv_raw(buf, sizeof(buf));
-        if (n > 0) {
-            msgs_received_.fetch_add(1, std::memory_order_relaxed);
-            if (state_ == MAVLinkState::CONNECTING) {
-                state_ = MAVLinkState::CONNECTED;
-                std::printf("[MAVLink] Connected to FC (received response)\n");
-            }
-        }
+        // Process all incoming data (parses MAVLink frames)
+        process_incoming();
     }
     
     return true;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAVLink Frame Parser
+// ═══════════════════════════════════════════════════════════
+
+void MAVLinkInterface::process_incoming() {
+    // Read all available bytes into ring buffer
+    while (true) {
+        size_t space = RX_BUF_SIZE - rx_head_;
+        if (space == 0) {
+            // Buffer full — discard oldest data
+            rx_tail_ = RX_BUF_SIZE / 2;
+            std::memmove(rx_buf_, rx_buf_ + rx_tail_, rx_head_ - rx_tail_);
+            rx_head_ -= rx_tail_;
+            rx_tail_ = 0;
+            space = RX_BUF_SIZE - rx_head_;
+        }
+        int n = recv_raw(rx_buf_ + rx_head_, space);
+        if (n <= 0) break;
+        rx_head_ += static_cast<size_t>(n);
+    }
+    
+    // Parse frames from buffer
+    while (rx_tail_ + 12 <= rx_head_) {  // Minimum frame: STX(1) + len(1) + header(8) + crc(2)
+        // Find start-of-frame
+        uint8_t stx = rx_buf_[rx_tail_];
+        
+        if (stx == 0xFD) {
+            // MAVLink v2 frame
+            uint8_t payload_len = rx_buf_[rx_tail_ + 1];
+            size_t frame_len = 12 + payload_len;  // STX + len + incompat + compat + seq + sysid + compid + msgid(3) + payload + crc(2)
+            
+            if (rx_tail_ + frame_len > rx_head_) break;  // Incomplete frame
+            
+            uint8_t sysid = rx_buf_[rx_tail_ + 5];
+            uint32_t msg_id = rx_buf_[rx_tail_ + 7]
+                           | (static_cast<uint32_t>(rx_buf_[rx_tail_ + 8]) << 8)
+                           | (static_cast<uint32_t>(rx_buf_[rx_tail_ + 9]) << 16);
+            const uint8_t* payload = rx_buf_ + rx_tail_ + 10;
+            
+            handle_message(msg_id, payload, payload_len, sysid);
+            msgs_received_.fetch_add(1, std::memory_order_relaxed);
+            
+            if (state_ == MAVLinkState::CONNECTING) {
+                state_ = MAVLinkState::CONNECTED;
+                std::printf("[MAVLink] Connected to FC (sysid=%d, first msg=%u)\n", sysid, msg_id);
+            }
+            last_heartbeat_us_ = now_us();
+            
+            rx_tail_ += frame_len;
+            
+        } else if (stx == 0xFE) {
+            // MAVLink v1 frame
+            uint8_t payload_len = rx_buf_[rx_tail_ + 1];
+            size_t frame_len = 8 + payload_len;  // STX + len + seq + sysid + compid + msgid + payload + crc(2)
+            
+            if (rx_tail_ + frame_len > rx_head_) break;
+            
+            uint8_t sysid = rx_buf_[rx_tail_ + 3];
+            uint32_t msg_id = rx_buf_[rx_tail_ + 5];
+            const uint8_t* payload = rx_buf_ + rx_tail_ + 6;
+            
+            handle_message(msg_id, payload, payload_len, sysid);
+            msgs_received_.fetch_add(1, std::memory_order_relaxed);
+            
+            if (state_ == MAVLinkState::CONNECTING) {
+                state_ = MAVLinkState::CONNECTED;
+                std::printf("[MAVLink] Connected via v1 (sysid=%d, msg=%u)\n", sysid, msg_id);
+            }
+            last_heartbeat_us_ = now_us();
+            
+            rx_tail_ += frame_len;
+            
+        } else {
+            // Not a valid start byte — skip
+            rx_tail_++;
+        }
+    }
+    
+    // Compact buffer if we've consumed a lot
+    if (rx_tail_ > RX_BUF_SIZE / 2) {
+        size_t remaining = rx_head_ - rx_tail_;
+        if (remaining > 0) {
+            std::memmove(rx_buf_, rx_buf_ + rx_tail_, remaining);
+        }
+        rx_head_ = remaining;
+        rx_tail_ = 0;
+    }
+}
+
+// Helper: read little-endian values from buffer
+static inline float    read_f32(const uint8_t* p) { float v; std::memcpy(&v, p, 4); return v; }
+static inline uint32_t read_u32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
+static inline int32_t  read_i32(const uint8_t* p) { int32_t v; std::memcpy(&v, p, 4); return v; }
+static inline uint16_t read_u16(const uint8_t* p) { uint16_t v; std::memcpy(&v, p, 2); return v; }
+static inline int16_t  read_i16(const uint8_t* p) { int16_t v; std::memcpy(&v, p, 2); return v; }
+static inline uint64_t read_u64(const uint8_t* p) { uint64_t v; std::memcpy(&v, p, 8); return v; }
+
+void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t len, uint8_t sysid) {
+    fc_system_id_ = sysid;
+    fc_telem_.last_update_us = now_us();
+    fc_telem_.msg_count++;
+    
+    switch (msg_id) {
+        
+    case 0: {  // HEARTBEAT (9 bytes)
+        if (len < 9) break;
+        fc_telem_.custom_mode  = read_u32(p);
+        fc_telem_.fc_type      = p[4];
+        fc_telem_.fc_autopilot = p[5];
+        fc_telem_.base_mode    = p[6];
+        fc_telem_.system_status = p[7];
+        fc_telem_.armed        = (p[6] & 0x80) != 0;  // MAV_MODE_FLAG_SAFETY_ARMED
+        fc_telem_.heartbeat_valid = true;
+        fc_armed_ = fc_telem_.armed;
+        break;
+    }
+    
+    case 1: {  // SYS_STATUS (31 bytes)
+        if (len < 31) break;
+        // bytes 0-11: sensors present/enabled/health (3x uint32)
+        fc_telem_.battery_voltage   = read_u16(p + 14) * 0.001f;  // mV → V
+        fc_telem_.battery_current   = read_i16(p + 16) * 0.01f;   // cA → A
+        fc_telem_.battery_remaining = static_cast<int8_t>(p[30]);  // %
+        fc_telem_.status_valid = true;
+        break;
+    }
+    
+    case 24: {  // GPS_RAW_INT (30+ bytes)
+        if (len < 30) break;
+        // uint64_t time_usec at p+0
+        fc_telem_.gps_lat   = read_i32(p + 8) * 1.0e-7;   // degE7 → deg
+        fc_telem_.gps_lon   = read_i32(p + 12) * 1.0e-7;
+        fc_telem_.gps_alt   = read_i32(p + 16) * 0.001f;   // mm → m
+        // eph at p+20, epv at p+22
+        fc_telem_.gps_speed = read_u16(p + 24) * 0.01f;    // cm/s → m/s
+        // cog at p+26
+        fc_telem_.gps_fix   = p[28];
+        fc_telem_.gps_sats  = p[29];
+        fc_telem_.gps_valid = (fc_telem_.gps_fix >= 2);
+        break;
+    }
+    
+    case 26: {  // SCALED_IMU (22+ bytes)
+        if (len < 22) break;
+        // uint32_t time_boot_ms at p+0
+        fc_telem_.acc_x  = read_i16(p + 4) * 0.00981f;   // mG → m/s² (mG * 9.81/1000)
+        fc_telem_.acc_y  = read_i16(p + 6) * 0.00981f;
+        fc_telem_.acc_z  = read_i16(p + 8) * 0.00981f;
+        fc_telem_.gyro_x = read_i16(p + 10) * 0.001f;     // mrad/s → rad/s
+        fc_telem_.gyro_y = read_i16(p + 12) * 0.001f;
+        fc_telem_.gyro_z = read_i16(p + 14) * 0.001f;
+        fc_telem_.mag_x  = read_i16(p + 16) * 0.001f;     // mgauss → gauss
+        fc_telem_.mag_y  = read_i16(p + 18) * 0.001f;
+        fc_telem_.mag_z  = read_i16(p + 20) * 0.001f;
+        fc_telem_.imu_valid = true;
+        break;
+    }
+    
+    case 29: {  // SCALED_PRESSURE (14 bytes)
+        if (len < 14) break;
+        // uint32_t time_boot_ms at p+0
+        fc_telem_.pressure    = read_f32(p + 4);            // hPa
+        // press_diff at p+8
+        fc_telem_.temperature = read_i16(p + 12) * 0.01f;   // cdeg → deg C
+        fc_telem_.baro_valid = true;
+        break;
+    }
+    
+    case 30: {  // ATTITUDE (28 bytes)
+        if (len < 28) break;
+        // uint32_t time_boot_ms at p+0
+        fc_telem_.roll       = read_f32(p + 4);    // rad
+        fc_telem_.pitch      = read_f32(p + 8);    // rad
+        fc_telem_.yaw        = read_f32(p + 12);   // rad
+        fc_telem_.rollspeed  = read_f32(p + 16);   // rad/s
+        fc_telem_.pitchspeed = read_f32(p + 20);   // rad/s
+        fc_telem_.yawspeed   = read_f32(p + 24);   // rad/s
+        fc_telem_.attitude_valid = true;
+        break;
+    }
+    
+    case 74: {  // VFR_HUD (20 bytes)
+        if (len < 20) break;
+        fc_telem_.airspeed    = read_f32(p);
+        fc_telem_.groundspeed = read_f32(p + 4);
+        fc_telem_.heading     = read_i16(p + 8);
+        fc_telem_.throttle    = read_u16(p + 10);
+        fc_telem_.alt         = read_f32(p + 12);
+        fc_telem_.climb       = read_f32(p + 16);
+        fc_telem_.hud_valid = true;
+        break;
+    }
+    
+    default:
+        // Unknown message — ignore
+        break;
+    }
+}
+
+FCTelemetry MAVLinkInterface::get_fc_telemetry() const {
+    return fc_telem_;  // Simple copy (all POD)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -378,6 +573,11 @@ MAVOpticalFlowRad MAVLinkInterface::build_optical_flow_rad(
 void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     if (state_ == MAVLinkState::DISCONNECTED) return;
     
+    // Always process incoming data (parse MAVLink frames)
+    if (!simulated_) {
+        process_incoming();
+    }
+    
     check_connection();
     
     if (heartbeat_count_ % 50 == 0) {
@@ -417,13 +617,29 @@ MAVLinkStats MAVLinkInterface::get_stats() const {
     stats.fc_system_id = fc_system_id_;
     stats.fc_armed = fc_armed_;
     
-    if (state_ == MAVLinkState::CONNECTED) {
+    // Link quality based on message rate
+    if (state_ == MAVLinkState::CONNECTED && fc_telem_.msg_count > 0) {
         stats.link_quality = 0.95f;
+        stats.fc_autopilot = fc_telem_.fc_autopilot;
+        stats.fc_type = fc_telem_.fc_type;
+    } else if (state_ == MAVLinkState::CONNECTED) {
+        stats.link_quality = 0.5f;
     } else {
         stats.link_quality = 0;
     }
     
-    std::strncpy(stats.fc_firmware, "ArduPilot 4.5.0", sizeof(stats.fc_firmware) - 1);
+    // FC firmware string based on detected autopilot type
+    if (fc_telem_.heartbeat_valid) {
+        const char* ap = (fc_telem_.fc_autopilot == 3) ? "ArduPilot" : 
+                         (fc_telem_.fc_autopilot == 12) ? "PX4" : "Unknown";
+        const char* tp = (fc_telem_.fc_type == 2) ? "QUADROTOR" :
+                         (fc_telem_.fc_type == 1) ? "FIXED_WING" :
+                         (fc_telem_.fc_type == 13) ? "HEXAROTOR" : "OTHER";
+        std::snprintf(stats.fc_firmware, sizeof(stats.fc_firmware), "%s %s", ap, tp);
+    } else {
+        std::strncpy(stats.fc_firmware, simulated_ ? "Simulated" : "Waiting...", sizeof(stats.fc_firmware) - 1);
+    }
+    
     std::strncpy(stats.transport_info, transport_info_, sizeof(stats.transport_info) - 1);
     
     return stats;

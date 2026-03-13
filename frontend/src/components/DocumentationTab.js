@@ -431,7 +431,7 @@ function WiringSection() {
 
 
 const FC_CONFIGS = [
-  { fc: 'Matek H743-SLIM V3', uart: 'UART6', pins: 'TX6 / RX6', serial: 'SERIAL6', rec: true },
+  { fc: 'Matek H743-SLIM V3', uart: 'UART3', pins: 'TX3 / RX3', serial: 'SERIAL4', rec: true },
   { fc: 'SpeedyBee F405 V4', uart: 'UART4', pins: 'TX4 / RX4', serial: 'SERIAL4', rec: false },
   { fc: 'Pixhawk 2.4.8', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
   { fc: 'Cube Orange+', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
@@ -439,7 +439,7 @@ const FC_CONFIGS = [
 
 const ARDUPILOT_PARAMS = [
   { param: 'SERIALx_PROTOCOL', value: '2', desc: 'MAVLink2 протокол' },
-  { param: 'SERIALx_BAUD', value: '921', desc: '921600 бод' },
+  { param: 'SERIALx_BAUD', value: '115', desc: '115200 бод' },
   { param: 'VISO_TYPE', value: '1', desc: 'MAVLink vision position' },
   { param: 'EK3_SRC1_POSXY', value: '6', desc: 'ExternalNav (Visual Odometry)' },
   { param: 'EK3_SRC1_VELXY', value: '6', desc: 'ExternalNav velocity' },
@@ -487,31 +487,44 @@ function FCSection() {
             STM32H743 процесор, 7 UART портів, вбудований барометр DPS310, гіроскоп ICM42688P.
           </p>
 
-          {/* Board layout */}
+          {/* Real hardware images */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-black/30 border border-[#1E293B] rounded-sm p-2">
+              <h5 className="text-[8px] text-cyan-400 font-bold uppercase mb-1">Pi Zero 2W — Pinout</h5>
+              <img 
+                src="https://customer-assets.emergentagent.com/job_005e4ff9-18ff-4dd0-95cc-8a677768a88f/artifacts/8xhhmnsw_Raspberry%20Pi%20Zero%20W%202%20pinout1.png"
+                alt="Raspberry Pi Zero 2W pinout"
+                className="w-full rounded-sm"
+                data-testid="pi-pinout-img"
+              />
+              <p className="text-[7px] text-slate-500 mt-1">Pin 8 (GPIO14) = TX, Pin 10 (GPIO15) = RX, Pin 6 = GND</p>
+            </div>
+            <div className="bg-black/30 border border-[#1E293B] rounded-sm p-2">
+              <h5 className="text-[8px] text-cyan-400 font-bold uppercase mb-1">Matek H743-SLIM V3</h5>
+              <img 
+                src="https://customer-assets.emergentagent.com/job_005e4ff9-18ff-4dd0-95cc-8a677768a88f/artifacts/jvm9rhy3_poletnyj-kontroller-matek-h743-slim-v3-3.jpg"
+                alt="Matek H743-SLIM V3 board"
+                className="w-full rounded-sm"
+                data-testid="matek-board-img"
+              />
+              <p className="text-[7px] text-slate-500 mt-1">TX3/RX3 на нижньому лівому краю плати (поряд з TX2/RX2)</p>
+            </div>
+          </div>
+
+          {/* Board UART mapping */}
           <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3">
-            <h4 className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-2">Розташування UART6 на платі</h4>
+            <h4 className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-2">UART маппінг Matek H743 (ArduPilot)</h4>
             <pre className="text-[8px] text-slate-400 font-mono leading-relaxed">{
-`  Matek H743-SLIM V3 (вигляд зверху)
-  ┌────────────────────────────────────────────┐
-  │  USB-C        [M1] [M2] [M3] [M4]         │
-  │                                            │
-  │  ┌──────┐   ┌──────────────────────┐       │
-  │  │UART1 │   │    STM32H743         │       │
-  │  │TX1/RX1   │    ICM42688P (Gyro)  │       │
-  │  └──────┘   │    DPS310 (Baro)     │       │
-  │             └──────────────────────┘       │
-  │                                            │
-  │  ┌──────┐   ┌──────┐   `}<span className="text-emerald-400">{`┌──────────────┐`}</span>{`
-  │  │UART4 │   │UART5 │   `}<span className="text-emerald-400">{`│ UART6        │`}</span>{`
-  │  │TX4/RX4   │TX5/RX5   `}<span className="text-emerald-400">{`│ TX6 ← Pi RX  │`}</span>{`
-  │  └──────┘   └──────┘   `}<span className="text-emerald-400">{`│ RX6 ← Pi TX  │`}</span>{`
-  │                         `}<span className="text-emerald-400">{`│ GND          │`}</span>{`
-  │  [M5] [M6] [M7] [M8]   `}<span className="text-emerald-400">{`└──────────────┘`}</span>{`
-  └────────────────────────────────────────────┘`
+`  Matek H743-SLIM V3 — UART → ArduPilot SERIAL
+  ──────────────────────────────────────────────
+  SERIAL1 = UART7 (TX7/RX7)  — з RTS/CTS
+  SERIAL2 = UART1 (TX1/RX1)
+  SERIAL3 = UART2 (TX2/RX2)
+  `}<span className="text-emerald-400 font-bold">{`SERIAL4 = UART3 (TX3/RX3)  <-- JT-Zero (MAVLink2, 115200)`}</span>{`
+  SERIAL5 = UART8
+  SERIAL6 = UART4 (TX4/RX4)
+  SERIAL7 = UART6 (TX6/RX6)  — за замовч. RCIN`
             }</pre>
-            <p className="text-[8px] text-slate-500 mt-1">
-              Документація Matek: <span className="text-cyan-400">mateksys.com/?portfolio=h743-slim-v3</span>
-            </p>
           </div>
 
           {/* Wiring table */}
@@ -527,8 +540,8 @@ function FCSection() {
               </thead>
               <tbody>
                 {[
-                  { n: '1', from: 'Pin 8 (GPIO14, TX)', to: 'RX6 (UART6 RX)', color: 'Зелений', colorClass: 'text-emerald-400' },
-                  { n: '2', from: 'Pin 10 (GPIO15, RX)', to: 'TX6 (UART6 TX)', color: 'Жовтий', colorClass: 'text-amber-400' },
+                  { n: '1', from: 'Pin 8 (GPIO14, TX)', to: 'RX3 (UART3 RX)', color: 'Зелений', colorClass: 'text-emerald-400' },
+                  { n: '2', from: 'Pin 10 (GPIO15, RX)', to: 'TX3 (UART3 TX)', color: 'Жовтий', colorClass: 'text-amber-400' },
                   { n: '3', from: 'Pin 6 (GND)', to: 'GND (будь-який)', color: 'Чорний', colorClass: 'text-slate-400' },
                 ].map(({ n, from, to, color, colorClass }) => (
                   <tr key={n} className="border-t border-[#1E293B]/50">
@@ -545,15 +558,15 @@ function FCSection() {
           {/* ArduPilot params for Matek */}
           <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3 space-y-2">
             <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
-              ArduPilot параметри для Matek H743 UART6
+              ArduPilot параметри для Matek H743 SERIAL4 (UART3)
             </h4>
             <p className="text-[8px] text-slate-500">
               Mission Planner → Config/Tuning → Full Parameter List
             </p>
             <code className="text-[9px] font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
-`# === UART6 — Companion Computer (JT-Zero) ===
-SERIAL6_PROTOCOL = 2          # MAVLink2
-SERIAL6_BAUD     = 921        # 921600 бод
+`# === SERIAL4 (UART3) — Companion Computer (JT-Zero) ===
+SERIAL4_PROTOCOL = 2          # MAVLink2
+SERIAL4_BAUD     = 115        # 115200 бод
 
 # === EKF — приймати Visual Odometry ===
 VISO_TYPE        = 1          # MAVLink vision position
@@ -582,7 +595,7 @@ SYSID_THISMAV    = 1          # System ID`
 `# Відредагуйте /home/pi/jt-zero/backend/.env:
 MAVLINK_TRANSPORT=serial
 MAVLINK_DEVICE=/dev/ttyAMA0
-MAVLINK_BAUD=921600
+MAVLINK_BAUD=115200
 
 # Перезапустіть:
 sudo systemctl restart jtzero`
