@@ -261,39 +261,44 @@ void Runtime::sensor_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        // IMU: every cycle (200 Hz)
-        imu_.update();
-        state_.imu = imu_.data();
+        // When real FC telemetry is available, skip simulated sensor updates
+        bool fc_active = !simulator_mode_ && mavlink_.has_fc_data();
         
-        // Derive attitude from accelerometer (simplified)
-        state_.roll  = std::atan2(state_.imu.acc_y, state_.imu.acc_z) * 57.2958f;
-        state_.pitch = std::atan2(-state_.imu.acc_x, 
-                       std::sqrt(state_.imu.acc_y * state_.imu.acc_y + 
-                                 state_.imu.acc_z * state_.imu.acc_z)) * 57.2958f;
-        state_.yaw  += state_.imu.gyro_z * (1.0f / HZ) * 57.2958f;
-        if (state_.yaw > 360.0f) state_.yaw -= 360.0f;
-        if (state_.yaw < 0.0f) state_.yaw += 360.0f;
-        
-        // Barometer: every 4th cycle (50 Hz)
-        if (cycle % 4 == 0) {
-            baro_.update();
-            state_.baro = baro_.data();
-            state_.altitude_agl = state_.baro.altitude;
+        if (!fc_active) {
+            // IMU: every cycle (200 Hz)
+            imu_.update();
+            state_.imu = imu_.data();
+            
+            // Derive attitude from accelerometer (simplified)
+            state_.roll  = std::atan2(state_.imu.acc_y, state_.imu.acc_z) * 57.2958f;
+            state_.pitch = std::atan2(-state_.imu.acc_x, 
+                           std::sqrt(state_.imu.acc_y * state_.imu.acc_y + 
+                                     state_.imu.acc_z * state_.imu.acc_z)) * 57.2958f;
+            state_.yaw  += state_.imu.gyro_z * (1.0f / HZ) * 57.2958f;
+            if (state_.yaw > 360.0f) state_.yaw -= 360.0f;
+            if (state_.yaw < 0.0f) state_.yaw += 360.0f;
+            
+            // Barometer: every 4th cycle (50 Hz)
+            if (cycle % 4 == 0) {
+                baro_.update();
+                state_.baro = baro_.data();
+                state_.altitude_agl = state_.baro.altitude;
+            }
+            
+            // GPS: every 20th cycle (10 Hz)
+            if (cycle % 20 == 0) {
+                gps_sensor_.update();
+                state_.gps = gps_sensor_.data();
+            }
         }
         
-        // GPS: every 20th cycle (10 Hz)
-        if (cycle % 20 == 0) {
-            gps_sensor_.update();
-            state_.gps = gps_sensor_.data();
-        }
-        
-        // Rangefinder: every 4th cycle (50 Hz)
+        // Rangefinder: every 4th cycle (50 Hz) — keep even with FC (no rangefinder msg)
         if (cycle % 4 == 1) {
             range_.update();
             state_.range = range_.data();
         }
         
-        // Optical Flow: every 4th cycle (50 Hz)
+        // Optical Flow: every 4th cycle (50 Hz) — keep even with FC
         if (cycle % 4 == 2) {
             flow_.update();
             state_.flow = flow_.data();
