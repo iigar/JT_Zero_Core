@@ -579,6 +579,22 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         break;
     }
     
+    case 27: {  // RAW_IMU — same as SCALED_IMU but uint64_t time (offset +4)
+        if (len < 14) break;
+        // uint64_t time_usec at p+0 (8 bytes, vs 4 in SCALED_IMU)
+        fc_telem_.acc_x  = safe_i16(8) * 0.00981f;    // mG → m/s²
+        fc_telem_.acc_y  = safe_i16(10) * 0.00981f;
+        fc_telem_.acc_z  = safe_i16(12) * 0.00981f;
+        fc_telem_.gyro_x = safe_i16(14) * 0.001f;     // mrad/s → rad/s
+        fc_telem_.gyro_y = safe_i16(16) * 0.001f;
+        fc_telem_.gyro_z = safe_i16(18) * 0.001f;
+        fc_telem_.mag_x  = safe_i16(20) * 0.001f;     // mgauss → gauss
+        fc_telem_.mag_y  = safe_i16(22) * 0.001f;
+        fc_telem_.mag_z  = safe_i16(24) * 0.001f;
+        fc_telem_.imu_valid = true;
+        break;
+    }
+    
     case 29: {  // SCALED_PRESSURE — need press_abs at offset 4
         if (len < 8) break;
         fc_telem_.pressure    = safe_f32(4);
@@ -596,6 +612,23 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         fc_telem_.pitchspeed = safe_f32(20);
         fc_telem_.yawspeed   = safe_f32(24);
         fc_telem_.attitude_valid = true;
+        break;
+    }
+    
+    case 33: {  // GLOBAL_POSITION_INT — fused GPS+INS position
+        if (len < 20) break;
+        // uint32_t time_boot_ms at p+0
+        double lat = safe_i32(4) * 1.0e-7;
+        double lon = safe_i32(8) * 1.0e-7;
+        if (lat != 0.0 || lon != 0.0) {
+            fc_telem_.gps_lat = lat;
+            fc_telem_.gps_lon = lon;
+            fc_telem_.gps_alt = safe_i32(12) * 0.001f;  // mm → m (AMSL)
+            // relative_alt at offset 16 (mm AGL)
+            float rel_alt = safe_i32(16) * 0.001f;
+            if (rel_alt != 0.0f) fc_telem_.alt = rel_alt;
+            fc_telem_.gps_valid = true;
+        }
         break;
     }
     
