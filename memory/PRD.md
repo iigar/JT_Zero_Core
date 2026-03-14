@@ -3,83 +3,82 @@
 ## Original Problem Statement
 JT-Zero robotics runtime for drone autonomy on Raspberry Pi Zero 2 W.
 C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
+Long-range flight capability: 5+ km RTL with VO+IMU only (no GPS, no compass).
 
 ## Architecture
 ```
 /app
 ├── backend/
-│   ├── server.py            # FastAPI + WebSocket (atomic snapshot) + camera
-│   ├── native_bridge.py     # C++ wrapper
-│   ├── simulator.py         # Python fallback for non-Pi
+│   ├── server.py            # FastAPI + WebSocket (atomic snapshot)
+│   ├── native_bridge.py     # C++ wrapper + VO field defaults
+│   ├── simulator.py         # Python fallback with new VO fields
 │   ├── diagnostics.py       # Hardware scanning
 │   ├── system_metrics.py    # OS metrics via psutil
-│   └── tests/test_jtzero_api.py  # 77 tests
+│   └── tests/test_jtzero_api.py  # 81 tests
 ├── frontend/src/
 │   ├── App.js               # Throttled state (5Hz), sensorModes propagation
 │   ├── components/
-│   │   ├── CameraPanel.js
-│   │   ├── MAVLinkPanel.js     # React.memo
-│   │   ├── SensorPanels.js     # React.memo + SourceBadge (HW/MAV/SIM)
-│   │   ├── PerformancePanel.js  # React.memo
+│   │   ├── CameraPanel.js     # 5 stats: DET/INL/CONF/DIST/ERR
+│   │   ├── MAVLinkPanel.js    # React.memo, GCS heartbeat filtered
+│   │   ├── SensorPanels.js    # React.memo + SourceBadge (HW/MAV/SIM)
+│   │   ├── PerformancePanel.js # React.memo
 │   │   ├── DiagnosticsPanel.js
-│   │   ├── TelemetryCharts.js
-│   │   ├── DocumentationTab.js  # QuickStartSection (API health checks)
+│   │   ├── DocumentationTab.js # QuickStartSection (8 API checks)
 │   │   └── SettingsTab.js
 │   └── hooks/useApi.js
 ├── jt-zero/                 # C++ Core
-│   ├── README.md            # Beginner-friendly overview
-│   ├── DEPLOYMENT.md        # Full install (online + offline ZIP/USB)
-│   ├── SYSTEM.md            # Architecture, VO algorithm, characteristics
+│   ├── README.md
+│   ├── DEPLOYMENT.md        # Online + offline install
+│   ├── SYSTEM.md            # Architecture, VO algorithm
 │   ├── COMMANDS.md          # Complete command reference
-│   ├── FC_CONNECTION.md     # Flight controller wiring
+│   ├── FC_CONNECTION.md     # FC wiring
+│   ├── LONG_RANGE_FLIGHT.md # 5km VO config + ArduPilot params
 │   ├── create_archive.sh    # Installer archive generator
-│   ├── include/jt_zero/
-│   │   └── mavlink_interface.h  # Added stream retry fields
-│   ├── mavlink/
-│   │   └── mavlink_interface.cpp  # HEARTBEAT filter + SET_MESSAGE_INTERVAL + retry
-│   └── api/
-│       └── python_bindings.cpp  # Expanded MAV_TYPE mapping
+│   ├── camera/camera_pipeline.cpp  # Median+MAD, Kalman, IMU validation
+│   ├── include/jt_zero/camera.h    # VOResult with confidence/uncertainty
+│   ├── mavlink/mavlink_interface.cpp # Confidence covariance, HEARTBEAT filter
+│   └── api/python_bindings.cpp      # New VO fields exposed
 └── memory/PRD.md
 ```
 
-## Completed Features (Latest Session - 2026-03-14)
+## Completed (Latest Session 2026-03-14)
+
+### Long-Range VO Improvements (5km target)
+- **Median + MAD outlier rejection** — replaces simple mean, rejects 10-30% bad features
+- **Kalman filter for velocity** — smooths noise, reduces random walk drift
+- **IMU-aided cross-validation** — rejects VO frames inconsistent with IMU
+- **Confidence-based covariance** — ArduPilot EKF knows when VO is unreliable
+- **Position freeze** — stops updating when confidence < 15% (prevents wild drift)
+- **Position uncertainty tracking** — estimates accumulated drift in meters
+- **Total distance tracking** — tracks total path length
+
+### Frontend Updates
+- Camera/VO panel: 5 stats (DET/INL/CONF/DIST/ERR) with color coding
+- Sensor badges (HW/MAV/SIM) on IMU, Barometer, GPS panels
+- GPS conditional display (Simulated/No Fix/Real)
+- Quick Start interactive checklist in Docs tab (8 API checks)
 
 ### Bug Fixes
-- **P0: MAVLink data jitter** — Throttled frontend 10Hz→5Hz, React.memo on components
-- **MAVLink "Unknown" FC values** — C++ HEARTBEAT filter skips GCS (MAV_TYPE=6,0,27,18)
-- **GPS showing "enabled" when simulated** — Added sensor source badges (HW/MAV/SIM)
-- **sensorModes prop not passed** — Fixed DashboardTab + TelemetryTab
+- MAVLink "Unknown" FC values — HEARTBEAT filter ignores GCS
+- GPS "enabled" when simulated — source badges
+- Frontend jitter — throttled 10Hz→5Hz + React.memo
+- Stream requests retry (3× with 5s interval) + SET_MESSAGE_INTERVAL
 
-### New Features
-- **Quick Start interactive checklist** in Docs tab (8 API-based health checks)
-- **Sensor source badges** on IMU, Barometer, GPS panels
-- **GPS conditional display** — shows "Simulated Data" or "No GPS Fix" when appropriate
-
-### P1: Stream Request Fix
-- **HEARTBEAT filter** — ignores GCS/generic heartbeats, only accepts vehicle types
-- **Expanded MAV_TYPE mapping** — 15+ vehicle types instead of 4
-- **REQUEST_DATA_STREAM retry** — 3 attempts with 5-second intervals
-- **SET_MESSAGE_INTERVAL** — modern COMMAND_LONG method alongside legacy streams
-
-### Documentation Overhaul
-- **SYSTEM.md** — Full algorithm explanation, performance characteristics
-- **DEPLOYMENT.md** — Online + offline installation (ZIP/SCP/USB)
-- **COMMANDS.md** — Complete command reference with troubleshooting
-- **create_archive.sh** — Self-contained installer generator
+### Documentation
+- LONG_RANGE_FLIGHT.md — ArduPilot params for 5km VO-only flight
+- SYSTEM.md, DEPLOYMENT.md, COMMANDS.md — comprehensive overhaul
+- create_archive.sh — offline installer
 
 ## Current Status
-- All 77 backend tests pass
+- 81 backend tests pass
 - All 7 frontend tabs working
-- Quick Start: 8/8 checks pass on preview
 - C++ changes need recompile on Pi
 
-## Backlog
-
-### P2
-- IP camera (RTSP/HTTP) and thermal camera
+## Backlog (P2)
+- IP camera (RTSP) and thermal camera
 - ARM NEON optimization for C++ core
 - Autonomous mission planning (waypoint navigation UI)
 
 ## Testing
-- Reports: /app/test_reports/iteration_13.json
-- Tests: /app/backend/tests/test_jtzero_api.py (77 tests)
+- Latest: /app/test_reports/iteration_14.json (81 tests, 100%)
+- Tests: /app/backend/tests/test_jtzero_api.py
