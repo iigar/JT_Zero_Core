@@ -157,6 +157,19 @@ class CameraStats:
     vo_vx: float = 0.0
     vo_vy: float = 0.0
     vo_valid: bool = True
+    # Hardware profile
+    active_profile: int = 0
+    profile_name: str = "Pi Zero 2W"
+    # Adaptive parameters
+    altitude_zone: int = 0
+    altitude_zone_name: str = "LOW"
+    adaptive_fast_thresh: float = 30.0
+    adaptive_lk_window: float = 5.0
+    # Hover yaw correction
+    hover_detected: bool = False
+    hover_duration: float = 0.0
+    yaw_drift_rate: float = 0.0
+    corrected_yaw: float = 0.0
 
 @dataclass
 class MAVLinkStats:
@@ -496,6 +509,36 @@ class JTZeroSimulator:
             },
         }
 
+    # ── VO Profile Management ──
+
+    _profiles = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W", "width": 320, "height": 240,
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100,
+         "focal_length": 277.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4", "width": 640, "height": 480,
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 200,
+         "focal_length": 554.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5", "width": 800, "height": 600,
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 300,
+         "focal_length": 693.0, "target_fps": 30.0},
+    ]
+
+    def get_vo_profiles(self) -> list:
+        return self._profiles
+
+    def set_vo_profile(self, profile_id: int) -> bool:
+        if 0 <= profile_id < len(self._profiles):
+            p = self._profiles[profile_id]
+            with self._lock:
+                self.camera_stats.active_profile = profile_id
+                self.camera_stats.profile_name = p["name"]
+                self.camera_stats.width = p["width"]
+                self.camera_stats.height = p["height"]
+                self.camera_stats.adaptive_fast_thresh = float(p["fast_threshold"])
+                self.camera_stats.adaptive_lk_window = float(p["lk_window"])
+            return True
+        return False
+
     def _update_camera(self, t: float):
         cam = self.camera_stats
         cam.frame_count += 1
@@ -521,10 +564,59 @@ class JTZeroSimulator:
         cam.vo_total_distance += abs(cam.vo_dx) + abs(cam.vo_dy)
         cam.vo_position_uncertainty = cam.vo_total_distance * 0.03 * (1.0 - cam.vo_confidence * 0.5)
         
+        # ── Adaptive Altitude Parameters ──
+        alt = self.state.altitude_agl
+        if alt < 10.0:
+            cam.altitude_zone = 0
+            cam.altitude_zone_name = "LOW"
+            cam.adaptive_fast_thresh = 30.0
+            cam.adaptive_lk_window = 5.0
+        elif alt < 50.0:
+            cam.altitude_zone = 1
+            cam.altitude_zone_name = "MEDIUM"
+            frac = (alt - 10.0) / 40.0
+            cam.adaptive_fast_thresh = 30.0 - frac * 5.0
+            cam.adaptive_lk_window = 5.0 + frac * 2.0
+        elif alt < 200.0:
+            cam.altitude_zone = 2
+            cam.altitude_zone_name = "HIGH"
+            frac = (alt - 50.0) / 150.0
+            cam.adaptive_fast_thresh = 25.0 - frac * 5.0
+            cam.adaptive_lk_window = 7.0 + frac * 2.0
+        else:
+            cam.altitude_zone = 3
+            cam.altitude_zone_name = "CRUISE"
+            cam.adaptive_fast_thresh = 20.0
+            cam.adaptive_lk_window = 9.0
+        
+        # ── Hover Yaw Correction ──
+        motion = math.sqrt(cam.vo_dx**2 + cam.vo_dy**2) * 1000  # to px-scale
+        is_mode_hover = self.state.flight_mode in ("HOVER", "ARMED")
+        
+        if is_mode_hover and motion < 0.5:
+            if not cam.hover_detected:
+                cam._hover_counter = getattr(cam, '_hover_counter', 0) + 1
+                if cam._hover_counter >= 30:
+                    cam.hover_detected = True
+            cam.hover_duration += 0.05  # 20Hz * 0.05s = 1s
+            # Simulate yaw drift during hover
+            cam.yaw_drift_rate = 0.001 * math.sin(t * 0.01) + random.gauss(0, 0.0002)
+            cam.corrected_yaw = self.state.yaw * 0.0174533 - cam.yaw_drift_rate * cam.hover_duration
+        else:
+            cam.hover_detected = False
+            cam.hover_duration = 0
+            cam.yaw_drift_rate = 0
+            cam._hover_counter = 0
+            cam.corrected_yaw = self.state.yaw * 0.0174533
+        
         # Camera events
         if self._tick % 60 == 15:
+            zone_names = ["LOW", "MED", "HIGH", "CRUISE"]
+            zone = zone_names[cam.altitude_zone] if cam.altitude_zone < 4 else "?"
             self._emit_event(EventType.CAMERA_VO_UPDATE, 20,
-                f"frame={cam.frame_count} feat={cam.vo_features_tracked}/{cam.vo_features_detected} q={cam.vo_tracking_quality:.0%}")
+                f"frame={cam.frame_count} feat={cam.vo_features_tracked}/{cam.vo_features_detected} "
+                f"q={cam.vo_tracking_quality:.0%} zone={zone}"
+                f"{' HOVER' if cam.hover_detected else ''}")
     
     def _update_mavlink(self, t: float):
         mav = self.mavlink_stats

@@ -174,7 +174,7 @@ function App() {
           <DocumentationTab />
         )}
         {activeTab === 'settings' && (
-          <SettingsTab state={state} threads={threads} engines={engines} runtimeMode={runtimeMode} mavlink={mavlink} sensorModes={sensorModes} />
+          <SettingsTab state={state} threads={threads} engines={engines} runtimeMode={runtimeMode} mavlink={mavlink} sensorModes={sensorModes} camera={camera} />
         )}
       </main>
 

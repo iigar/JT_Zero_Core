@@ -308,6 +308,8 @@ VisualOdometry::VisualOdometry() {
     std::memset(prev_frame_, 0, FRAME_SIZE);
     features_.fill({});
     prev_features_.fill({});
+    // Default profile: Pi Zero 2W
+    profile_ = HW_PROFILES[0];
 }
 
 void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
@@ -315,6 +317,121 @@ void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
     imu_ay_ = ay;
     imu_gz_ = gyro_z;
     imu_hint_valid_ = true;
+}
+
+void VisualOdometry::set_altitude(float altitude_agl) {
+    current_altitude_ = altitude_agl;
+    update_adaptive_params();
+}
+
+void VisualOdometry::set_yaw_hint(float yaw_rad) {
+    yaw_hint_ = yaw_rad;
+    yaw_hint_valid_ = true;
+}
+
+void VisualOdometry::set_profile(const HardwareProfile& profile) {
+    profile_ = profile;
+    // Reset VO state when switching profiles (resolution change)
+    reset();
+}
+
+// ── Adaptive parameter interpolation ──
+void VisualOdometry::update_adaptive_params() {
+    float alt = current_altitude_;
+    
+    // Determine zone and interpolation factor within zone
+    if (alt < ALT_ZONE_LOW_MAX) {
+        adaptive_.zone = AltitudeZone::LOW;
+        // LOW zone: aggressive tracking
+        adaptive_.fast_threshold = profile_.fast_threshold;
+        adaptive_.lk_window_size = profile_.lk_window_size;
+        adaptive_.lk_iterations = profile_.lk_iterations;
+        adaptive_.min_inliers = 5;
+        adaptive_.kalman_q = 0.5f;
+        adaptive_.kalman_r_base = 0.3f;
+        adaptive_.redetect_ratio = 0.15f;
+    } else if (alt < ALT_ZONE_MEDIUM_MAX) {
+        adaptive_.zone = AltitudeZone::MEDIUM;
+        // Interpolate between LOW and MEDIUM settings
+        float t = (alt - ALT_ZONE_LOW_MAX) / (ALT_ZONE_MEDIUM_MAX - ALT_ZONE_LOW_MAX);
+        adaptive_.fast_threshold = static_cast<uint8_t>(
+            profile_.fast_threshold + t * (-5)); // threshold decreases (more sensitive at height)
+        adaptive_.lk_window_size = profile_.lk_window_size + static_cast<int>(t * 2);
+        adaptive_.lk_iterations = profile_.lk_iterations + static_cast<int>(t * 1);
+        adaptive_.min_inliers = 5 + static_cast<int>(t * 3);
+        adaptive_.kalman_q = 0.5f - t * 0.15f;   // less process noise
+        adaptive_.kalman_r_base = 0.3f + t * 0.1f; // more measurement caution
+        adaptive_.redetect_ratio = 0.15f + t * 0.05f;
+    } else if (alt < ALT_ZONE_HIGH_MAX) {
+        adaptive_.zone = AltitudeZone::HIGH;
+        // Conservative: larger windows, stricter thresholds
+        float t = (alt - ALT_ZONE_MEDIUM_MAX) / (ALT_ZONE_HIGH_MAX - ALT_ZONE_MEDIUM_MAX);
+        adaptive_.fast_threshold = static_cast<uint8_t>(
+            std::max(15, static_cast<int>(profile_.fast_threshold) - 5 - static_cast<int>(t * 5)));
+        adaptive_.lk_window_size = profile_.lk_window_size + 2 + static_cast<int>(t * 2);
+        adaptive_.lk_iterations = profile_.lk_iterations + 1 + static_cast<int>(t * 1);
+        adaptive_.min_inliers = 8 + static_cast<int>(t * 4);
+        adaptive_.kalman_q = 0.35f - t * 0.1f;
+        adaptive_.kalman_r_base = 0.4f + t * 0.15f;
+        adaptive_.redetect_ratio = 0.20f + t * 0.05f;
+    } else {
+        adaptive_.zone = AltitudeZone::CRUISE;
+        // Maximum stability: biggest windows, strictest filtering
+        adaptive_.fast_threshold = static_cast<uint8_t>(
+            std::max(12, static_cast<int>(profile_.fast_threshold) - 10));
+        adaptive_.lk_window_size = profile_.lk_window_size + 4;
+        adaptive_.lk_iterations = profile_.lk_iterations + 2;
+        adaptive_.min_inliers = 12;
+        adaptive_.kalman_q = 0.25f;
+        adaptive_.kalman_r_base = 0.55f;
+        adaptive_.redetect_ratio = 0.25f;
+    }
+}
+
+// ── Hover yaw correction ──
+void VisualOdometry::update_hover_state(float median_dx, float median_dy, float dt) {
+    // Compute average micro-motion magnitude (in pixels)
+    float motion_mag = std::sqrt(median_dx * median_dx + median_dy * median_dy);
+    
+    // EMA of motion magnitude
+    hover_.micro_motion_avg = 0.1f * motion_mag + 0.9f * hover_.micro_motion_avg;
+    
+    if (hover_.micro_motion_avg < HoverState::HOVER_MOTION_THRESH) {
+        hover_.stable_frame_count++;
+        if (hover_.stable_frame_count >= HoverState::HOVER_MIN_FRAMES) {
+            hover_.is_hovering = true;
+            hover_.hover_duration_sec += dt;
+            
+            // Estimate yaw drift from micro-motion pattern
+            // During hover, systematic x-displacement indicates yaw rotation
+            // drift_rate ≈ median_dx / focal_length (radians per frame)
+            if (profile_.focal_length_px > 0 && dt > 0) {
+                float frame_yaw_drift = median_dx / profile_.focal_length_px; // rad per frame
+                float rate = frame_yaw_drift / dt; // rad/s
+                
+                // Smooth the drift rate estimate
+                hover_.yaw_drift_rate = HoverState::DRIFT_ALPHA * rate + 
+                    (1.0f - HoverState::DRIFT_ALPHA) * hover_.yaw_drift_rate;
+                
+                // Accumulate correction
+                hover_.accumulated_yaw_drift += hover_.yaw_drift_rate * dt;
+            }
+            
+            // Update corrected yaw (subtract estimated drift)
+            if (yaw_hint_valid_) {
+                hover_.corrected_yaw = yaw_hint_ - hover_.accumulated_yaw_drift;
+            }
+        }
+    } else {
+        // Motion detected — exit hover or reset counter
+        if (hover_.is_hovering) {
+            // Keep accumulated correction but stop accumulating
+            hover_.is_hovering = false;
+        }
+        hover_.stable_frame_count = 0;
+        hover_.hover_duration_sec = 0;
+        hover_.yaw_drift_rate = 0;
+    }
 }
 
 float VisualOdometry::compute_median(float* arr, int n) {
@@ -345,13 +462,25 @@ float VisualOdometry::compute_mad(float* arr, int n, float median) {
 VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance) {
     VOResult result;
     result.timestamp_us = frame.info.timestamp_us;
+    result.active_profile = static_cast<uint8_t>(profile_.type);
+    result.altitude_zone = static_cast<uint8_t>(adaptive_.zone);
+    result.adaptive_fast_thresh = static_cast<float>(adaptive_.fast_threshold);
+    result.adaptive_lk_window = static_cast<float>(adaptive_.lk_window_size);
+    
+    // Use adaptive or profile FAST threshold
+    uint8_t fast_thresh = adaptive_.fast_threshold;
+    int lk_win = adaptive_.lk_window_size;
+    int lk_iter = adaptive_.lk_iterations;
+    size_t max_feat = profile_.max_features;
     
     if (!has_prev_frame_) {
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
-                           features_.data(), MAX_FEATURES, 25));
+                           features_.data(), max_feat, fast_thresh));
         
-        std::memcpy(prev_frame_, frame.data, FRAME_SIZE);
+        size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
+        if (frame_bytes > FRAME_SIZE) frame_bytes = FRAME_SIZE;
+        std::memcpy(prev_frame_, frame.data, frame_bytes);
         prev_timestamp_us_ = frame.info.timestamp_us;
         has_prev_frame_ = true;
         
@@ -366,17 +495,17 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         prev_features_[i] = features_[i];
     }
     
-    // Track existing features
+    // Track existing features using adaptive LK parameters
     int tracked_count = tracker_.track(
         prev_frame_, frame.data,
         frame.info.width, frame.info.height,
-        features_.data(), active_count_);
+        features_.data(), active_count_,
+        lk_win, lk_iter);
     
     // ════════════════════════════════════════════════════
     // Phase 1: Median filter + MAD outlier rejection
     // ════════════════════════════════════════════════════
     
-    // Collect displacements from tracked features
     float dx_arr[MAX_FEATURES];
     float dy_arr[MAX_FEATURES];
     float dx_copy[MAX_FEATURES];
@@ -395,24 +524,20 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     int inlier_count = 0;
     float inlier_sum_x = 0, inlier_sum_y = 0;
     
-    if (valid_flow >= 5) {
-        // Compute median displacement (robust to outliers)
+    if (valid_flow >= adaptive_.min_inliers) {
         std::memcpy(dx_copy, dx_arr, valid_flow * sizeof(float));
         std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
         median_dx = compute_median(dx_copy, valid_flow);
         median_dy = compute_median(dy_copy, valid_flow);
         
-        // Compute MAD for outlier threshold
         std::memcpy(dx_copy, dx_arr, valid_flow * sizeof(float));
         std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
         float mad_x = compute_mad(dx_copy, valid_flow, median_dx);
         float mad_y = compute_mad(dy_copy, valid_flow, median_dy);
         
-        // Threshold: 2.5 * MAD (covers ~99% of inliers)
-        float thresh_x = std::max(2.5f * mad_x, 1.0f); // min 1 pixel
+        float thresh_x = std::max(2.5f * mad_x, 1.0f);
         float thresh_y = std::max(2.5f * mad_y, 1.0f);
         
-        // Reject outliers, compute inlier mean (more precise than median)
         for (int i = 0; i < valid_flow; ++i) {
             if (std::fabs(dx_arr[i] - median_dx) <= thresh_x &&
                 std::fabs(dy_arr[i] - median_dy) <= thresh_y) {
@@ -433,8 +558,9 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
     if (dt <= 0 || dt > 1.0f) dt = 0.066f;
     
-    constexpr float focal_length_px = 277.0f;
-    float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal_length_px : 0;
+    // Use profile-specific focal length
+    float focal = profile_.focal_length_px;
+    float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal : 0;
     
     float raw_dx = filtered_dx_px * pixel_to_meter;
     float raw_dy = filtered_dy_px * pixel_to_meter;
@@ -442,20 +568,16 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float raw_vy = (dt > 0) ? raw_dy / dt : 0;
     
     // ════════════════════════════════════════════════════
-    // Phase 2: Kalman filter for velocity smoothing
+    // Phase 2: Kalman filter (adaptive noise parameters)
     // ════════════════════════════════════════════════════
     
-    // Process noise (acceleration uncertainty)
-    constexpr float Q_accel = 0.5f; // m/s^2 process noise
+    float Q_accel = adaptive_.kalman_q;
     float Q = Q_accel * Q_accel * dt * dt;
     
-    // Measurement noise based on tracking quality
     float inlier_ratio = (valid_flow > 0) ? static_cast<float>(inlier_count) / static_cast<float>(valid_flow) : 0;
-    float R_base = 0.3f; // base measurement noise (m/s)
-    float R = R_base / std::max(0.1f, inlier_ratio); // higher noise when fewer inliers
+    float R = adaptive_.kalman_r_base / std::max(0.1f, inlier_ratio);
     
     // Predict
-    // kf_vx_ stays the same (constant velocity model)
     kf_vx_var_ += Q;
     kf_vy_var_ += Q;
     
@@ -467,7 +589,6 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     kf_vx_var_ *= (1.0f - Kx);
     kf_vy_var_ *= (1.0f - Ky);
     
-    // Use Kalman-filtered velocity for position update
     result.vx = kf_vx_;
     result.vy = kf_vy_;
     result.dx = kf_vx_ * dt;
@@ -479,64 +600,67 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     // Phase 3: IMU-aided validation
     // ════════════════════════════════════════════════════
     
-    float imu_consistency = 1.0f; // 1.0 = perfectly consistent
+    float imu_consistency = 1.0f;
     
     if (imu_hint_valid_ && dt > 0) {
-        // Expected velocity change from IMU acceleration
         float expected_dvx = imu_ax_ * dt;
         float expected_dvy = imu_ay_ * dt;
-        
-        // Actual velocity change from VO
         float actual_dvx = raw_vx - kf_vx_;
         float actual_dvy = raw_vy - kf_vy_;
-        
-        // Consistency: how well does VO agree with IMU?
         float discrepancy = std::sqrt(
             (actual_dvx - expected_dvx) * (actual_dvx - expected_dvx) +
             (actual_dvy - expected_dvy) * (actual_dvy - expected_dvy));
-        
-        // Map discrepancy to consistency (0-1)
-        // 0 m/s difference → 1.0, 2+ m/s difference → 0.1
         imu_consistency = std::max(0.1f, 1.0f - discrepancy * 0.5f);
-        
-        imu_hint_valid_ = false; // consume hint
+        imu_hint_valid_ = false;
     }
     
     // ════════════════════════════════════════════════════
     // Phase 4: Confidence metric
     // ════════════════════════════════════════════════════
     
-    // Combine multiple quality indicators
     float track_quality = (active_count_ > 0) ? 
         static_cast<float>(tracked_count) / static_cast<float>(active_count_) : 0;
     
-    float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f); // need 30+ inliers
+    float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f);
     
-    // Raw confidence: tracking × inlier_ratio × imu_consistency × feature_quality
     float raw_confidence = track_quality * inlier_ratio * imu_consistency * feature_quality;
     
-    // Smooth confidence with exponential moving average
-    constexpr float alpha = 0.3f; // smoothing factor
+    constexpr float alpha = 0.3f;
     running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
     
-    // If confidence drops below threshold, don't update position (freeze)
-    bool position_update = running_confidence_ > 0.15f && inlier_count >= 5;
+    bool position_update = running_confidence_ > 0.15f && inlier_count >= adaptive_.min_inliers;
     
     if (position_update) {
         pose_x_ += result.dx;
         pose_y_ += result.dy;
         total_distance_ += std::sqrt(result.dx * result.dx + result.dy * result.dy);
     } else {
-        // Freeze position, report zero displacement
         result.dx = 0;
         result.dy = 0;
         result.vx = 0;
         result.vy = 0;
     }
     
-    // Position uncertainty: grows with distance, shrinks with confidence
-    float drift_rate = 0.03f * (1.0f - running_confidence_ * 0.5f); // 1.5-3% base drift
+    float drift_rate = 0.03f * (1.0f - running_confidence_ * 0.5f);
     result.position_uncertainty = total_distance_ * drift_rate;
+    
+    // ════════════════════════════════════════════════════
+    // Phase 5: Hover yaw correction
+    // ════════════════════════════════════════════════════
+    
+    update_hover_state(median_dx, median_dy, dt);
+    
+    result.hover_detected = hover_.is_hovering;
+    result.hover_duration = hover_.hover_duration_sec;
+    result.yaw_drift_rate = hover_.yaw_drift_rate;
+    result.corrected_yaw = hover_.corrected_yaw;
+    
+    // If hovering, apply additional position freeze to prevent drift accumulation
+    if (hover_.is_hovering && hover_.hover_duration_sec > 2.0f) {
+        // During confirmed hover, apply stronger position damping
+        result.dx *= 0.1f;
+        result.dy *= 0.1f;
+    }
     
     // ════════════════════════════════════════════════════
     // Fill result
@@ -549,16 +673,20 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     result.confidence = running_confidence_;
     result.valid = position_update;
     
-    // Re-detect features if too few tracked
-    if (tracked_count < 20 || active_count_ < 30) {
+    // Re-detect features using adaptive threshold if too few tracked
+    size_t redetect_thresh = static_cast<size_t>(
+        adaptive_.redetect_ratio * static_cast<float>(max_feat));
+    if (static_cast<size_t>(tracked_count) < redetect_thresh || active_count_ < redetect_thresh * 2) {
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
-                           features_.data(), MAX_FEATURES, 25));
+                           features_.data(), max_feat, fast_thresh));
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
     
     // Update state
-    std::memcpy(prev_frame_, frame.data, FRAME_SIZE);
+    size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
+    if (frame_bytes > FRAME_SIZE) frame_bytes = FRAME_SIZE;
+    std::memcpy(prev_frame_, frame.data, frame_bytes);
     prev_timestamp_us_ = frame.info.timestamp_us;
     
     return result;
@@ -578,6 +706,12 @@ void VisualOdometry::reset() {
     kf_vy_var_ = 1.0f;
     running_confidence_ = 0.5f;
     imu_hint_valid_ = false;
+    yaw_hint_valid_ = false;
+    current_altitude_ = 0;
+    // Reset hover state
+    hover_ = HoverState{};
+    // Reset adaptive params to profile defaults
+    update_adaptive_params();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -587,7 +721,6 @@ void VisualOdometry::reset() {
 CameraPipeline::CameraPipeline() = default;
 
 bool CameraPipeline::initialize(CameraType type) {
-    // Auto-detect if requested type is SIMULATED or NONE
     CameraType actual = type;
     if (type == CameraType::SIMULATED || type == CameraType::NONE) {
         actual = auto_detect_camera();
@@ -599,7 +732,6 @@ bool CameraPipeline::initialize(CameraType type) {
                 active_camera_ = &csi_camera_;
                 break;
             }
-            // Fall through to USB if CSI fails
             std::printf("[CameraPipeline] CSI open failed, trying USB...\n");
             [[fallthrough]];
         case CameraType::USB:
@@ -607,7 +739,6 @@ bool CameraPipeline::initialize(CameraType type) {
                 active_camera_ = &usb_camera_;
                 break;
             }
-            // Fall through to simulation
             std::printf("[CameraPipeline] USB open failed, using simulation\n");
             [[fallthrough]];
         case CameraType::SIMULATED:
@@ -621,18 +752,66 @@ bool CameraPipeline::initialize(CameraType type) {
     frame_count_ = 0;
     start_time_us_ = now_us();
     vo_.reset();
+    
+    // Auto-detect hardware profile based on platform
+#ifdef __aarch64__
+    // Check /proc/device-tree/model for Pi model
+    FILE* f = std::fopen("/proc/device-tree/model", "r");
+    if (f) {
+        char model[128]{};
+        std::fread(model, 1, 127, f);
+        std::fclose(f);
+        if (std::strstr(model, "Pi 5")) {
+            set_profile(HWProfileType::PI_5);
+        } else if (std::strstr(model, "Pi 4")) {
+            set_profile(HWProfileType::PI_4);
+        } else {
+            set_profile(HWProfileType::PI_ZERO_2W);
+        }
+        std::printf("[CameraPipeline] Detected: %s -> Profile: %s\n", 
+                    model, vo_.active_profile().name);
+    } else {
+        set_profile(HWProfileType::PI_ZERO_2W);
+    }
+#else
+    set_profile(HWProfileType::PI_ZERO_2W);
+    std::printf("[CameraPipeline] Non-ARM platform, using Pi Zero 2W profile\n");
+#endif
+    
     return true;
+}
+
+void CameraPipeline::set_profile(HWProfileType type) {
+    size_t idx = static_cast<size_t>(type);
+    if (idx < NUM_HW_PROFILES) {
+        vo_.set_profile(HW_PROFILES[idx]);
+        std::printf("[CameraPipeline] Profile set: %s (%ux%u @ %.0ffps)\n",
+                    HW_PROFILES[idx].name,
+                    HW_PROFILES[idx].frame_width,
+                    HW_PROFILES[idx].frame_height,
+                    HW_PROFILES[idx].target_fps);
+    }
+}
+
+HWProfileType CameraPipeline::active_profile() const {
+    return vo_.active_profile().type;
+}
+
+void CameraPipeline::set_altitude(float altitude_agl) {
+    vo_.set_altitude(altitude_agl);
+}
+
+void CameraPipeline::set_yaw_hint(float yaw_rad) {
+    vo_.set_yaw_hint(yaw_rad);
 }
 
 bool CameraPipeline::tick(float ground_distance) {
     if (!running_ || !active_camera_) return false;
     
-    // Capture frame
     if (!active_camera_->capture(current_frame_)) {
         return false;
     }
     
-    // Process visual odometry
     vo_result_ = vo_.process(current_frame_, ground_distance);
     
     frame_count_++;
@@ -659,7 +838,6 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.width = current_frame_.info.width;
     stats.height = current_frame_.info.height;
     
-    // Compute actual FPS
     uint64_t elapsed_us = now_us() - start_time_us_;
     if (elapsed_us > 0 && frame_count_ > 1) {
         stats.fps_actual = static_cast<float>(frame_count_) * 1'000'000.0f / 
@@ -679,6 +857,22 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.vo_vx = vo_result_.vx;
     stats.vo_vy = vo_result_.vy;
     stats.vo_valid = vo_result_.valid;
+    
+    // Hardware profile
+    stats.active_profile = static_cast<uint8_t>(vo_.active_profile().type);
+    std::strncpy(stats.profile_name, vo_.active_profile().name, 31);
+    stats.profile_name[31] = '\0';
+    
+    // Adaptive parameters
+    stats.altitude_zone = static_cast<uint8_t>(vo_.adaptive_params().zone);
+    stats.adaptive_fast_thresh = static_cast<float>(vo_.adaptive_params().fast_threshold);
+    stats.adaptive_lk_window = static_cast<float>(vo_.adaptive_params().lk_window_size);
+    
+    // Hover state
+    stats.hover_detected = vo_.hover_state().is_hovering;
+    stats.hover_duration = vo_.hover_state().hover_duration_sec;
+    stats.yaw_drift_rate = vo_.hover_state().yaw_drift_rate;
+    stats.corrected_yaw  = vo_.hover_state().corrected_yaw;
     
     return stats;
 }

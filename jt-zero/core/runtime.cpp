@@ -781,6 +781,10 @@ void Runtime::camera_loop() {
         float ground_dist = state_.range.valid ? state_.range.distance : 1.0f;
         
         if (camera_.is_running()) {
+            // Feed altitude and yaw to camera VO for adaptive params + hover correction
+            camera_.set_altitude(state_.altitude_agl);
+            camera_.set_yaw_hint(state_.yaw * 0.0174533f); // deg to rad
+            
             camera_.tick(ground_dist);
             
             // Emit frame event periodically

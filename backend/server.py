@@ -224,6 +224,21 @@ async def get_camera_features():
         return runtime.get_features()
     return []
 
+@app.get("/api/vo/profiles")
+async def get_vo_profiles():
+    """Get available hardware profiles for Visual Odometry."""
+    if hasattr(runtime, 'get_vo_profiles'):
+        return runtime.get_vo_profiles()
+    return []
+
+@app.post("/api/vo/profile/{profile_id}")
+async def set_vo_profile(profile_id: int):
+    """Set active VO hardware profile."""
+    if hasattr(runtime, 'set_vo_profile'):
+        ok = runtime.set_vo_profile(profile_id)
+        return {"success": ok, "profile_id": profile_id}
+    return {"success": False, "error": "VO profiles not available"}
+
 @app.get("/api/mavlink")
 async def get_mavlink():
     return runtime.get_mavlink_stats()

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiCall } from '../hooks/useApi';
-import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, Activity, Wifi, MemoryStick, Server } from 'lucide-react';
+import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, Activity, Wifi, MemoryStick, Server, Camera, Mountain } from 'lucide-react';
 import DiagnosticsPanel from './DiagnosticsPanel';
 
 function Slider({ label, value, min, max, step, unit, onChange, testId }) {
@@ -46,18 +46,30 @@ function SectionCard({ title, icon: Icon, children, testId }) {
   );
 }
 
-export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink, sensorModes }) {
+export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink, sensorModes, camera }) {
   const [config, setConfig] = useState({
     wind_speed: 0, wind_direction: 0,
     sensor_noise: 1, battery_drain: 1,
     mass_kg: 1.2, drag_coeff: 0.3,
   });
+  const [voProfiles, setVoProfiles] = useState([]);
+  const [activeProfile, setActiveProfile] = useState(0);
 
   useEffect(() => {
     apiCall('GET', '/api/simulator/config').then(data => {
       if (!data.error) setConfig(data);
     }).catch(() => {});
+    apiCall('GET', '/api/vo/profiles').then(data => {
+      if (Array.isArray(data)) setVoProfiles(data);
+    }).catch(() => {});
   }, []);
+
+  // Track active profile from camera data
+  useEffect(() => {
+    if (camera?.active_profile !== undefined) {
+      setActiveProfile(camera.active_profile);
+    }
+  }, [camera?.active_profile]);
 
   async function updateConfig(key, value) {
     const next = { ...config, [key]: value };
@@ -75,6 +87,14 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
     setConfig(defaults);
     await apiCall('POST', '/api/simulator/config', defaults);
   }
+
+  async function switchProfile(id) {
+    const res = await apiCall('POST', `/api/vo/profile/${id}`);
+    if (res?.success) setActiveProfile(id);
+  }
+
+  const ZONE_NAMES = ['LOW', 'MEDIUM', 'HIGH', 'CRUISE'];
+  const ZONE_COLORS = ['text-emerald-400', 'text-cyan-400', 'text-amber-400', 'text-red-400'];
 
   const activeThreads = threads?.filter(t => t.running).length || 0;
 
@@ -179,7 +199,73 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
           </div>
         </div>
 
-        {/* Row 2: Hardware Diagnostics */}
+        {/* Row 2: VO Configuration */}
+        <div className="grid grid-cols-12 gap-4">
+          {/* Hardware Profiles */}
+          <div className="col-span-7">
+            <SectionCard title="VO Hardware Profile" icon={Camera} testId="settings-vo-profiles">
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  {voProfiles.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => switchProfile(p.id)}
+                      data-testid={`vo-profile-${p.id}`}
+                      className={`relative p-2 border rounded-sm text-left transition-all ${
+                        activeProfile === p.id
+                          ? 'border-[#00F0FF]/60 bg-[#00F0FF]/5'
+                          : 'border-[#1E293B] bg-black/20 hover:border-[#1E293B]/80'
+                      }`}
+                    >
+                      {activeProfile === p.id && (
+                        <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#00F0FF]" />
+                      )}
+                      <div className="text-[10px] font-bold text-slate-300">{p.name}</div>
+                      <div className="text-[8px] text-slate-500 mt-1 space-y-0.5">
+                        <div>{p.width}x{p.height} @ {p.target_fps}fps</div>
+                        <div>FAST={p.fast_threshold} LK={p.lk_window}px</div>
+                        <div>{p.max_features} features, f={p.focal_length}px</div>
+                      </div>
+                    </button>
+                  ))}
+                  {voProfiles.length === 0 && (
+                    <p className="text-[9px] text-slate-600 col-span-3">Loading profiles...</p>
+                  )}
+                </div>
+              </div>
+            </SectionCard>
+          </div>
+
+          {/* Adaptive VO Status */}
+          <div className="col-span-5">
+            <SectionCard title="Adaptive VO Status" icon={Mountain} testId="settings-vo-adaptive">
+              <div className="space-y-1">
+                <InfoRow label="Altitude Zone" 
+                  value={camera?.altitude_zone_name || ZONE_NAMES[camera?.altitude_zone || 0] || 'LOW'}
+                  color={ZONE_COLORS[camera?.altitude_zone || 0]} />
+                <InfoRow label="FAST Threshold" value={camera?.adaptive_fast_thresh?.toFixed(0) || 30} />
+                <InfoRow label="LK Window" value={`${camera?.adaptive_lk_window?.toFixed(0) || 5}px`} />
+                <InfoRow label="Profile" value={camera?.profile_name || 'Pi Zero 2W'}
+                  color="text-[#00F0FF]" />
+                <div className="h-px bg-[#1E293B]/50 my-1" />
+                <InfoRow label="Hover Detected" 
+                  value={camera?.hover_detected ? 'YES' : 'NO'}
+                  color={camera?.hover_detected ? 'text-violet-400' : 'text-slate-500'} />
+                {camera?.hover_detected && (
+                  <>
+                    <InfoRow label="Hover Duration" value={`${(camera?.hover_duration || 0).toFixed(0)}s`}
+                      color="text-violet-400" />
+                    <InfoRow label="Yaw Drift" value={`${((camera?.yaw_drift_rate || 0) * 57.2958).toFixed(3)}°/s`}
+                      color="text-amber-400" />
+                    <InfoRow label="Corrected Yaw" value={`${((camera?.corrected_yaw || 0) * 57.2958).toFixed(1)}°`} />
+                  </>
+                )}
+              </div>
+            </SectionCard>
+          </div>
+        </div>
+
+        {/* Row 3: Hardware Diagnostics */}
         <DiagnosticsPanel />
 
         {/* Row 3: Thread Details */}

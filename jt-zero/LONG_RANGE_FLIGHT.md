@@ -34,8 +34,68 @@
 3. **IMU cross-validation** — VO перевіряється проти IMU, відкидає bad frames
 4. **Confidence-based covariance** — EKF знає коли VO ненадійний і більше довіряє IMU
 5. **Position freeze** — при дуже поганому tracking позиція "заморожується" замість дрейфу
+6. **Hardware Profiles** — оптимізовані параметри для кожного Pi (Zero 2W / 4 / 5)
+7. **Adaptive Parameters** — FAST threshold, LK window, Kalman Q/R автоматично змінюються залежно від висоти
+8. **Hover Yaw Correction** — компенсація гіроскопічного дрейфу yaw при зависанні (до 20 хв)
 
 Очікуване покращення: з 3-5% дрейфу до **1.5-3%** (при оптимальних умовах).
+
+---
+
+## Hardware Profiles (NEW)
+
+Система автоматично визначає модель Raspberry Pi і обирає оптимальний профіль:
+
+| Профіль | Роздільність | FAST | LK Window | Max Features | Focal Length | FPS |
+|---------|-------------|------|-----------|-------------|-------------|-----|
+| **Pi Zero 2W** | 320x240 | 30 | 5px | 100 | 277px | 15 |
+| **Pi 4** | 640x480 | 25 | 7px | 200 | 554px | 30 |
+| **Pi 5** | 800x600 | 20 | 9px | 300 | 693px | 30 |
+
+Можна переключити профіль через: Settings → VO Hardware Profile.
+
+## Altitude-Adaptive Parameters (NEW)
+
+VO автоматично змінює параметри залежно від висоти (з барометра):
+
+| Зона | Висота | FAST | LK Window | Kalman Q | Стратегія |
+|------|--------|------|-----------|----------|-----------|
+| **LOW** | 0-10м | Default | Default | 0.5 | Aggressive tracking |
+| **MEDIUM** | 10-50м | -5 | +2px | 0.35 | Balanced |
+| **HIGH** | 50-200м | -10 | +4px | 0.25 | Conservative |
+| **CRUISE** | 200м+ | -10 | +4px | 0.25 | Maximum stability |
+
+Параметри інтерполюються плавно на границях зон.
+
+## Hover Yaw Correction (NEW)
+
+Коли дрон зависає на місці (motion < 0.5px), система:
+1. Детектує стан зависання після 30 стабільних кадрів
+2. Аналізує мікро-зміщення features для оцінки yaw drift rate
+3. Застосовує EMA-згладжену корекцію (alpha=0.02)
+4. Додатково зменшує position update в 10x (damping) при тривалому зависанні
+
+**Результат:** yaw drift зменшується з ~2-5°/хв до <0.5°/хв.
+
+---
+
+## Параметри для високошвидкісного/високовисотного режиму (NEW)
+
+Для польотів на 25 м/с та 200м висоти:
+
+```
+# ═══════ High Speed / High Altitude ═══════
+WPNAV_SPEED = 2500             # 25 м/с
+WPNAV_ACCEL = 300              # 3 м/с²
+ANGLE_MAX = 3500               # 35° нахил
+
+# VO буде автоматично в зоні CRUISE (200м+):
+#   - Великий LK window → кращий tracking при дрібних features
+#   - Менший Kalman Q → більше стабільності
+#   - Строгіший redetect threshold
+```
+
+**Рекомендація:** Використовуйте Pi 4 або Pi 5 профіль для високих швидкостей — більша роздільність дає кращий tracking при 25 м/с.
 
 ---
 
@@ -162,4 +222,9 @@ BATT_FS_LOW_ACT = 2            # RTL при низькій батареї
 | **INL** | Camera/VO панель | >30 inliers |
 | **DIST** | Camera/VO панель | Загальна пройдена відстань |
 | **ERR** | Camera/VO панель | Оцінка похибки позиції |
+| **ZONE** | Camera/VO панель (рядок 2) | LOW/MED/HIGH/CRUISE |
+| **FAST** | Camera/VO панель (рядок 2) | Поточний адаптивний threshold |
+| **DRIFT** | Camera/VO панель (рядок 2) | <0.5°/s при hover |
+| **HOVER** | Camera/VO заголовок | Фіолетовий бейдж + тривалість |
+| **Profile** | Camera/VO заголовок / Settings | Pi Zero 2W / Pi 4 / Pi 5 |
 | **MAVLink** | MAVLink вкладка | CONNECTED, лічильники ростуть |

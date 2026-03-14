@@ -159,7 +159,19 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "vo_total_distance"_a = cs.vo_total_distance,
         "vo_dx"_a = cs.vo_dx, "vo_dy"_a = cs.vo_dy, "vo_dz"_a = cs.vo_dz,
         "vo_vx"_a = cs.vo_vx, "vo_vy"_a = cs.vo_vy,
-        "vo_valid"_a = cs.vo_valid
+        "vo_valid"_a = cs.vo_valid,
+        // Hardware profile
+        "active_profile"_a = static_cast<int>(cs.active_profile),
+        "profile_name"_a = std::string(cs.profile_name),
+        // Adaptive parameters
+        "altitude_zone"_a = static_cast<int>(cs.altitude_zone),
+        "adaptive_fast_thresh"_a = cs.adaptive_fast_thresh,
+        "adaptive_lk_window"_a = cs.adaptive_lk_window,
+        // Hover yaw correction
+        "hover_detected"_a = cs.hover_detected,
+        "hover_duration"_a = cs.hover_duration,
+        "yaw_drift_rate"_a = cs.yaw_drift_rate,
+        "corrected_yaw"_a = cs.corrected_yaw
     );
 }
 
@@ -400,6 +412,35 @@ PYBIND11_MODULE(jtzero_native, m) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")
         
+        .def("set_vo_profile", [](jtzero::Runtime& self, int profile_id) {
+            if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_HW_PROFILES)) {
+                self.camera().set_profile(static_cast<jtzero::HWProfileType>(profile_id));
+                return true;
+            }
+            return false;
+        }, py::arg("profile_id"), "Set VO hardware profile (0=PiZero, 1=Pi4, 2=Pi5)")
+        
+        .def("get_vo_profiles", []() {
+            py::list profiles;
+            for (size_t i = 0; i < jtzero::NUM_HW_PROFILES; ++i) {
+                auto& p = jtzero::HW_PROFILES[i];
+                profiles.append(py::dict(
+                    "id"_a = static_cast<int>(i),
+                    "name"_a = std::string(p.name),
+                    "type"_a = jtzero::hw_profile_str(p.type),
+                    "width"_a = p.frame_width,
+                    "height"_a = p.frame_height,
+                    "fast_threshold"_a = static_cast<int>(p.fast_threshold),
+                    "lk_window"_a = p.lk_window_size,
+                    "lk_iterations"_a = p.lk_iterations,
+                    "max_features"_a = static_cast<int>(p.max_features),
+                    "focal_length"_a = p.focal_length_px,
+                    "target_fps"_a = p.target_fps
+                ));
+            }
+            return profiles;
+        }, "Get available hardware profiles")
+        
         .def("get_sensor_modes", [](const jtzero::Runtime& self) {
             const auto& hw = self.hw_info();
             // Determine actual data source for each sensor:
@@ -523,6 +564,9 @@ PYBIND11_MODULE(jtzero_native, m) {
             "max_features"_a = jtzero::MAX_FEATURES,
             "frame_width"_a = jtzero::FRAME_WIDTH,
             "frame_height"_a = jtzero::FRAME_HEIGHT,
+            "max_frame_width"_a = jtzero::MAX_FRAME_WIDTH,
+            "max_frame_height"_a = jtzero::MAX_FRAME_HEIGHT,
+            "hw_profiles"_a = static_cast<int>(jtzero::NUM_HW_PROFILES),
             "telemetry_history"_a = jtzero::MemoryEngine::TELEMETRY_HISTORY,
             "event_history"_a = jtzero::MemoryEngine::EVENT_HISTORY
         );

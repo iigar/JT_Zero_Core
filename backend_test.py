@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 class JTZeroTester:
-    def __init__(self, base_url="https://mavlink-nav.preview.emergentagent.com"):
+    def __init__(self, base_url="https://visual-nav-rtl.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0

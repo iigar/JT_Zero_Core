@@ -28,6 +28,17 @@ export default function CameraPanel({ camera, features = [] }) {
     vo_dx = 0,
     vo_dy = 0,
     vo_valid = false,
+    // New adaptive + hover fields
+    active_profile = 0,
+    profile_name = 'Pi Zero 2W',
+    altitude_zone = 0,
+    altitude_zone_name = '',
+    adaptive_fast_thresh = 30,
+    adaptive_lk_window = 5,
+    hover_detected = false,
+    hover_duration = 0,
+    yaw_drift_rate = 0,
+    corrected_yaw = 0,
   } = camera || {};
 
   const isReal = !['SIMULATED', 'SIM', 'NONE', ''].includes(camera_type) && camera_open;
@@ -191,6 +202,11 @@ export default function CameraPanel({ camera, features = [] }) {
   const typeColor = isCSI ? 'text-emerald-400' : camera_type === 'USB' ? 'text-amber-400' : 'text-slate-500';
   const confPct = (vo_confidence * 100).toFixed(0);
   const confColor = vo_confidence > 0.6 ? 'text-emerald-400' : vo_confidence > 0.3 ? 'text-amber-400' : 'text-red-400';
+  
+  const ZONE_NAMES = ['LOW', 'MED', 'HIGH', 'CRUISE'];
+  const ZONE_COLORS = ['text-emerald-400', 'text-cyan-400', 'text-amber-400', 'text-red-400'];
+  const zoneLabel = altitude_zone_name || ZONE_NAMES[altitude_zone] || 'LOW';
+  const zoneColor = ZONE_COLORS[altitude_zone] || 'text-slate-500';
 
   return (
     <div className="h-full flex flex-col bg-[#080A0E] border border-[#1E293B] rounded-sm overflow-hidden" data-testid="camera-panel">
@@ -205,6 +221,9 @@ export default function CameraPanel({ camera, features = [] }) {
           }`}>
             {isReal ? (isCSI ? 'CSI' : 'USB') : 'SIM'}
           </span>
+          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-[#1E293B]/50 text-slate-400 border border-[#1E293B]/60" data-testid="camera-profile-badge">
+            {profile_name || 'Pi Zero 2W'}
+          </span>
           {streamActive && (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
               LIVE
@@ -212,6 +231,12 @@ export default function CameraPanel({ camera, features = [] }) {
           )}
         </div>
         <div className="flex items-center gap-3 text-[9px] text-slate-500">
+          <span className={`font-bold ${zoneColor}`} data-testid="camera-zone-badge">{zoneLabel}</span>
+          {hover_detected && (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-violet-500/20 text-violet-400 border border-violet-500/30 animate-pulse" data-testid="camera-hover-badge">
+              HOVER {hover_duration > 0 ? `${hover_duration.toFixed(0)}s` : ''}
+            </span>
+          )}
           <span>{fps_actual.toFixed(1)} fps</span>
           <span>#{frame_count}</span>
         </div>
@@ -229,13 +254,21 @@ export default function CameraPanel({ camera, features = [] }) {
         />
       </div>
 
-      {/* Stats bar */}
+      {/* Stats bar - row 1: core VO metrics */}
       <div className="grid grid-cols-5 gap-px bg-[#1E293B]/30 shrink-0">
         <Stat icon={<Eye className="w-3 h-3" />} label="DET" value={vo_features_detected} color="text-cyan-400" />
         <Stat icon={<Crosshair className="w-3 h-3" />} label="INL" value={vo_inlier_count} color="text-emerald-400" />
         <Stat icon={<Zap className="w-3 h-3" />} label="CONF" value={`${confPct}%`} color={confColor} />
         <Stat icon={null} label="DIST" value={vo_total_distance > 1000 ? `${(vo_total_distance/1000).toFixed(1)}km` : `${vo_total_distance.toFixed(0)}m`} color="text-slate-300" />
         <Stat icon={null} label="ERR" value={`±${vo_position_uncertainty.toFixed(0)}m`} color={vo_position_uncertainty > 100 ? 'text-red-400' : vo_position_uncertainty > 30 ? 'text-amber-400' : 'text-emerald-400'} />
+      </div>
+      {/* Stats bar - row 2: adaptive + hover metrics */}
+      <div className="grid grid-cols-5 gap-px bg-[#1E293B]/30 shrink-0">
+        <Stat label="FAST" value={adaptive_fast_thresh.toFixed(0)} color="text-slate-400" small />
+        <Stat label="LK" value={`${adaptive_lk_window.toFixed(0)}px`} color="text-slate-400" small />
+        <Stat label="ZONE" value={zoneLabel} color={zoneColor} small />
+        <Stat label="DRIFT" value={hover_detected ? `${(yaw_drift_rate * 57.2958).toFixed(2)}°/s` : '-'} color={hover_detected ? 'text-violet-400' : 'text-slate-600'} small />
+        <Stat label="YAW" value={`${(corrected_yaw * 57.2958).toFixed(1)}°`} color="text-slate-400" small />
       </div>
     </div>
   );

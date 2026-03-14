@@ -23,11 +23,24 @@ except ImportError:
 class NativeRuntime:
     """Adapter wrapping C++ Runtime with simulator-compatible interface."""
     
+    _VO_PROFILES = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W", "width": 320, "height": 240,
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100,
+         "focal_length": 277.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4", "width": 640, "height": 480,
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 200,
+         "focal_length": 554.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5", "width": 800, "height": 600,
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 300,
+         "focal_length": 693.0, "target_fps": 30.0},
+    ]
+    
     def __init__(self):
         if not NATIVE_AVAILABLE:
             raise RuntimeError("jtzero_native module not found")
         
         self._rt = _native.Runtime()
+        self._active_profile_id = 0
         
         # Auto-detect: use real hardware on Pi, simulator elsewhere
         # Override with JT_ZERO_SIMULATE=1 to force simulation
@@ -101,6 +114,24 @@ class NativeRuntime:
         d.setdefault("vo_confidence", d.get("vo_tracking_quality", 0))
         d.setdefault("vo_position_uncertainty", 0)
         d.setdefault("vo_total_distance", 0)
+        # Hardware profile — inject from managed state
+        p = self._VO_PROFILES[self._active_profile_id]
+        d["active_profile"] = self._active_profile_id
+        d["profile_name"] = p["name"]
+        # Only override resolution if C++ hasn't set it
+        if d.get("width", 320) == 320 and self._active_profile_id != 0:
+            d["width"] = p["width"]
+            d["height"] = p["height"]
+        # Adaptive parameters defaults
+        d.setdefault("altitude_zone", 0)
+        d.setdefault("altitude_zone_name", "LOW")
+        d.setdefault("adaptive_fast_thresh", float(p["fast_threshold"]))
+        d.setdefault("adaptive_lk_window", float(p["lk_window"]))
+        # Hover yaw correction defaults
+        d.setdefault("hover_detected", False)
+        d.setdefault("hover_duration", 0.0)
+        d.setdefault("yaw_drift_rate", 0.0)
+        d.setdefault("corrected_yaw", 0.0)
         return d
     
     def get_frame_data(self) -> bytes:
@@ -154,3 +185,24 @@ class NativeRuntime:
     
     def set_sim_config(self, config: dict):
         self._rt.set_sim_config(config)
+    
+    def get_vo_profiles(self) -> list:
+        try:
+            if hasattr(self._rt, 'get_vo_profiles'):
+                return [dict(p) for p in self._rt.get_vo_profiles()]
+        except Exception:
+            pass
+        return list(self._VO_PROFILES)
+    
+    def set_vo_profile(self, profile_id: int) -> bool:
+        if 0 <= profile_id < len(self._VO_PROFILES):
+            # Try C++ first
+            try:
+                if hasattr(self._rt, 'set_vo_profile'):
+                    self._rt.set_vo_profile(profile_id)
+            except Exception:
+                pass
+            # Always update managed state
+            self._active_profile_id = profile_id
+            return True
+        return False
