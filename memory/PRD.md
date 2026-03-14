@@ -98,7 +98,6 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 ## Backlog
 
 ### P1
-- Hardware Diagnostics Panel (auto-check all subsystems on startup)
 - Implement MAVLink VISION_POSITION_ESTIMATE sending (so FC accepts VO data)
 - Fix CRC for outgoing REQUEST_DATA_STREAM (currently needs SR4_* manual config)
 
@@ -109,7 +108,7 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 - Performance optimization (ARM NEON intrinsics)
 - Full MAVLink v2 message serialization with proper CRC
 
-### 2026-03-14 Session (System Monitor + Charts)
+### 2026-03-14 Session (System Monitor + Charts + Diagnostics)
 - **Replaced PerformancePanel with System Monitor** — shows real OS metrics via psutil:
   CPU total + per-core, RAM used/total, temperature, disk usage, network TX/RX, process info, sparkline histories
 - **Improved TelemetryCharts:**
@@ -121,5 +120,12 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 - **New backend module** `system_metrics.py` — uses psutil for CPU, RAM, temp, disk, network, process metrics
 - **Updated /api/performance** — returns `{engine: ..., system: ...}` structure
 - **WebSocket** now includes `system_metrics` field in telemetry payload
-- **Backend tests:** 59 tests passing (added 9 new system metrics tests)
+- **Hardware Diagnostics Panel:**
+  - New `diagnostics.py` backend module: scans camera (CSI/USB), I2C buses + devices, SPI, UART ports, GPIO, MAVLink/FC
+  - Auto-runs at startup via lifespan hook, caches results
+  - `/api/diagnostics` GET (cached) and `/api/diagnostics/scan` POST (fresh scan)
+  - Frontend `DiagnosticsPanel.js`: 3-column layout with summary badges, Re-Scan button
+  - Integrated into Settings tab, replacing old "Hardware Sensors" section
+  - Known I2C addresses: MPU6050 (0x68), BMP280 (0x76), HMC5883L (0x1E), etc.
+- **Backend tests:** 71 tests passing
 
