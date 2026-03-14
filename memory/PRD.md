@@ -98,11 +98,10 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 ## Backlog
 
 ### P1
-- Implement MAVLink VISION_POSITION_ESTIMATE sending (so FC accepts VO data)
 - Fix CRC for outgoing REQUEST_DATA_STREAM (currently needs SR4_* manual config)
 
 ### P2
-- Direct I2C/SPI sensor drivers (MPU6050, BMP280) — C++ code complete, needs recompile on Pi
+- Direct I2C/SPI sensor drivers (MPU6050, BMP280) — C++ code complete, needs recompile on Pi with sensors connected
 - Autonomous mission planning (waypoint navigation)
 - Camera IP_STREAM (RTSP/HTTP), thermal camera
 - Performance optimization (ARM NEON intrinsics)
@@ -136,4 +135,10 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
   - `/api/sensors` endpoint returns sensor modes + hw_info
   - DiagnosticsPanel shows "C++ Sensor Drivers" section with HW/SIM badges
 - **Backend tests:** 77 tests passing
+- **MAVLink VO Serialization:**
+  - Implemented full MAVLink v2 serialization for VISION_POSITION_ESTIMATE (#102, CRC=158)
+  - Implemented ODOMETRY (#331, CRC=91) with quaternion, covariance (NaN for unknown)
+  - Implemented OPTICAL_FLOW_RAD (#106, CRC=175)
+  - All three messages now serialize real bytes and send through UART to FC
+  - Verified on Pi: FC receives messages, counters increment
 
