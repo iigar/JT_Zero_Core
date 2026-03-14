@@ -1,123 +1,97 @@
 # JT-Zero: Система Visual Odometry для дронів
 
-## Що це?
+## Що це і навіщо?
 
-JT-Zero -- це програма-компаньйон для дрона, яка працює на **Raspberry Pi Zero 2 W**. Вона використовує камеру для визначення позиції дрона у просторі (Visual Odometry) і передає ці дані на польотний контролер через MAVLink.
+JT-Zero — це **companion computer система** для дронів. Вона вирішує конкретну проблему: **стабільний політ без GPS** (у приміщеннях, підвалах, тунелях, складах).
 
-**Простими словами:** камера дивиться вниз, бачить як рухається підлога, і каже дрону "ти змістився на 10 см вліво". Польотний контролер використовує цю інформацію для стабільного зависання навіть без GPS (наприклад, у приміщенні).
+Як це працює: камера Raspberry Pi дивиться вниз, аналізує переміщення поверхні і каже дрону "ти змістився на 10 см вліво". Польотний контролер (ArduPilot) використовує ці дані замість GPS для стабілізації і навігації.
 
-## Що входить до складу?
+**Коштує:** ~$60 (Pi Zero 2W + камера + дроти) замість $500+ за промислові рішення.
 
-```
-JT-Zero
-  |
-  |-- C++ ядро         швидка обробка відео та сенсорів
-  |-- Python сервер    FastAPI бекенд для API та WebSocket
-  |-- Web Dashboard    7-вкладковий моніторинг у браузері
-  |-- MAVLink          двосторонній зв'язок з польотним контролером
-```
-
-## Можливості
-
-- Визначення позиції камерою (Visual Odometry) з точністю 5-20 см
-- Реальний час: обробка 15 кадрів/сек на Pi Zero 2 W
-- Інтеграція з ArduPilot EKF3 як External Navigation
-- Живий Dashboard з телеметрією, 3D моделлю, графіками
-- Автовизначення обладнання (камера, I2C сенсори, UART)
-- Підтримка Pi Camera v2/v3 та USB камер
-
-## Що потрібно для початку?
-
-| Компонент | Обов'язково | Опціонально |
-|-----------|-------------|-------------|
-| Raspberry Pi Zero 2 W | Так | Pi 3B+, Pi 4, Pi 5 теж підходять |
-| SD-карта 8+ ГБ | Так | Рекомендовано 16 ГБ |
-| Pi Camera v2 | Так | USB камера як альтернатива |
-| Польотний контролер | Так | ArduPilot 4.3+, перевірено з Matek H743 |
-| 3 дроти (TX, RX, GND) | Так | Для UART з'єднання |
-| IMU (MPU6050) | Ні | Для незалежного AHRS |
-| Барометр (BMP280) | Ні | Для точнішої висоти |
-| GPS модуль | Ні | Для outdoor навігації |
-
-## Швидкий старт
-
-### 1. Встановлення на Pi
-
-Детальна покрокова інструкція (для початківців):
-**[DEPLOYMENT.md](DEPLOYMENT.md)**
-
-### 2. Підключення до польотного контролера
-
-Схема проводки та параметри ArduPilot:
-**[FC_CONNECTION.md](FC_CONNECTION.md)**
-
-### 3. Перевірка роботи
-
-Відкрийте у браузері (з комп'ютера у тій самій мережі):
-```
-http://jtzero.local:8001
-```
+---
 
 ## Документація
 
-| Документ | Опис |
-|----------|------|
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Встановлення на Pi (з GitHub або офлайн) |
-| [FC_CONNECTION.md](FC_CONNECTION.md) | Підключення до Matek H743 / інших FC |
-| [SYSTEM.md](SYSTEM.md) | Архітектура, алгоритми, характеристики |
-| [COMMANDS.md](COMMANDS.md) | Всі команди для збірки, запуску, дебагу |
+| Документ | Що описує |
+|----------|-----------|
+| **[SYSTEM.md](jt-zero/SYSTEM.md)** | Навіщо створена система, як працює алгоритм VO, характеристики (швидкість, висота, точність, дальність), архітектура, обмеження |
+| **[DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)** | Покрокова встановлення від нуля (для початківців). **Два способи: через GitHub або офлайн (архів/USB)** |
+| **[COMMANDS.md](jt-zero/COMMANDS.md)** | Всі команди: збірка, запуск, API (curl), діагностика, troubleshooting |
+| **[FC_CONNECTION.md](jt-zero/FC_CONNECTION.md)** | Підключення до польотного контролера (Matek H743, Pixhawk, etc.) |
 
-## Архітектура (коротко)
+---
+
+## Встановлення без GitHub
+
+Не хочете використовувати `git`? Є два варіанти:
+
+### Варіант 1: Скачати ZIP з сайту
+
+1. На комп'ютері відкрийте: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
+2. Скопіюйте на Pi: `scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/`
+3. На Pi: `unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero`
+
+### Варіант 2: Установочний архів з автоінсталятором
+
+```bash
+# На комп'ютері (де є git clone):
+cd jt-zero
+chmod +x create_archive.sh
+./create_archive.sh
+# Створить файл jt-zero-install.zip
+
+# Скопіювати на Pi:
+scp jt-zero-install.zip pi@jtzero.local:~/
+
+# На Pi:
+unzip jt-zero-install.zip
+cd jt-zero-install
+chmod +x install.sh
+./install.sh
+```
+
+Детальна інструкція: **[DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)** (Етап 5, Спосіб Б)
+
+---
+
+## Архітектура
 
 ```
-  Pi Camera (CSI)     Matek H743-SLIM V3 (FC)
-       |                      |
-  [C++ ядро]            [MAVLink UART]
-  15fps VO               115200 baud
-  FAST + LK              |
-       |                  |
-  [Python FastAPI]--------+
-       |
-  [React Dashboard]
-  7 вкладок, WebSocket @ 10 Hz
+┌─────────────────┐      ┌──────────────────┐      ┌────────────────┐
+│   CSI Camera    │─────>│  C++ Core        │─────>│  Flight        │
+│   (OV5647)      │ MIPI │  - FAST Detect   │ UART │  Controller    │
+│                 │      │  - LK Tracking   │      │  (ArduPilot)   │
+└─────────────────┘      │  - MAVLink TX/RX │      └────────────────┘
+                         └────────┬─────────┘
+                                  │ pybind11
+                         ┌────────┴─────────┐
+                         │  FastAPI Backend  │
+                         │  WebSocket 10 Hz  │
+                         └────────┬─────────┘
+                                  │ HTTP/WS
+                         ┌────────┴─────────┐
+                         │  React Dashboard  │
+                         │  7 вкладок        │
+                         └──────────────────┘
 ```
 
-### 8 потоків реального часу
+## Стек технологій
 
-| Потік | Частота | Роль |
-|-------|---------|------|
-| T0 Supervisor | 10 Hz | Здоров'я системи, телеметрія |
-| T1 Sensors | 200 Hz | Читання IMU, Baro, GPS |
-| T2 Events | 200 Hz | Диспетчер подій |
-| T3 Reflex | 200 Hz | Швидкі реакції (<5ms) |
-| T4 Rules | 20 Hz | Складна логіка поведінки |
-| T5 MAVLink | 50 Hz | Зв'язок з FC |
-| T6 Camera | 15 FPS | Visual Odometry |
-| T7 API | 30 Hz | HTTP/WebSocket бридж |
+| Компонент | Технологія |
+|-----------|-----------|
+| Ядро | C++17, lock-free, 8 потоків реального часу |
+| Зв'язка C++/Python | pybind11 |
+| Backend | FastAPI, WebSocket, uvicorn |
+| Frontend | React 19, Recharts, Tailwind CSS, Three.js |
+| Протокол | MAVLink v2 (повна серіалізація з CRC) |
+| Платформа | Raspberry Pi Zero 2 W (ARM Cortex-A53) |
 
-## API Endpoints
+## Можливості
 
-| Метод | Endpoint | Опис |
-|-------|----------|------|
-| GET | `/api/health` | Стан сервера |
-| GET | `/api/state` | Повна телеметрія |
-| GET | `/api/mavlink` | MAVLink статистика |
-| GET | `/api/sensors` | Режими сенсорів |
-| GET | `/api/diagnostics` | Діагностика обладнання |
-| GET | `/api/camera/frame` | Кадр з камери (PNG) |
-| GET | `/api/camera/features` | Feature points |
-| GET | `/api/performance` | CPU, RAM, Temp |
-| WS | `/api/ws/telemetry` | Потік телеметрії (10 Hz) |
-| POST | `/api/command` | Відправити команду (arm, disarm, etc.) |
-
-## Поточний статус
-
-- Visual Odometry: працює, ~12 Hz
-- MAVLink: працює, ArduPilot EKF приймає VO дані
-- Dashboard: 7 вкладок, все функціонує
-- Камера: Pi Camera v2 (OV5647), 15 FPS
-- FC: Matek H743-SLIM V3, ArduCopter V4.3.6
-
-## Ліцензія
-
-MIT License
+- Visual Odometry з точністю ±5-20 см
+- Ефективна швидкість: до 2-3 м/с
+- Робоча висота: 0.3-10 м (оптимально 1-3 м)
+- Частота VO: ~12 Hz (ArduPilot EKF приймає)
+- 7-вкладковий Dashboard з реальним часом
+- Автовизначення обладнання
+- Підтримка Pi Camera v2/v3 та USB камер

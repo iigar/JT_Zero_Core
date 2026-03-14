@@ -2,26 +2,22 @@
 
 Автономна система візуальної навігації для дронів на базі Raspberry Pi Zero 2 W.
 
-C++ ядро реального часу + Python API + React dashboard + MAVLink інтеграція з польотним контролером.
+## Навіщо це?
 
-## Що це
+Дрони не можуть стабільно літати у приміщеннях без GPS. JT-Zero вирішує цю проблему: камера Pi аналізує переміщення поверхні і передає позицію на польотний контролер через MAVLink. Дрон літає стабільно навіть без GPS, використовуючи лише камеру за $15.
 
-JT-Zero — це companion computer система, яка перетворює звичайну камеру Raspberry Pi на джерело навігаційних даних для польотного контролера. Система аналізує відео з камери, відстежує візуальні ознаки, обчислює переміщення дрона і передає ці дані через MAVLink на FC (ArduPilot/PX4).
+## Що входить
 
-## Можливості
-
-- **Visual Odometry** — обчислення позиції та швидкості за відеопотоком
-- **Стрімінг відео** — живе відео з камери в веб-інтерфейс з накладанням feature points
-- **MAVLink телеметрія** — двонаправлений зв'язок з FC (прийом/передача)
-- **Hardware Diagnostics** — автоматичне сканування обладнання при старті
-- **System Monitor** — моніторинг CPU, RAM, температури, мережі
-- **Веб-інтерфейс** — 7 вкладок з повною інформацією про систему
+- **C++ ядро** — обробка відео та сенсорів в реальному часі (8 потоків)
+- **Python сервер** — FastAPI бекенд з WebSocket стрімінгом
+- **React Dashboard** — 7-вкладковий моніторинг у браузері
+- **MAVLink** — повна двостороння інтеграція з ArduPilot
 
 ## Архітектура
 
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌────────────────┐
-│   CSI Camera    │─────→│  C++ Core        │─────→│  Flight        │
+│   CSI Camera    │─────>│  C++ Core        │─────>│  Flight        │
 │   (OV5647/      │ MIPI │  - Feature Det.  │ UART │  Controller    │
 │    IMX219)      │      │  - Visual Odom.  │      │  (ArduPilot)   │
 └─────────────────┘      │  - MAVLink TX/RX │      └────────────────┘
@@ -39,18 +35,26 @@ JT-Zero — це companion computer система, яка перетворює 
                          └──────────────────┘
 ```
 
-## Швидкий старт
-
-Дивіться [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md) — повна інструкція від нуля.
-
 ## Документація
 
 | Файл | Опис |
 |------|------|
-| [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md) | Встановлення та налаштування (з GitHub або офлайн) |
-| [FC_CONNECTION.md](jt-zero/FC_CONNECTION.md) | Підключення до польотного контролера |
-| [SYSTEM.md](jt-zero/SYSTEM.md) | Технічний опис системи, алгоритми, характеристики |
-| [COMMANDS.md](jt-zero/COMMANDS.md) | Всі команди для взаємодії з системою |
+| **[SYSTEM.md](jt-zero/SYSTEM.md)** | Як працює система, алгоритм VO, характеристики, архітектура |
+| **[DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)** | Встановлення на Pi (через GitHub або офлайн через ZIP/USB) |
+| **[COMMANDS.md](jt-zero/COMMANDS.md)** | Всі команди: збірка, запуск, API, діагностика, troubleshooting |
+| **[FC_CONNECTION.md](jt-zero/FC_CONNECTION.md)** | Підключення до польотного контролера |
+
+## Встановлення без GitHub
+
+Не потрібен `git`! Скачайте ZIP і перенесіть на Pi:
+
+1. Завантажте: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
+2. Скопіюйте на Pi: `scp JT_Zero_Core-main.zip pi@jtzero.local:~/`
+3. На Pi: `unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero`
+
+Або використовуйте скрипт `create_archive.sh` для створення установочного архіву з автоінсталятором.
+
+Детальна інструкція: [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)
 
 ## Стек технологій
 
@@ -59,10 +63,6 @@ JT-Zero — це companion computer система, яка перетворює 
 | Ядро | C++17, lock-free, real-time |
 | Зв'язка C++/Python | pybind11 |
 | Backend | FastAPI, WebSocket, uvicorn |
-| Frontend | React, Recharts, Tailwind CSS |
+| Frontend | React 19, Recharts, Tailwind CSS, Three.js |
 | Протокол | MAVLink v2 |
 | Платформа | Raspberry Pi Zero 2 W (ARM Cortex-A53) |
-
-## Ліцензія
-
-Приватний проєкт.

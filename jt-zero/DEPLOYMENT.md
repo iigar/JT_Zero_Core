@@ -1,12 +1,23 @@
 # JT-Zero — Повна інструкція встановлення на Raspberry Pi
 
+Ця інструкція написана для початківців. Вона покриває ВСЕ: від чистого Pi до працюючої системи. Навіть якщо ви ніколи не працювали з Linux чи Raspberry Pi — просто виконуйте команди по порядку.
+
+**Два способи встановлення:**
+- **Спосіб А:** Через інтернет (GitHub) — якщо Pi підключений до Wi-Fi
+- **Спосіб Б:** Без інтернету (архів) — якщо інтернету немає або не хочете використовувати GitHub
+
+---
+
 ## Що потрібно
 
-- **Raspberry Pi Zero 2 W** (або Pi 3B+, Pi 4, Pi 5 — теж підходять)
-- **SD-карта** мінімум 8 ГБ (рекомендовано 16+ ГБ)
-- **Живлення** — micro-USB кабель + блок живлення 5V 2.5A
-- **Комп'ютер** з Wi-Fi у тій самій мережі (для підключення до Dashboard)
-- **Опціонально:** сенсори (MPU6050, BMP280, GPS), камера Pi Camera v2
+| Компонент | Обов'язково? | Опис |
+|-----------|-------------|------|
+| Raspberry Pi Zero 2 W | Так | Або Pi 3B+, Pi 4, Pi 5 |
+| SD-карта 8+ ГБ | Так | Рекомендовано 16 ГБ |
+| Кабель micro-USB + блок живлення 5V 2.5A | Так | Для живлення Pi |
+| Комп'ютер у тій самій Wi-Fi мережі | Так | Для підключення до Dashboard |
+| Pi Camera v2 | Рекомендовано | CSI камера для Visual Odometry |
+| Польотний контролер (ArduPilot 4.3+) | Рекомендовано | Matek H743, Pixhawk, etc. |
 
 ---
 
@@ -14,247 +25,221 @@
 
 ### 1.1. Завантажте Raspberry Pi Imager
 
-Перейдіть на сайт і завантажте програму для вашої ОС (Windows / Mac / Linux):
+На вашому комп'ютері (Windows / Mac / Linux) перейдіть на сайт:
 
 ```
 https://www.raspberrypi.com/software/
 ```
 
-Встановіть і запустіть.
+Завантажте та встановіть програму.
 
-### 1.2. Налаштуйте образ
+### 1.2. Запишіть образ ОС
 
-1. Натисніть **"Choose Device"** → виберіть **"Raspberry Pi Zero 2 W"**
-2. Натисніть **"Choose OS"** → виберіть **"Raspberry Pi OS (other)"** → **"Raspberry Pi OS Lite (64-bit)"**
-   - Це версія без графічного інтерфейсу — легша і швидша
-3. Натисніть **"Choose Storage"** → виберіть вашу SD-карту
+1. Запустіть Raspberry Pi Imager
+2. **"Choose Device"** → виберіть **"Raspberry Pi Zero 2 W"**
+3. **"Choose OS"** → **"Raspberry Pi OS (other)"** → **"Raspberry Pi OS Lite (64-bit)"**
+   - Lite = без графічного інтерфейсу, швидша та легша
+4. **"Choose Storage"** → виберіть вашу SD-карту
 
-### 1.3. Налаштуйте доступ (ВАЖЛИВО)
+### 1.3. Налаштуйте доступ (ДУЖЕ ВАЖЛИВО!)
 
-Натисніть іконку **шестерні** (або Ctrl+Shift+X) і задайте:
+Натисніть **іконку шестерні** (або Ctrl+Shift+X):
 
-- **Hostname:** `jtzero`
-- **Enable SSH:** ✅ увімкнено, "Use password authentication"
-- **Username:** `pi`
-- **Password:** ваш пароль (запам'ятайте його!)
-- **Wi-Fi SSID:** назва вашої Wi-Fi мережі
-- **Wi-Fi Password:** пароль від Wi-Fi
-- **Wi-Fi Country:** UA (Україна)
+| Налаштування | Значення |
+|-------------|----------|
+| Hostname | `jtzero` |
+| Enable SSH | Так, "Use password authentication" |
+| Username | `pi` |
+| Password | ваш пароль (запам'ятайте!) |
+| Wi-Fi SSID | назва вашої Wi-Fi мережі |
+| Wi-Fi Password | пароль від Wi-Fi |
+| Wi-Fi Country | UA |
 
-Натисніть **"Save"**, потім **"Write"**.
+Натисніть **"Save"**, потім **"Write"**. Зачекайте поки запишеться.
 
 ### 1.4. Вставте SD-карту в Pi і увімкніть живлення
 
-Зачекайте 1-2 хвилини поки Pi завантажиться і підключиться до Wi-Fi.
+Зачекайте 1-2 хвилини — Pi завантажиться і підключиться до Wi-Fi.
 
 ---
 
 ## Етап 2: Підключення до Pi через SSH
 
-### 2.1. Відкрийте термінал
+### На Windows:
+Відкрийте **PowerShell** (пошук → "PowerShell")
 
-- **Windows:** відкрийте PowerShell (пошук → "PowerShell")
-- **Mac/Linux:** відкрийте Terminal
+### На Mac / Linux:
+Відкрийте **Terminal**
 
-### 2.2. Підключіться до Pi
-
-Введіть команду:
+### Підключіться:
 
 ```bash
 ssh pi@jtzero.local
 ```
 
-Система запитає пароль — введіть той, що задали в Imager.
+Введіть пароль, який задали в Imager.
 
 **Якщо `jtzero.local` не працює:**
-- Зайдіть у роутер (зазвичай `192.168.1.1` у браузері) і знайдіть IP-адресу пристрою `jtzero`
-- Підключіться: `ssh pi@192.168.1.XX` (замініть XX на реальну адресу)
+- Зайдіть у роутер (зазвичай `192.168.1.1` у браузері)
+- Знайдіть пристрій `jtzero` і його IP-адресу
+- Підключіться: `ssh pi@192.168.1.XX`
 
-**Якщо все добре — побачите:**
-```
-pi@jtzero:~ $
-```
-
-Це означає: ви всередині Pi і можете вводити команди.
+**Якщо побачите `pi@jtzero:~ $`** — ви всередині Pi!
 
 ---
 
-## Етап 3: Увімкнення інтерфейсів сенсорів
+## Етап 3: Увімкнення інтерфейсів
 
-Цей крок потрібен для апаратних сенсорів (IMU, барометр, GPS). Якщо сенсорів поки немає — все одно зробіть, щоб потім не повертатися.
+Навіть якщо сенсорів ще немає — зробіть цей крок зараз.
 
 ```bash
 sudo raspi-config
 ```
 
-Відкриється меню. Навігація: стрілками вгору/вниз, Enter — вибрати, Tab — перемикання між кнопками.
+Навігація: стрілки вгору/вниз, Enter — вибрати, Tab — переключити кнопки.
 
-1. Виберіть **"Interface Options"** → **"I2C"** → **"Yes"** → **"OK"**
-2. Виберіть **"Interface Options"** → **"SPI"** → **"Yes"** → **"OK"**
-3. Виберіть **"Interface Options"** → **"Serial Port"**:
+1. **"Interface Options"** → **"I2C"** → **"Yes"** → **"OK"**
+2. **"Interface Options"** → **"SPI"** → **"Yes"** → **"OK"**
+3. **"Interface Options"** → **"Serial Port"**:
    - "Would you like a login shell?" → **"No"**
-   - "Would you like the serial hardware enabled?" → **"Yes"** → **"OK"**
-4. Виберіть **"Finish"** → **"Yes"** (перезавантажити)
+   - "Would you like the serial hardware enabled?" → **"Yes"**
+4. **"Finish"** → **"Yes"** (перезавантажити)
 
-Pi перезавантажиться. Зачекайте хвилину і підключіться знову:
-
+Зачекайте хвилину і підключіться знову:
 ```bash
 ssh pi@jtzero.local
 ```
 
 ---
 
-## Етап 4: Встановлення залежностей
-
-Ці команди встановлять програми потрібні для збірки і роботи JT-Zero.
+## Етап 4: Встановлення системних пакетів
 
 ```bash
-sudo apt update && sudo apt install -y cmake g++ python3-dev python3-pip python3-venv pybind11-dev libatomic1 i2c-tools git
+sudo apt update && sudo apt install -y \
+  cmake g++ python3-dev python3-pip python3-venv pybind11-dev \
+  libatomic1 i2c-tools unzip
 ```
 
-**Що встановлюється:**
-- `cmake`, `g++` — компілятор C++ та система збірки
-- `python3-dev`, `python3-pip`, `python3-venv` — Python та інструменти
-- `pybind11-dev` — бібліотека для з'єднання C++ з Python
-- `libatomic1` — бібліотека для lock-free операцій (потрібна рантайму)
-- `i2c-tools` — утиліти для перевірки сенсорів
-- `git` — для завантаження коду з GitHub
+**Що це:**
+| Пакет | Для чого |
+|-------|----------|
+| `cmake`, `g++` | Компілятор C++ та система збірки |
+| `python3-dev`, `python3-pip`, `python3-venv` | Python та пакетний менеджер |
+| `pybind11-dev` | З'єднання C++ з Python |
+| `libatomic1` | Lock-free операції в C++ ядрі |
+| `i2c-tools` | Перевірка I2C сенсорів |
+| `unzip` | Розпакування архівів |
 
 Це займе 2-5 хвилин.
 
 ---
 
-## Етап 5: Перевірка сенсорів (опціонально)
+## Етап 5: Завантаження проєкту
 
-Якщо у вас підключені сенсори (MPU6050, BMP280), перевірте що Pi їх бачить:
-
-```bash
-sudo i2cdetect -y 1
-```
-
-**Що маєте побачити (якщо сенсори підключені):**
-```
-     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-...
-60: -- -- -- -- -- -- -- -- 68 -- -- -- -- -- -- --
-70: -- -- -- -- -- -- 76 -- -- -- -- -- -- -- -- --
-```
-
-- `68` = MPU6050 (IMU/гіроскоп)
-- `76` = BMP280 (барометр)
-
-**Якщо сенсорів немає** — таблиця буде порожня. Це нормально — JT-Zero автоматично використає симуляцію.
-
----
-
-## Етап 6: Завантаження проєкту
-
-### Варіант А: Через GitHub (потрібен інтернет + git)
+### ─── Спосіб А: Через GitHub (потрібен інтернет на Pi) ───
 
 ```bash
+sudo apt install -y git
 git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
 ```
 
-**Що робить:** завантажує весь проєкт з GitHub у папку `~/jt-zero` на Pi.
+Готово! Переходьте до Етапу 6.
 
-### Варіант Б: Без GitHub (офлайн встановлення через ZIP/SCP)
+---
 
-Якщо у вас немає `git` або доступу до GitHub, можна перенести проєкт вручну.
+### ─── Спосіб Б: Без GitHub (офлайн, через архів) ───
 
-#### Крок 1: Завантажте архів на комп'ютер
+Цей спосіб працює навіть якщо на Pi НЕМАЄ інтернету. Вам потрібен комп'ютер з інтернетом для скачування файлів.
 
-На вашому комп'ютері (не на Pi) завантажте ZIP архів проєкту:
+#### Крок Б.1: Скачайте архів на ваш комп'ютер
+
+Відкрийте у браузері на вашому комп'ютері:
 
 ```
 https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip
 ```
 
-Або: на сторінці GitHub натисніть зелену кнопку **"Code"** > **"Download ZIP"**.
+Або: зайдіть на сторінку GitHub проєкту → зелена кнопка **"Code"** → **"Download ZIP"**.
 
-#### Крок 2: Скопіюйте архів на Pi
+Файл `JT_Zero_Core-main.zip` збережеться у папку "Завантаження" (Downloads).
 
-Відкрийте термінал на вашому комп'ютері (не SSH, а локальний):
+#### Крок Б.2: Скопіюйте архів на Pi
+
+Відкрийте **новий** термінал на вашому комп'ютері (НЕ SSH до Pi, а локальний).
 
 **Windows (PowerShell):**
 ```powershell
-scp C:\Users\ВАШ_ЛОГІН\Downloads\JT_Zero_Core-main.zip pi@jtzero.local:~/
+scp $env:USERPROFILE\Downloads\JT_Zero_Core-main.zip pi@jtzero.local:~/
 ```
 
-**Mac/Linux:**
+**Mac:**
 ```bash
 scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
 ```
 
-Система запитає пароль Pi -- введіть його.
+**Linux:**
+```bash
+scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+```
 
-#### Крок 3: Розпакуйте на Pi
+Система запитає пароль Pi — введіть його. Файл скопіюється на Pi.
 
-Підключіться до Pi через SSH і виконайте:
+#### Крок Б.3: Розпакуйте на Pi
+
+Поверніться до SSH-терміналу Pi:
 
 ```bash
-# Встановити unzip (якщо не встановлений)
-sudo apt install -y unzip
+cd ~
+unzip JT_Zero_Core-main.zip
+mv JT_Zero_Core-main jt-zero
+rm JT_Zero_Core-main.zip
+```
+
+**Перевірте:**
+```bash
+ls ~/jt-zero/
+```
+
+Маєте побачити: `backend/  frontend/  jt-zero/  memory/  README.md  ...`
+
+#### Альтернатива: USB флешка (якщо Pi НЕ в мережі)
+
+Якщо Pi взагалі не підключений до мережі:
+
+1. На комп'ютері: скачайте ZIP на USB флешку
+2. Вставте флешку в Pi через **micro-USB OTG адаптер**
+3. На Pi:
+```bash
+# Змонтувати флешку
+sudo mkdir -p /mnt/usb
+sudo mount /dev/sda1 /mnt/usb
+
+# Скопіювати архів
+cp /mnt/usb/JT_Zero_Core-main.zip ~/
+
+# Відмонтувати і витягти флешку
+sudo umount /mnt/usb
 
 # Розпакувати
 cd ~
 unzip JT_Zero_Core-main.zip
-
-# Перейменувати папку
 mv JT_Zero_Core-main jt-zero
-
-# Перевірити
-ls ~/jt-zero/
-# Маєте побачити: backend/  frontend/  jt-zero/  memory/  ...
+rm JT_Zero_Core-main.zip
 ```
-
-#### Крок 4: Видалити ZIP (не обов'язково)
-```bash
-rm ~/JT_Zero_Core-main.zip
-```
-
-#### Як оновлювати без GitHub?
-
-Кожного разу коли потрібно оновити:
-1. На комп'ютері: завантажте новий ZIP з GitHub
-2. Скопіюйте на Pi через `scp`
-3. Розпакуйте з заміною:
-```bash
-cd ~
-unzip -o JT_Zero_Core-main.zip
-rm -rf jt-zero
-mv JT_Zero_Core-main jt-zero
-cd ~/jt-zero/jt-zero/build && make -j4
-cp jtzero_native*.so ../../backend/
-sudo systemctl restart jtzero
-```
-
-#### Альтернатива: USB флешка
-
-Якщо Pi не підключений до мережі:
-1. Скачайте ZIP на флешку
-2. Вставте флешку в Pi через OTG-адаптер
-3. Змонтуйте:
-```bash
-sudo mkdir -p /mnt/usb
-sudo mount /dev/sda1 /mnt/usb
-cp /mnt/usb/JT_Zero_Core-main.zip ~/
-sudo umount /mnt/usb
-```
-4. Далі -- як у кроці 3 вище
 
 ---
 
-## Етап 7: Збірка C++ рантайму
+## Етап 6: Збірка C++ ядра
 
-### 7.1. Виправити відому помилку компілятора
+### 6.1. Виправлення для GCC 14
 
-GCC 14 (який стоїть на новому Pi OS) суворіший до коду. Потрібно додати один рядок:
+GCC 14 (на новому Pi OS) суворіший до коду. Потрібно додати один рядок:
 
 ```bash
 sed -i '10a #include <cstdlib>' ~/jt-zero/jt-zero/main.cpp
 ```
 
-### 7.2. Зібрати
+### 6.2. Компіляція
 
 ```bash
 cd ~/jt-zero/jt-zero
@@ -266,52 +251,53 @@ make -j4
 ```
 
 **Що робить кожна команда:**
-1. Переходить у папку з C++ кодом
-2. Видаляє стару папку збірки (якщо є)
-3. Створює нову папку збірки
-4. Переходить у неї
-5. `cmake` — аналізує проєкт і генерує інструкції для компілятора
-6. `make -j4` — компілює код використовуючи всі 4 ядра Pi
+1. Переходить у папку C++ коду
+2. Видаляє стару папку збірки
+3. Створює нову папку для компіляції
+4. Входить у неї
+5. `cmake` — аналізує проєкт і готує інструкції для компілятора
+6. `make -j4` — компілює, використовуючи всі 4 ядра Pi
 
-**Збірка займає 5-10 хвилин.** Під час збірки можуть з'явитися жовті `warning` — це нормально. Головне — немає червоних `error`.
+**Збірка займає 5-10 хвилин.** Жовті `warning` — це нормально. Головне — немає червоних `error`.
 
-**Якщо все добре, останній рядок:**
+**Якщо все добре, останні рядки:**
 ```
-[100%] Built target jt-zero
+[100%] Built target jtzero_native
 ```
+
+**ЦІ Ж САМІ КОМАНДИ** працюють однаково незалежно від того, скачали ви код через GitHub чи через ZIP архів. Структура файлів ідентична.
 
 ---
 
-## Етап 8: Налаштування Python-сервера
+## Етап 7: Налаштування Python-сервера
 
-### 8.1. Скопіювати C++ модуль у backend
+### 7.1. Скопіюйте зібраний C++ модуль
 
 ```bash
 cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/
 ```
 
-### 8.2. Створити Python-середовище та встановити бібліотеки
+### 7.2. Створіть Python-середовище
 
 ```bash
 cd ~/jt-zero/backend
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn websockets
+pip install fastapi uvicorn websockets psutil
 ```
 
-### 8.3. Перевірити що C++ модуль працює
+### 7.3. Перевірте C++ модуль
 
 ```bash
-python3 -c "import jtzero_native; print('OK')"
+python3 -c "import jtzero_native; print('C++ module OK!')"
 ```
 
-**Якщо побачите `OK`** — C++ рантайм підключений, сервер використовуватиме швидкий нативний код.
-
-**Якщо помилка** — не страшно, сервер автоматично переключиться на Python-симулятор.
+**Якщо `C++ module OK!`** — все працює.
+**Якщо помилка** — не страшно, сервер автоматично використає Python-симулятор.
 
 ---
 
-## Етап 9: Перший запуск (тест)
+## Етап 8: Перший запуск (тест)
 
 ```bash
 cd ~/jt-zero/backend
@@ -319,44 +305,38 @@ source venv/bin/activate
 uvicorn server:app --host 0.0.0.0 --port 8001
 ```
 
-**Що маєте побачити:**
+**Маєте побачити:**
 ```
-[JT-Zero API] Using NATIVE C++ runtime (GCC GCC 14.2)
+[JT-Zero API] Using NATIVE C++ runtime (GCC 14.2)
 [JT-Zero] All threads started (7 threads)
 INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
 ```
 
 ### Перевірка у браузері
 
-На вашому комп'ютері (не на Pi) відкрийте:
-
+На вашому комп'ютері відкрийте:
 ```
 http://jtzero.local:8001
 ```
 
-Або якщо не працює — дізнайтесь IP Pi:
+Або знайдіть IP Pi:
 ```bash
-# На Pi (в іншому вікні SSH):
+# На Pi (в іншому SSH-вікні):
 hostname -I
 ```
+І відкрийте: `http://<IP>:8001`
 
-І відкрийте: `http://<IP_АДРЕСА>:8001`
+**Маєте побачити:** Dashboard з 3D дроном, графіками, 7 вкладками.
 
-**Маєте побачити:** Dashboard з 3D дроном, графіками телеметрії, вкладками.
-
-### Зупинити тестовий запуск
-
-Натисніть **Ctrl+C** у терміналі де запущено сервер.
+Натисніть **Ctrl+C** щоб зупинити тестовий запуск.
 
 ---
 
-## Етап 10: Автозапуск (systemd)
+## Етап 9: Автозапуск (systemd)
 
 Щоб JT-Zero запускався автоматично при кожному включенні Pi.
 
-### 10.1. Створити файл сервісу
-
-Скопіюйте цю команду **повністю** і вставте:
+### 9.1. Створіть сервіс
 
 ```bash
 sudo tee /etc/systemd/system/jtzero.service << 'EOF'
@@ -378,7 +358,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### 10.2. Увімкнути та запустити
+### 9.2. Увімкніть і запустіть
 
 ```bash
 sudo systemctl daemon-reload
@@ -386,281 +366,163 @@ sudo systemctl enable jtzero
 sudo systemctl start jtzero
 ```
 
-### 10.3. Перевірити
+### 9.3. Перевірте
 
 ```bash
 sudo systemctl status jtzero
 ```
 
-**Маєте побачити зелений текст `active (running)`.**
-
-Натисніть **`q`** щоб вийти з цього екрану.
+**Має бути зелений `active (running)`.**
+Натисніть `q` щоб вийти.
 
 ---
 
-## Етап 11: Налаштування камери
+## Етап 10: Підключення камери
 
-Pi Camera Module (v2/v3) підключається через CSI шлейф. На Pi Zero 2 W використовується **міні-CSI** роз'єм (22-pin), тому потрібен правильний адаптер-шлейф (22-pin → 15-pin).
+### 10.1. Фізичне підключення
 
-### 11.1. Підключення камери
-
-1. **Вимкніть Pi** повністю (відключіть живлення)
-2. Знайдіть на Pi Zero 2W маленький білий роз'єм — це міні-CSI
-3. Акуратно підніміть фіксатор роз'єму (чорна планка)
-4. Вставте шлейф контактами вниз (до плати), синьою стороною вгору
+1. **Вимкніть Pi** (відключіть живлення)
+2. На Pi Zero 2W знайдіть маленький білий роз'єм — **міні-CSI** (22-pin)
+3. Підніміть фіксатор (чорна планка)
+4. Вставте шлейф контактами вниз, синьою стороною вгору
 5. Закрийте фіксатор
 6. Увімкніть Pi
 
-**ВАЖЛИВО:** Pi Zero 2W має **22-pin** міні-CSI роз'єм. Стандартний шлейф від Pi 3/4 (15-pin) НЕ підходить! Потрібен перехідник або спеціальний шлейф "Pi Zero Camera Cable".
+**ВАЖЛИВО:** Pi Zero 2W має **22-pin** роз'єм. Стандартний шлейф Pi 3/4 (15-pin) НЕ підходить! Потрібен перехідник або "Pi Zero Camera Cable".
 
-### 11.2. Встановлення libcamera
-
-На нових версіях Pi OS (Bookworm) утиліта `libcamera-hello` може бути не встановлена за замовчуванням:
+### 10.2. Перевірка
 
 ```bash
-sudo apt update && sudo apt install -y libcamera-apps libcamera-dev
-```
-
-### 11.3. Перевірка конфігурації boot
-
-```bash
-# Перевірити наявний конфіг:
-grep -i camera /boot/firmware/config.txt
-
-# Якщо нічого не знайдено або файл в іншому місці:
-grep -i camera /boot/config.txt
-```
-
-Переконайтесь що є рядок:
-```
-camera_auto_detect=1
-```
-
-Якщо його немає — додайте:
-```bash
-# Для Bookworm (Pi OS 12):
-echo "camera_auto_detect=1" | sudo tee -a /boot/firmware/config.txt
-
-# Для Bullseye (Pi OS 11):
-echo "camera_auto_detect=1" | sudo tee -a /boot/config.txt
-```
-
-Перезавантажте:
-```bash
-sudo reboot
-```
-
-### 11.4. Перевірка камери
-
-Після перезавантаження:
-
-```bash
-# Перевірка чи libcamera бачить камеру:
 rpicam-hello --list-cameras
-
-# Тест камери (показує картинку на 2 секунди):
-rpicam-hello --timeout 2000
-
-# Якщо все працює, зробити фото:
 rpicam-still -o test.jpg
 ls -la test.jpg
 ```
 
-**Увага!** На Pi OS Trixie/Bookworm команди `libcamera-*` були перейменовані на `rpicam-*`:
-- `libcamera-hello` → `rpicam-hello`
-- `libcamera-still` → `rpicam-still`
-- `libcamera-vid` → `rpicam-vid`
-
-### 11.5. Якщо камера не виявлена
-
+Якщо камера не знайдена:
 ```bash
-# 1. Перевірте версію ОС:
-cat /etc/os-release
+# Перевірте boot config
+grep camera /boot/firmware/config.txt
+# Має бути: camera_auto_detect=1
 
-# 2. Перевірте DToverlay:
-cat /boot/firmware/config.txt | grep dtoverlay
-
-# 3. Для конкретних моделей камер може знадобитися:
-#    Pi Camera v3 (IMX708):
-#    dtoverlay=imx708
-#
-#    Pi Camera v2 (IMX219):
-#    dtoverlay=imx219
-#
-#    Додайте в /boot/firmware/config.txt і перезавантажте
-
-# 4. Перевірте dmesg на помилки камери:
-dmesg | grep -i camera
-dmesg | grep -i csi
-dmesg | grep -i imx
+# Якщо немає — додайте:
+echo "camera_auto_detect=1" | sudo tee -a /boot/firmware/config.txt
+sudo reboot
 ```
-
-### 11.6. USB веб-камера (альтернатива)
-
-Якщо CSI камера не працює або ви використовуєте USB камеру:
-
-```bash
-# Підключіть USB камеру через OTG адаптер
-# Перевірте що камера визначена:
-ls /dev/video*
-
-# Маєте побачити /dev/video0 або /dev/video1
-# Перевірте деталі:
-v4l2-ctl --list-devices
-```
-
-JT-Zero автоматично визначає тип камери при запуску: спочатку шукає CSI, потім USB, і лише потім переходить у режим симуляції.
 
 ---
 
-## Етап 12: Підключення сенсорів (GPIO)
+## Етап 11: Підключення сенсорів (опціонально)
 
-### Схема підключення (3.3V логіка!)
+### I2C сенсори (MPU6050, BMP280)
 
 ```
-  Pi Zero 2 W GPIO Header
-  ─────────────────────────
+  Pi GPIO Header
+  ─────────────────────
   3V3  (1) (2)  5V
-  SDA  (3) (4)  5V        ← I2C: MPU6050 + BMP280 (дані)
-  SCL  (5) (6)  GND       ← I2C: MPU6050 + BMP280 (тактування)
-  GP4  (7) (8)  TX (UART) ← GPS модуль: RX
-  GND  (9) (10) RX (UART) ← GPS модуль: TX
+  SDA  (3) (4)  5V        ← MPU6050 + BMP280: SDA
+  SCL  (5) (6)  GND       ← MPU6050 + BMP280: SCL
+  GP4  (7) (8)  TX (UART) ← GPS RX
+  GND  (9) (10) RX (UART) ← GPS TX
 ```
 
-### MPU6050 (IMU — гіроскоп + акселерометр)
+I2C сенсори підключаються до ОДНИХ і тих самих пінів SDA/SCL (вони на одній шині).
 
-| MPU6050 пін | Pi пін | Опис |
-|---|---|---|
-| VCC | Pin 1 (3.3V) | Живлення |
-| GND | Pin 6 (GND) | Земля |
-| SDA | Pin 3 (GPIO 2) | Дані I2C |
-| SCL | Pin 5 (GPIO 3) | Тактування I2C |
-
-### BMP280 (барометр — висота + температура)
-
-| BMP280 пін | Pi пін | Опис |
-|---|---|---|
-| VCC | Pin 1 (3.3V) | Живлення |
-| GND | Pin 9 (GND) | Земля |
-| SDA | Pin 3 (GPIO 2) | Дані I2C (спільний з MPU6050) |
-| SCL | Pin 5 (GPIO 3) | Тактування I2C (спільний з MPU6050) |
-
-### GPS модуль (NMEA через UART)
-
-| GPS пін | Pi пін | Опис |
-|---|---|---|
-| VCC | Pin 1 (3.3V) | Живлення |
-| GND | Pin 6 (GND) | Земля |
-| TX | Pin 10 (GPIO 15, RX) | GPS передає → Pi приймає |
-| RX | Pin 8 (GPIO 14, TX) | Pi передає → GPS приймає |
-
-**ВАЖЛИВО:** I2C сенсори (MPU6050, BMP280) підключаються до ОДНИХ і тих самих пінів SDA/SCL — вони розділяють шину.
+Перевірка:
+```bash
+sudo i2cdetect -y 1
+# 0x68 = MPU6050, 0x76 = BMP280
+```
 
 ---
 
-## Корисні команди
+## Етап 12: Підключення до польотного контролера
 
-| Що зробити | Команда |
-|---|---|
-| Статус сервера | `sudo systemctl status jtzero` |
-| Зупинити | `sudo systemctl stop jtzero` |
-| Запустити | `sudo systemctl start jtzero` |
-| Перезапустити | `sudo systemctl restart jtzero` |
-| Логи в реальному часі | `journalctl -u jtzero -f` |
-| Перевірити I2C сенсори | `sudo i2cdetect -y 1` |
-| Перевірити API | `curl http://localhost:8001/api/health` |
-| IP адреса Pi | `hostname -I` |
+Детальна інструкція: **[FC_CONNECTION.md](FC_CONNECTION.md)**
+
+Коротко:
+```
+Pi TX (GPIO14) → FC RX (SERIAL4/UART6)
+Pi RX (GPIO15) → FC TX
+GND            → GND
+```
+
+Параметри ArduPilot (Mission Planner):
+```
+SERIAL4_PROTOCOL = 2    (MAVLink2)
+SERIAL4_BAUD = 115       (115200)
+VISO_TYPE = 1            (MAVLink)
+EK3_SRC1_POSXY = 6      (ExternalNav)
+EK3_SRC1_VELXY = 6      (ExternalNav)
+```
 
 ---
 
-## Оновлення проєкту
+## Як оновлювати систему
 
-Коли в Emergent зроблені зміни і збережені на GitHub:
+### З GitHub (якщо є інтернет)
 
 ```bash
-cd ~/jt-zero
-git pull
-cd jt-zero/build
-make -j4
-cp jtzero_native*.so ~/jt-zero/backend/
+cd ~/jt-zero && git pull
+cd jt-zero/build && make -j4
+cp jtzero_native*.so ../../backend/
 sudo systemctl restart jtzero
 ```
 
----
+### Без GitHub (архівом)
 
-## Мінімальна конфігурація (без зовнішніх сенсорів)
-
-JT-Zero працює і без зовнішніх сенсорів:
-
-- **Pi Zero 2 W** + **камера** + **UART до польотного контролера** — цього достатньо
-- Всі відсутні сенсори автоматично переходять у режим симуляції
-- Камера (Pi Camera v2 або USB) забезпечує Visual Odometry
-- MAVLink через UART відправляє дані на польотний контролер
-
-Зовнішній IMU (MPU6050) потрібен тільки якщо хочете незалежний AHRS на companion computer.
+1. На комп'ютері: скачайте новий ZIP з GitHub
+2. Скопіюйте на Pi:
+```bash
+# На комп'ютері:
+scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+```
+3. На Pi:
+```bash
+cd ~
+unzip -o JT_Zero_Core-main.zip
+rm -rf jt-zero
+mv JT_Zero_Core-main jt-zero
+cd ~/jt-zero/jt-zero/build && make -j4
+cp jtzero_native*.so ../../backend/
+sudo systemctl restart jtzero
+```
 
 ---
 
 ## Вирішення проблем
 
 ### "Cannot connect to jtzero.local"
-- Перевірте що Pi і комп'ютер в одній Wi-Fi мережі
-- Спробуйте IP адресу замість jtzero.local
-- На Pi: `hostname -I` покаже IP
-
-### "{"detail":"Not Found"}" у браузері
-- Dashboard (папка `static/`) не скопійована в backend
-- Оновіть код: `cd ~/jt-zero && git pull && sudo systemctl restart jtzero`
+- Pi і комп'ютер мають бути в одній Wi-Fi мережі
+- Спробуйте IP адресу: на Pi виконайте `hostname -I`
 
 ### Сервер не запускається
-- Перевірте логи: `journalctl -u jtzero -n 50`
-- Перевірте що venv існує: `ls ~/jt-zero/backend/venv/bin/uvicorn`
+```bash
+sudo journalctl -u jtzero -n 50 --no-pager
+```
 
-### Збірка C++ падає з помилкою
-- Перевірте що всі залежності встановлені (Етап 4)
-- Спробуйте чисту збірку: `cd ~/jt-zero/jt-zero && rm -rf build && mkdir build && cd build && cmake .. && make -j4`
+### Збірка C++ падає
+```bash
+cd ~/jt-zero/jt-zero
+rm -rf build && mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j4
+```
 
 ### ArduPilot Pre-Arm помилки
 
-#### "Rangefinder 1: No Data"
-
-Ця помилка з'являється якщо ArduPilot очікує дані від далекоміра, але він не підключений.
-
-**Рішення:** Відключити далекомір у Mission Planner:
-```
-RNGFND1_TYPE = 0
-```
-Після зміни -- натисніть **"Write Params"** і перезавантажте FC.
-
-#### "Battery 1 below minimum arming voltage"
-
-Напруга батареї нижче мінімального порогу для arm.
-
-**Рішення (виберіть одне):**
-1. **Зарядіть батарею** до робочої напруги (для 4S LiPo -- мінімум 14.8V)
-2. **Знизіть поріг** (для тестування без батареї):
-```
-BATT_ARM_VOLT = 0
-```
-**УВАГА:** Не літайте з `BATT_ARM_VOLT = 0` -- це лише для наземного тестування!
-
-#### "VisOdom: not healthy"
-
-Visual Odometry не отримує дані від JT-Zero.
-
-**Перевірте:**
-1. JT-Zero запущений: `sudo systemctl status jtzero`
-2. MAVLink підключений: `curl -s http://localhost:8001/api/mavlink | python3 -c "import sys,json;print(json.load(sys.stdin)['state'])"`
-3. VO повідомлення відправляються: лічильник `vision_pos_sent` росте
-4. Параметри FC: `VISO_TYPE = 1`, `EK3_SRC1_POSXY = 6`
+| Помилка | Рішення |
+|---------|---------|
+| "Rangefinder 1: No Data" | Mission Planner: `RNGFND1_TYPE = 0` |
+| "Battery below minimum arming" | Зарядіть батарею або `BATT_ARM_VOLT = 0` (тільки для тесту!) |
+| "VisOdom: not healthy" | Перевірте JT-Zero: `curl http://localhost:8001/api/mavlink` |
 
 ---
 
 ## Порядок дій після встановлення
 
-1. Перевірте Dashboard у браузері: `http://jtzero.local:8001`
-2. Перевірте вкладку **Settings** > **Hardware Diagnostics**
-3. Перевірте вкладку **MAVLink** -- статус має бути **CONNECTED**
+1. Відкрийте Dashboard: `http://jtzero.local:8001`
+2. Перевірте вкладку **Settings** → Hardware Diagnostics
+3. Перевірте вкладку **MAVLink** — статус має бути **CONNECTED**
 4. У Mission Planner перевірте Pre-Arm Messages
-5. Виправте Pre-Arm помилки (див. вище)
-6. Перший тест: **БЕЗ ПРОПЕЛЕРІВ!**
+5. Виправте Pre-Arm помилки (таблиця вище)
+6. **Перший тест: БЕЗ ПРОПЕЛЕРІВ!**
