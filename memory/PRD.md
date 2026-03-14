@@ -98,8 +98,8 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 ## Backlog
 
 ### P1
-- Implement MAVLink VISION_POSITION_ESTIMATE sending (so FC accepts VO data)
 - Hardware Diagnostics Panel (auto-check all subsystems on startup)
+- Implement MAVLink VISION_POSITION_ESTIMATE sending (so FC accepts VO data)
 - Fix CRC for outgoing REQUEST_DATA_STREAM (currently needs SR4_* manual config)
 
 ### P2
@@ -108,3 +108,18 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 - Camera IP_STREAM (RTSP/HTTP), thermal camera
 - Performance optimization (ARM NEON intrinsics)
 - Full MAVLink v2 message serialization with proper CRC
+
+### 2026-03-14 Session (System Monitor + Charts)
+- **Replaced PerformancePanel with System Monitor** — shows real OS metrics via psutil:
+  CPU total + per-core, RAM used/total, temperature, disk usage, network TX/RX, process info, sparkline histories
+- **Improved TelemetryCharts:**
+  - Visible Y-axis labels with proper auto-scaling (paddedDomain)
+  - Current value readouts next to chart titles
+  - New Barometer pressure chart
+  - ReferenceLine at y=0 for Attitude and Gyro charts
+  - Disabled chart animations for smoother real-time updates
+- **New backend module** `system_metrics.py` — uses psutil for CPU, RAM, temp, disk, network, process metrics
+- **Updated /api/performance** — returns `{engine: ..., system: ...}` structure
+- **WebSocket** now includes `system_metrics` field in telemetry payload
+- **Backend tests:** 59 tests passing (added 9 new system metrics tests)
+
