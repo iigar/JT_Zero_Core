@@ -55,6 +55,12 @@ public:
     RangefinderSensor&  range() { return range_; }
     OpticalFlowSensor&  flow()  { return flow_; }
     
+    const IMUSensor&          imu()   const { return imu_; }
+    const BarometerSensor&    baro()  const { return baro_; }
+    const GPSSensor&          gps()   const { return gps_sensor_; }
+    const RangefinderSensor&  range() const { return range_; }
+    const OpticalFlowSensor&  flow()  const { return flow_; }
+    
     // Access camera & MAVLink
     CameraPipeline&    camera()  { return camera_; }
     MAVLinkInterface&  mavlink() { return mavlink_; }
