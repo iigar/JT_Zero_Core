@@ -26,3 +26,7 @@ Thumbs.db
 
 # Do NOT ignore backend/static — it contains the production frontend build
 !backend/static/
+-e 
+# Environment files
+*.env
+*.env.*
