@@ -123,8 +123,16 @@ async def get_state():
 
 @app.get("/api/diagnostics")
 async def get_diagnostics():
-    """Return cached hardware diagnostics."""
-    return get_cached_diagnostics()
+    """Return cached hardware diagnostics with live MAVLink status."""
+    diag = get_cached_diagnostics()
+    # Always refresh MAVLink status (it changes after startup)
+    mavlink = runtime.get_mavlink_stats()
+    connected = mavlink.get("state") == "CONNECTED"
+    diag["mavlink"]["connected"] = connected
+    diag["mavlink"]["fc_type"] = mavlink.get("fc_type", "N/A")
+    diag["mavlink"]["fc_firmware"] = mavlink.get("fc_firmware", "N/A")
+    diag["summary"]["mavlink_connected"] = connected
+    return diag
 
 @app.post("/api/diagnostics/scan")
 async def scan_diagnostics():

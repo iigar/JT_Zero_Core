@@ -260,7 +260,7 @@ export default function DiagnosticsPanel() {
                     return (
                       <div key={key} className="flex items-center justify-between py-0.5">
                         <div className="flex items-center gap-1.5">
-                          <StatusIcon status={isHw} />
+                          <StatusIcon status={isHw || mode === 'mavlink'} />
                           <span className="text-[9px] text-slate-400">{label}</span>
                           {model && model !== 'none' && (
                             <span className="text-[8px] text-slate-600 font-mono">{model}</span>
@@ -269,8 +269,10 @@ export default function DiagnosticsPanel() {
                         <span className={`text-[8px] font-bold uppercase px-1 py-0.5 rounded-sm border ${
                           isHw
                             ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
+                            : mode === 'mavlink'
+                            ? 'text-sky-400 border-sky-500/20 bg-sky-500/5'
                             : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
-                        }`}>{isHw ? 'HW' : 'SIM'}</span>
+                        }`}>{isHw ? 'HW' : mode === 'mavlink' ? 'MAV' : 'SIM'}</span>
                       </div>
                     );
                   })}

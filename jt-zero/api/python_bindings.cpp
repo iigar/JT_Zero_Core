@@ -388,12 +388,22 @@ PYBIND11_MODULE(jtzero_native, m) {
         
         .def("get_sensor_modes", [](const jtzero::Runtime& self) {
             const auto& hw = self.hw_info();
+            // Determine actual data source for each sensor:
+            // - "hardware" = direct I2C/SPI driver active (hw_info detected + try_hardware succeeded)
+            // - "mavlink"  = native mode, data comes from flight controller via MAVLink
+            // - "simulated" = simulation mode
+            auto sensor_mode = [&](bool hw_detected) -> std::string {
+                if (!self.is_simulator_mode()) {
+                    return hw_detected ? "hardware" : "mavlink";
+                }
+                return "simulated";
+            };
             return py::dict(
-                "imu"_a = self.imu().is_simulated() ? "simulated" : "hardware",
-                "baro"_a = self.baro().is_simulated() ? "simulated" : "hardware",
-                "gps"_a = self.gps().is_simulated() ? "simulated" : "hardware",
-                "rangefinder"_a = self.range().is_simulated() ? "simulated" : "hardware",
-                "optical_flow"_a = self.flow().is_simulated() ? "simulated" : "hardware",
+                "imu"_a = sensor_mode(hw.imu_detected),
+                "baro"_a = sensor_mode(hw.baro_detected),
+                "gps"_a = sensor_mode(hw.gps_detected),
+                "rangefinder"_a = self.is_simulator_mode() ? "simulated" : "mavlink",
+                "optical_flow"_a = self.is_simulator_mode() ? "simulated" : "mavlink",
                 "hw_info"_a = py::dict(
                     "i2c_available"_a = hw.i2c_available,
                     "imu_detected"_a = hw.imu_detected,
@@ -406,7 +416,7 @@ PYBIND11_MODULE(jtzero_native, m) {
                     "gps_model"_a = std::string(hw.gps_model)
                 )
             );
-        }, "Get sensor modes (hardware vs simulated) and detection info")
+        }, "Get sensor modes (hardware vs mavlink vs simulated) and detection info")
         
         .def("get_events", [](const jtzero::Runtime& self, size_t count) {
             return recent_events_to_list(self, count);

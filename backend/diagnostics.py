@@ -13,6 +13,7 @@ import time
 I2C_KNOWN_DEVICES = {
     0x1E: "HMC5883L (Compass)",
     0x29: "VL53L0X (Rangefinder)",
+    0x36: "MAX17048 (Fuel Gauge) / CSI Camera",
     0x3C: "SSD1306 (OLED)",
     0x48: "ADS1115 (ADC)",
     0x50: "AT24C32 (EEPROM)",

@@ -120,13 +120,13 @@ class NativeRuntime:
                 return dict(self._rt.get_sensor_modes())
         except Exception:
             pass
-        # Fallback: determine modes from state
+        # Fallback: native mode without new C++ binding = mavlink
         return {
-            "imu": "simulated",
-            "baro": "simulated",
-            "gps": "simulated",
-            "rangefinder": "simulated",
-            "optical_flow": "simulated",
+            "imu": "mavlink",
+            "baro": "mavlink",
+            "gps": "mavlink",
+            "rangefinder": "mavlink",
+            "optical_flow": "mavlink",
             "hw_info": {
                 "i2c_available": False,
                 "imu_detected": False,
