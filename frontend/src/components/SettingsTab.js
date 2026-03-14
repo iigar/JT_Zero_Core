@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiCall } from '../hooks/useApi';
-import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, HardDrive, Activity, Wifi, Thermometer, MemoryStick, Server } from 'lucide-react';
+import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, Activity, Wifi, MemoryStick, Server } from 'lucide-react';
+import DiagnosticsPanel from './DiagnosticsPanel';
 
 function Slider({ label, value, min, max, step, unit, onChange, testId }) {
   return (
@@ -178,46 +179,12 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
           </div>
         </div>
 
-        {/* Row 2: Hardware Sensors + Thread Details */}
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-6">
-            <SectionCard title="Hardware Sensors" icon={HardDrive} testId="settings-hardware">
-              <div className="space-y-1.5">
-                {[
-                  { name: 'IMU (MPU6050)', bus: 'I2C 0x68', data: state?.imu, key: 'imu' },
-                  { name: 'Barometer (BMP280)', bus: 'I2C 0x76', data: state?.baro, key: 'baro' },
-                  { name: 'GPS (NMEA)', bus: 'UART 9600', data: state?.gps, key: 'gps' },
-                  { name: 'Rangefinder', bus: 'I2C/UART', data: state?.rangefinder, key: 'rangefinder' },
-                  { name: 'Optical Flow', bus: 'SPI', data: state?.optical_flow, key: 'optical_flow' },
-                ].map(({ name, bus, data, key }) => {
-                  const isHardware = sensorModes?.[key] === 'hardware';
-                  return (
-                  <div key={name} className="flex items-center justify-between py-1 border-b border-[#1E293B]/30">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${data?.valid ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]' : 'bg-slate-700'}`} />
-                      <span className="text-[10px] text-slate-300">{name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[8px] text-slate-600 font-mono">{bus}</span>
-                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm border ${
-                        isHardware
-                          ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
-                          : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
-                      }`} data-testid={`sensor-mode-${key}`}>
-                        {isHardware ? 'HW' : 'SIM'}
-                      </span>
-                    </div>
-                  </div>
-                  );
-                })}
-              </div>
-              <p className="text-[8px] text-slate-600 mt-2">
-                Sensors auto-detect hardware. Missing devices fall back to simulation.
-              </p>
-            </SectionCard>
-          </div>
+        {/* Row 2: Hardware Diagnostics */}
+        <DiagnosticsPanel />
 
-          <div className="col-span-6">
+        {/* Row 3: Thread Details */}
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-12">
             <SectionCard title="Thread Status" icon={Activity} testId="settings-threads">
               <div className="space-y-1">
                 {threads?.map((t, i) => (

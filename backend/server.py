@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional
 from system_metrics import get_system_metrics
+from diagnostics import run_diagnostics, get_cached_diagnostics
 
 # ─── Runtime Selection ────────────────────────────────────
 # Try native C++ runtime first, fall back to Python simulator
@@ -42,6 +43,16 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     runtime.start()
+    # Run initial hardware diagnostics scan
+    try:
+        mavlink = runtime.get_mavlink_stats()
+        diag = run_diagnostics(mavlink_stats=mavlink)
+        print(f"[JT-Zero API] Hardware scan: camera={diag['summary']['camera']}, "
+              f"i2c={diag['summary']['i2c_devices']} devices, "
+              f"mavlink={'OK' if diag['summary']['mavlink_connected'] else 'N/A'} "
+              f"({diag['scan_duration_ms']}ms)")
+    except Exception as e:
+        print(f"[JT-Zero API] Hardware scan failed: {e}")
     yield
     runtime.stop()
 
@@ -109,6 +120,17 @@ async def get_hardware():
 @app.get("/api/state")
 async def get_state():
     return runtime.get_state()
+
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Return cached hardware diagnostics."""
+    return get_cached_diagnostics()
+
+@app.post("/api/diagnostics/scan")
+async def scan_diagnostics():
+    """Run a fresh hardware diagnostics scan."""
+    mavlink = runtime.get_mavlink_stats()
+    return run_diagnostics(mavlink_stats=mavlink)
 
 @app.get("/api/events")
 async def get_events(count: int = 50):

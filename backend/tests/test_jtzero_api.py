@@ -619,6 +619,152 @@ class TestEventDeduplication:
         assert len(heartbeat_events) == 0, "SYS_HEARTBEAT events should be filtered out"
 
 
+class TestDiagnosticsEndpoint:
+    """Tests for /api/diagnostics endpoint - hardware diagnostics scanner (new in iteration 11)"""
+    
+    def test_diagnostics_returns_200(self):
+        """Diagnostics endpoint returns 200"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        assert response.status_code == 200
+    
+    def test_diagnostics_has_summary(self):
+        """Diagnostics returns summary with camera, i2c, spi, uart, mavlink status"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "summary" in data
+        summary = data["summary"]
+        assert "platform" in summary
+        assert "camera" in summary
+        assert "i2c_devices" in summary
+        assert "spi_available" in summary
+        assert "uart_available" in summary
+        assert "mavlink_connected" in summary
+        assert "gpio_available" in summary
+        assert "overall" in summary
+    
+    def test_diagnostics_has_platform(self):
+        """Diagnostics returns platform section with kernel and OS info"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "platform" in data
+        platform = data["platform"]
+        assert "is_raspberry_pi" in platform
+        assert "kernel" in platform
+        assert "os" in platform
+    
+    def test_diagnostics_has_camera(self):
+        """Diagnostics returns camera section with CSI and USB detection"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "camera" in data
+        cameras = data["camera"]
+        assert isinstance(cameras, list)
+        assert len(cameras) == 2  # CSI and USB
+        for cam in cameras:
+            assert "name" in cam
+            assert "detected" in cam
+            assert "status" in cam
+            assert "info" in cam
+    
+    def test_diagnostics_has_i2c(self):
+        """Diagnostics returns I2C section with bus count and device list"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "i2c" in data
+        i2c = data["i2c"]
+        assert "available" in i2c
+        assert "buses" in i2c
+        assert "devices" in i2c
+        assert isinstance(i2c["buses"], list)
+        assert isinstance(i2c["devices"], list)
+    
+    def test_diagnostics_has_spi(self):
+        """Diagnostics returns SPI section with availability"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "spi" in data
+        spi = data["spi"]
+        assert "available" in spi
+        assert "devices" in spi
+        assert "info" in spi
+    
+    def test_diagnostics_has_uart(self):
+        """Diagnostics returns UART section with available and unavailable ports"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "uart" in data
+        uart = data["uart"]
+        assert "ports" in uart
+        assert "available_count" in uart
+        assert isinstance(uart["ports"], list)
+        for port in uart["ports"]:
+            assert "device" in port
+            assert "description" in port
+            assert "available" in port
+    
+    def test_diagnostics_has_gpio(self):
+        """Diagnostics returns GPIO section with sysfs, gpiomem, gpiochip0 status"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "gpio" in data
+        gpio = data["gpio"]
+        assert "sysfs_available" in gpio
+        assert "gpiomem" in gpio
+        assert "gpiochip0" in gpio
+    
+    def test_diagnostics_has_mavlink(self):
+        """Diagnostics returns MAVLink section with connection status, FC type, firmware"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "mavlink" in data
+        mavlink = data["mavlink"]
+        assert "connected" in mavlink
+        assert "fc_type" in mavlink
+        assert "fc_firmware" in mavlink
+    
+    def test_diagnostics_has_metadata(self):
+        """Diagnostics returns timestamp and scan duration"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "timestamp" in data
+        assert "scan_duration_ms" in data
+        assert isinstance(data["timestamp"], (int, float))
+        assert isinstance(data["scan_duration_ms"], (int, float))
+
+
+class TestDiagnosticsScanEndpoint:
+    """Tests for POST /api/diagnostics/scan endpoint - triggers fresh scan (new in iteration 11)"""
+    
+    def test_diagnostics_scan_returns_200(self):
+        """Diagnostics scan POST returns 200"""
+        response = requests.post(f"{BASE_URL}/api/diagnostics/scan")
+        assert response.status_code == 200
+    
+    def test_diagnostics_scan_returns_fresh_results(self):
+        """Diagnostics scan returns fresh results with new timestamp"""
+        # Get cached diagnostics first
+        cached = requests.get(f"{BASE_URL}/api/diagnostics").json()
+        cached_ts = cached.get("timestamp", 0)
+        
+        # Wait a bit and trigger fresh scan
+        time.sleep(0.1)
+        scanned = requests.post(f"{BASE_URL}/api/diagnostics/scan").json()
+        scanned_ts = scanned.get("timestamp", 0)
+        
+        # Fresh scan should have newer timestamp
+        assert scanned_ts > cached_ts, "Fresh scan should have newer timestamp"
+        
+        # Verify same structure as GET
+        assert "summary" in scanned
+        assert "platform" in scanned
+        assert "camera" in scanned
+        assert "i2c" in scanned
+        assert "spi" in scanned
+        assert "uart" in scanned
+        assert "gpio" in scanned
+        assert "mavlink" in scanned
+
+
 class TestHardwareEndpoint:
     """Tests for /api/hardware endpoint - sensor detection status (new in iteration 7)"""
     
