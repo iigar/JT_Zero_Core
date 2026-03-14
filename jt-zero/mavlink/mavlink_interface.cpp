@@ -307,7 +307,7 @@ bool MAVLinkInterface::send_odometry(const MAVOdometry& msg) {
         // Extensions
         payload[230] = 0;  // reset_counter
         payload[231] = 2;  // estimator_type = MAV_ESTIMATOR_TYPE_VIO
-        payload[232] = static_cast<uint8_t>(std::max(0, std::min(100, msg.quality)));
+        payload[232] = static_cast<uint8_t>(std::max(0.0f, std::min(100.0f, msg.quality)));
         
         send_mavlink_v2(331, payload, 233, 91);
     }
