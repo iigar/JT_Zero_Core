@@ -1,168 +1,263 @@
 <analysis>**original_problem_statement:**
 The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi Zero 2 W. The project includes a high-performance C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard.
 
-The primary goal is to get the full system running on the physical Pi, displaying real-time data from a CSI camera and a flight controller (Matek H743-SLIM) connected via MAVLink. The user is actively debugging the live deployment with the agent's guidance.
+The primary goal is to get the full system running on the physical Pi, displaying real-time data from a CSI camera and a flight controller (Matek H743-SLIM) connected via MAVLink, and critically, to use the system's visual odometry as a navigation source for the flight controller's EKF.
 
 PRODUCT REQUIREMENTS:
 1.  A stable C++ core for event processing, memory management, and rules.
 2.  A FastAPI backend to serve data and a React frontend for monitoring.
-3.  Integration with real hardware: I2C/SPI/UART sensors (IMU, Baro, GPS) and cameras (CSI, USB).
-4.  MAVLink integration to communicate with a flight controller.
-5.  A comprehensive deployment guide for a Raspberry Pi.
-6.  A functional and intuitive UI for monitoring and configuration, including a live video feed and real-time telemetry display.
-7.  Detailed documentation for connecting to specific flight controllers like Matek H743-SLIM.
+3.  Integration with real hardware: I2C/SPI/UART sensors and CSI/USB cameras.
+4.  MAVLink integration, including sending Visual Odometry () data to the flight controller.
+5.  A comprehensive, beginner-friendly deployment guide for a Raspberry Pi, including instructions for installation without using GitHub.
+6.  A functional and intuitive UI for monitoring and configuration.
+7.  Detailed system documentation covering architecture, capabilities, and command references.
 8.  Visual feature detection from the camera feed displayed on the UI.
-9.  Detailed commit messages for code changes.
 
 **User's preferred language**: The user communicates in both **Ukrainian** and **English**. The agent MUST continue to respond in **Ukrainian**.
 
 **what currently exists?**
-The full-stack application (C++ core, FastAPI backend, React frontend) is successfully deployed and running on the user's Raspberry Pi Zero 2 W. The system is fully integrated with the physical hardware:
-- The CSI camera provides a stable, live video feed to the dashboard.
-- Visual features detected by the C++ core are correctly overlaid on the video stream in the UI.
-- A stable, bidirectional MAVLink connection with the Matek H743 flight controller is established.
-- The C++ core now parses incoming MAVLink messages (, , , , , ) and sends real-time telemetry (Attitude, IMU, Barometer, Battery) to the frontend dashboard via WebSocket. The issue of simulated data overwriting real data has been fixed.
-
-However, the telemetry values displayed are stable but incorrect (e.g., Roll at -18° when level), and the user is unhappy with the performance window.
+The full-stack application is deployed and running on the user's Raspberry Pi. All major features are implemented:
+-   **Full Hardware Integration:** Live CSI camera feed with C++ visual feature overlays.
+-   **MAVLink Telemetry:** Stable bidirectional communication with the Matek H743 flight controller, parsing real-time telemetry.
+-   **Visual Odometry (VO) Navigation:** The C++ core now correctly serializes and sends  and  messages to the flight controller at a stable rate (~12Hz). **ArduPilot's EKF successfully accepts this data as an ExternalNav source**, a major project milestone.
+-   **Enhanced UI:**
+    -   The System Monitor (formerly Performance) panel shows live OS metrics (CPU, RAM, Temp) using .
+    -   Telemetry charts have been improved with better auto-scaling and visual clarity.
+    -   A Hardware Diagnostics Panel in the Settings tab automatically scans and reports the status of the camera, I2C/SPI buses, UART, MAVLink, and C++ sensor drivers.
+-   **C++ Sensor Drivers:** The direct hardware drivers (e.g., MPU6050, BMP280) are integrated, and their status (SIM, Hardware, or MAVLink) is correctly reported in the UI.
 
 **Last working item**:
-- **Last item agent was working:** Fixing an issue where the telemetry data on the dashboard was jittery and unstable. The root cause was identified as a data race condition where the 200Hz simulation loop () was overwriting the ~4Hz real MAVLink telemetry data in the shared state. A fix was implemented in  to prevent the simulation from running when real FC telemetry is available.
-- **Status:** USER VERIFICATION PENDING
-- **Agent Testing Done:** N
-- **Which testing method agent to use?** The user is the primary tester on the physical hardware. The next agent needs to analyze the user's latest video and  output to diagnose the new problem of incorrect, but stable, telemetry values.
-- **User Testing Done:** Y (The user deployed the fix, confirmed via  that the data is now stable, but provided a video and feedback that the values are incorrect, e.g., Roll=-18°, Pitch=-20° while the drone is level. This indicates a new problem.)
+The user's last message contained a new bug report and a large documentation request. The agent was processing this request but has not yet started implementation.
+
+-   **Last item agent was working:** Addressing the user's final request:
+    1.  **Bug Report:** A regression where the flight controller data has become jittery again in the MAVLink UI panel.
+    2.  **Task Request:** A comprehensive documentation overhaul.
+-   **Status:** BLOCKED (The documentation task is blocked by the new P0 bug).
+-   **Agent Testing Done:** N
+-   **Which testing method agent to use?** Manual testing. The next agent must first debug the jittery data issue by guiding the user to run  commands on their Pi to isolate the problem to the backend or frontend.
+-   **User Testing Done:** Y (User observed the new bug on their physical hardware).
 
 **All Pending/In progress Issue list**:
-- **Issue 1: (P0)** Telemetry values are stable but incorrect.
-- **Issue 2: (P1)** Performance window is not adequate.
-- **Issue 3: (P2)** Spam of OBSTACLE events in the event log.
-- **Issue 4: (P2)** UI panels overlapping on Dashboard and Telemetry tabs.
+-   **Issue 1: (P0)** MAVLink data is jittery on the frontend (Regression).
+-   **Issue 2: (P2)** ArduPilot pre-arm check: Rangefinder 1: No Data.
+-   **Issue 3: (P2)** ArduPilot pre-arm check: Battery 1 below minimum arming voltage.
 
 **Issues Detail:**
-- **Issue 1:** Telemetry values are stable but incorrect (e.g., Roll shows -18° when the drone is level).
-    - **Attempted fixes:** The agent fixed the data race condition between the simulation loop and the MAVLink loop. This stopped the data jitter but revealed a persistent static offset.
-    - **Next debug checklist:**
-        1.  **Hypothesis:** The flight controller's accelerometer is not calibrated. This is the most common cause for a static roll/pitch offset.
-        2.  **Action:** Instruct the user to perform an Accel Calibration (or Level Horizon) in Mission Planner for their flight controller.
-        3.  **Verification:** After calibration, ask the user to restart the  service and check the dashboard and  output again to see if roll and pitch are now close to 0 when the drone is level.
-    - **Why fix this issue and what will be achieved with the fix?** This is critical for the drone's model in the UI to reflect its actual physical orientation. It's the final step to having a fully functional, real-time telemetry display.
-    - **Status:** IN PROGRESS
-    - **Is recurring issue?** N
-    - **Should Test frontend/backend/both after fix?** backend (via user testing on hardware)
-    - **Blocked on other issue:** None
+-   **Issue 1:** MAVLink data is jittery again on the frontend.
+    -   **Attempted fixes:** None for this recurrence. A previous, similar issue was caused by a data race between simulation and real data streams.
+    -   **Next debug checklist:**
+        1.  Instruct the user to run {"flight_mode":"IDLE","armed":false,"battery_voltage":12.5965576171875,"battery_percent":99.86760711669922,"cpu_usage":1.0820000171661377,"ram_usage_mb":0.6544189453125,"cpu_temp":42.97999954223633,"uptime_sec":106500,"event_count":1159,"error_count":0,"roll":0.40044595329861404,"pitch":-0.7143350507317007,"yaw":1.1295716762542725,"altitude_agl":7.028569221496582,"vx":0.0,"vy":0.0,"vz":0.0,"pos_n":0.0,"pos_e":0.0,"pos_d":-0.0,"target_altitude":10.0,"motor":[0.0,0.0,0.0,0.0],"imu":{"gyro_x":-0.006144785787910223,"gyro_y":0.007150962948799133,"gyro_z":-0.005290081258863211,"acc_x":0.1228184774518013,"acc_y":0.06884614378213882,"acc_z":-9.85034465789795,"valid":true},"baro":{"pressure":1012.4014892578125,"altitude":7.028569221496582,"temperature":21.7108097076416,"valid":true},"gps":{"lat":50.45016608869636,"lon":30.523485693651274,"alt":154.9784698486328,"speed":1.9024055004119873,"satellites":11,"fix_type":3,"valid":true},"rangefinder":{"distance":2.368138551712036,"signal_quality":0.9613990783691406,"valid":true},"optical_flow":{"flow_x":-0.04994138330221176,"flow_y":0.01827693171799183,"quality":195,"ground_distance":3.0257463455200195,"valid":true}} and {"state":"CONNECTED","messages_sent":1072,"messages_received":37,"errors":0,"link_quality":0.949999988079071,"system_id":1,"component_id":191,"fc_system_id":1,"fc_autopilot":"ArduPilot","fc_firmware":"ArduPilot 4.5.0","fc_type":"QUADROTOR","fc_armed":false,"vision_pos_sent":357,"odometry_sent":357,"optical_flow_sent":178} on their Pi while the UI is jittery.
+        2.  **If  output is stable:** The bug is in the frontend rendering logic. Investigate  and related components for issues like missing  props in lists or inefficient state updates causing excessive re-renders.
+        3.  **If  output is jittery:** The bug is a backend regression. Examine  and the WebSocket logic. It is possible that data from different sources (e.g., the main state dictionary and the MAVLink status dictionary) are being combined incorrectly in the WebSocket payload, reintroducing a race condition.
+    -   **Why fix this issue and what will be achieved with the fix?** A stable UI is critical for reliably monitoring the drone's status.
+    -   **Status:** NOT STARTED
+    -   **Is recurring issue?** Y
+    -   **Should Test frontend/backend/both after fix?** Both. Backend via , frontend via user observation on hardware.
+    -   **Blocked on other issue:** None.
 
-- **Issue 2:** Performance window is not adequate.
-    - **Attempted fixes:** None.
-    - **Next debug checklist:**
-        1.  Ask the user for clarification: Що саме не так з вікном performance? Які дані ви очікуєте там бачити, і як воно має поводитись? (What exactly is wrong with the 'performance' window? What data do you expect to see there, and how should it behave?)
-        2.  View the code for the performance panel in the frontend to understand what it currently displays.
-    - **Why fix this issue and what will be achieved with the fix?** To meet user expectations for system monitoring.
-    - **Status:** NOT STARTED
-    - **Is recurring issue?** N
-    - **Should Test frontend/backend/both after fix?** frontend
-    - **Blocked on other issue:** None
-
-- **Issue 3:** Event Spam.
-    - **Status:** USER VERIFICATION PENDING (carried over from previous session)
-
-- **Issue 4:** UI Panel Overlap.
-    - **Status:** USER VERIFICATION PENDING (carried over from previous session)
+-   **Issue 2 & 3:** ArduPilot Pre-Arm Checks.
+    -   **Attempted fixes:** None. These are configuration issues, not code bugs.
+    -   **Next debug checklist:** Guide the user to change ArduPilot parameters in Mission Planner.
+        -   For Rangefinder: Set  if no rangefinder is connected.
+        -   For Battery: Charge the battery or lower the  parameter.
+    -   **Why fix this issue and what will be achieved with the fix?** To allow the drone to be armed.
+    -   **Status:** NOT STARTED
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** N/A (Configuration change).
 
 **In progress Task List**:
 None.
 
 **Upcoming and Future Tasks**
-- **Upcoming Tasks:**
-  - **(P1) Hardware Diagnostics Panel:** Create a new UI panel that automatically checks for the camera, I2C/SPI buses, and MAVLink connection on startup.
-  - **(P2) Direct I2C/SPI sensor drivers:** Implement C++ drivers for sensors like MPU6050 (IMU) and BMP280 (Baro).
-  - **(P2) Detailed Commit Messages:** The user has requested that future work includes detailed commit messages.
-- **Future Tasks:**
-  - **(P2)** MAVLink v2 full serialization.
-  - **(P2)** IP camera (RTSP) and thermal camera support.
-  - **(P2)** ARM NEON optimization.
-  - **(P2)** Autonomous Mission Planning.
+-   **Upcoming Tasks:**
+    -   **(P1) Comprehensive Documentation Overhaul:**
+        -   Create/update  to be beginner-friendly.
+        -   Create : A step-by-step assembly and installation guide, including a method for installation *without* requiring usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. (e.g., packaging the project as a  archive).
+        -   Create : Detail the architecture, algorithms, and performance capabilities (e.g., effective VO range, speed).
+        -   Create : A centralized list of all commands for building, running, and debugging.
+-   **Future Tasks:**
+    -   **(P2)** IP camera (RTSP) and thermal camera support.
+    -   **(P2)** ARM NEON optimization for the C++ core.
+    -   **(P2)** Autonomous Mission Planning UI/features.
 
 **Completed work in this session**
-- **Fixed Critical Frontend Bugs:**
-  - Resolved a prop mismatch ( vs ) in  that prevented the live video from ever loading.
-  - Made the WebSocket URL relative, allowing the frontend to connect to the local backend on the Pi instead of being hardcoded to the Emergent preview URL.
-- **Implemented Real-time Visual Feature Tracking:**
-  - Exposed C++ feature detection results ( struct with x, y coordinates) through .
-  - Added a  endpoint and integrated feature data into the WebSocket stream.
-  - Rewrote  to draw the real-time feature points over the live video canvas.
-- **Achieved Full MAVLink Telemetry Integration:**
-  - Guided the user to correctly configure the hardware UART () on the Raspberry Pi Zero 2 W.
-  - Fixed the MAVLink baud rate mismatch in the C++ code (changed from 921600 to 115200).
-  - Implemented a robust C++ parser in  for key telemetry messages: , , , , and .
-  - Fixed a critical bug in the parser that incorrectly handled MAVLink v2's payload truncation (zero-trimming).
-  - Implemented an automatic  message to be sent from the C++ core to the flight controller on connection, ensuring telemetry starts flowing automatically.
-  - Exposed all parsed telemetry (Attitude, IMU, Baro, Battery) through the backend state and WebSocket to the frontend.
-- **Updated Documentation:**
-  - Rewrote the  documentation component with correct wiring instructions for the Matek H743 (SERIAL4 at 115200 baud) and embedded user-provided images of the physical wiring for clarity.
-- **Resolved Telemetry Jitter:**
-  - Diagnosed and fixed a data race condition in  where the 200Hz simulation loop was overwriting the real telemetry data from the MAVLink loop. The fix ensures simulation data is ignored when a real FC is connected.
+-   **MAVLink Visual Odometry (VO) Integration:** Successfully implemented the C++ serialization and transmission of  and  messages. Debugged and stabilized the message rate, resulting in **ArduPilot's EKF successfully using the system as an external navigation source.**
+-   **System Monitoring Overhaul:** Replaced the Performance panel's static metrics with live OS data (CPU, RAM, Temp) from .
+-   **Hardware Diagnostics Panel:** Implemented a new UI panel to automatically scan and display the real-time status of all connected hardware (Camera, I2C/SPI, UART, MAVLink).
+-   **C++ Sensor Driver Integration:** Fully wired the existing C++ I2C/SPI drivers into the runtime, with their source (SIM, Hardware, or MAVLink) correctly reported in the UI.
+-   **Extensive Remote Debugging on Pi:** Resolved numerous remote deployment issues, including C++ compilation errors ( correctness), Python dependency conflicts ( vs. system), server crash loops, and incorrect build paths.
+-   **Frontend Stability Fix:** Fixed a critical bug where the frontend was hardcoded to the preview server's URL, causing it to display simulated data instead of real data from the Pi.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Live Hardware Debugging:** Iterative debugging with a user on a physical Raspberry Pi, interpreting  outputs, system logs, and user-provided videos.
-- **Data Race Conditions:** Diagnosing and fixing conflicts between high-frequency simulation threads and lower-frequency hardware I/O threads competing to write to a shared state object.
-- **MAVLink Protocol:** Parsing MAVLink v2 messages, handling payload truncation (zero-trimming), requesting data streams (), and debugging connection issues (baud rates, stream rates).
-- **Full-Stack Data Flow:** Implementing a feature from C++ hardware interaction () through Python bindings (), a backend API (), a WebSocket stream, and finally to a React canvas ().
-- **C++ Development:** Modifying headers and implementation files, using  for Python integration, and managing a  build process on a remote device.
+-   **MAVLink Message Serialization:** Manually packing C++ structs into byte arrays according to the MAVLink v2 protocol, including handling endianness, CRC checks (), and sending over a serial link.
+-   **Remote Live Hardware Debugging:** The entire session involved iteratively guiding the user through , , , , , and interpreting -- No entries -- logs, C++ compiler errors, and  outputs from their physical Raspberry Pi.
+-   **Python Virtual Environments (venv):** Managing dependencies within a  on a remote Linux machine, separate from system-wide packages.
+-   **Full-Stack Feature Implementation:** Building features from C++ (hardware detection, VO serialization) through Python bindings, a FastAPI backend, a WebSocket stream, and to a React frontend.
 
 **key DB schema**
-- No database is used.
+-   No database is used.
 
 **All files of reference**
-- **Telemetry Jitter Fix:** 
-- **MAVLink Parsing & Integration:** , , 
-- **Visual Feature Tracking:** , , , , , 
-- **Documentation Update:** 
-- **Initial Frontend Fixes:** , 
+-   **MAVLink VO Serialization:** , 
+-   **Hardware Diagnostics:** , , , 
+-   **System Metrics:** , 
+-   **C++ Driver Integration:** , , 
+-   **Deployment/Build Fixes:** , , various C++ files for  correctness.
 
 **Critical Info for New Agent**
-- **The main blockers are solved.** Live video, visual features, and real-time MAVLink telemetry are all working. The project has reached a major milestone.
-- **The current P0 issue is a calibration problem, not a code bug.** The stable but incorrect roll/pitch values (e.g., -18°) are classic symptoms of an uncalibrated accelerometer on the flight controller. Guide the user through accelerometer calibration in Mission Planner.
-- **Address the user's secondary concerns.** After confirming the calibration fixes the telemetry offset, ask for clarification on the performance window issue.
-- **Maintain momentum.** The user is highly engaged. Solving this last telemetry issue will complete a major phase of the project and provide a huge confidence boost.
+-   **The project has achieved a major milestone: the JT-Zero system is now a valid external navigation source for ArduPilot's EKF.** This is a huge success.
+-   **A regression has occurred.** The user reports jittery MAVLink data in the UI again. This is the **highest priority (P0)** task. You must debug this before starting any new features or documentation.
+-   **The next major task is a complete documentation overhaul.** The user has very specific requirements: beginner-friendly, an offline installation guide (without GitHub), a system overview, and a command reference.
+-   **Continue the established remote debugging workflow.** Be extremely precise with commands, paths ( vs ), and environment specifics (e.g., using 
+Usage:   
+  pip <command> [options]
+
+Commands:
+  install                     Install packages.
+  lock                        Generate a lock file.
+  download                    Download packages.
+  uninstall                   Uninstall packages.
+  freeze                      Output installed packages in requirements format.
+  inspect                     Inspect the python environment.
+  list                        List installed packages.
+  show                        Show information about installed packages.
+  check                       Verify installed packages have compatible 
+dependencies.
+  config                      Manage local and global configuration.
+  search                      Search PyPI for packages.
+  cache                       Inspect and manage pip's wheel cache.
+  index                       Inspect information available from package 
+indexes.
+  wheel                       Build wheels from your requirements.
+  hash                        Compute hashes of package archives.
+  completion                  A helper command used for command completion.
+  debug                       Show information useful for debugging.
+  help                        Show help for commands.
+
+General Options:
+  -h, --help                  Show help.
+  --debug                     Let unhandled exceptions propagate outside the
+                              main subroutine, instead of logging them to
+                              stderr.
+  --isolated                  Run pip in an isolated mode, ignoring
+                              environment variables and user configuration.
+  --require-virtualenv        Allow pip to only run in a virtual environment;
+                              exit with an error otherwise.
+  --python <python>           Run pip with the specified Python interpreter.
+  -v, --verbose               Give more output. Option is additive, and can be
+                              used up to 3 times.
+  -V, --version               Show version and exit.
+  -q, --quiet                 Give less output. Option is additive, and can be
+                              used up to 3 times (corresponding to WARNING,
+                              ERROR, and CRITICAL logging levels).
+  --log <path>                Path to a verbose appending log.
+  --no-input                  Disable prompting for input.
+  --keyring-provider <keyring_provider>
+                              Enable the credential lookup via the keyring
+                              library if user input is allowed. Specify which
+                              mechanism to use [auto, disabled, import,
+                              subprocess]. (default: auto)
+  --proxy <proxy>             Specify a proxy in the form
+                              scheme://[user:passwd@]proxy.server:port.
+  --retries <retries>         Maximum attempts to establish a new HTTP
+                              connection. (default: 5)
+  --timeout <sec>             Set the socket timeout (default 15 seconds).
+  --exists-action <action>    Default action when a path already exists:
+                              (s)witch, (i)gnore, (w)ipe, (b)ackup, (a)bort.
+  --trusted-host <hostname>   Mark this host or host:port pair as trusted,
+                              even though it does not have valid or any HTTPS.
+  --cert <path>               Path to PEM-encoded CA certificate bundle. If
+                              provided, overrides the default. See 'SSL
+                              Certificate Verification' in pip documentation
+                              for more information.
+  --client-cert <path>        Path to SSL client certificate, a single file
+                              containing the private key and the certificate
+                              in PEM format.
+  --cache-dir <dir>           Store the cache data in <dir>.
+  --no-cache-dir              Disable the cache.
+  --disable-pip-version-check
+                              Don't periodically check PyPI to determine
+                              whether a new version of pip is available for
+                              download. Implied with --no-
+                              index.
+  --no-color                  Suppress colored output.
+  --use-feature <feature>     Enable new functionality, that may be backward
+                              incompatible.
+  --use-deprecated <feature>  Enable deprecated functionality, that will be
+                              removed in the future.
+  --resume-retries <resume_retries>
+                              Maximum attempts to resume or restart an
+                              incomplete download. (default: 5) inside the ).
 
 **documents and test reports created in this job**
--  (Updated)
+-   
+-    and associated pytest results.
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Asks if the agent can add parsing for real MAVLink messages from the FC to replace simulated data. Agrees to the plan.
-2.  **User:** Agrees with the agent's plan to tackle the telemetry jitter.
-3.  **User:** Reports that the telemetry is jittery and provides  output showing values spiking between real (FC) and simulated data.
-4.  **Agent:** Identifies the root cause as a data race between the simulation loop and the MAVLink loop and proposes a fix.
-5.  **User:** Provides  output and a video after deploying the fix. The data is now stable, but the values are incorrect (e.g., Roll=-18.30).
-6.  **Agent:** Analyzes the video and confirms the data is stable but offset. Proposes the next plan to fix it.
-7.  **User:** Agrees with the plan to fix the telemetry offset.
-8.  **User:** Reports that the barometer seems adequate, but the IMU behavior is not, with the drone model twitching despite the physical setup being stationary.
-9.  **User:** Provides  output demonstrating the telemetry values are stable but consistently incorrect (e.g., Roll=-18.30). Also shares a video showing the stable but incorrect UI.
-10. **PENDING:** **User:** After seeing the stable data, asks to proceed with the next step, which the agent had outlined as fixing the telemetry offset and then looking into the performance window.
+10. **User:** Provides logs showing  is gone and EKF is using external nav. Success!
+9.  **PENDING:** **User:** Reports that the MAVLink data in the UI is jittery again (a regression). Asks for a complete documentation overhaul for beginners, including a system overview and an offline (non-GitHub) installation guide.
 
 **Project Health Check:**
-- **Broken:**
-  - Telemetry values are stable but incorrect due to a likely calibration issue.
-  - The user has reported the performance window is not adequate.
-- **Mocked:**
-  - Direct sensor drivers (MPU6050, BMP280) are still placeholders.
-  - GPS functionality is present but not active (likely due to an indoor setup without a GPS lock).
+-   **Broken:**
+    -   A regression is causing jittery data display in the MAVLink UI panel.
+-   **Mocked:**
+    -   None. The system is operating with real hardware data.
 
 **3rd Party Integrations**
-- None.
+-   None.
 
 **Testing status**
-- **Testing agent used after significant changes:** NO
-- **Troubleshoot agent used after agent stuck in loop:** NO
-- **Test files created:** None.
-- **Known regressions:** None.
-
-**Credentials to test flow:**
-- No credentials are required. The application is self-contained on the Raspberry Pi.
+-   **Testing agent used after significant changes:** YES (Used multiple times, successfully verifying UI and backend changes).
+-   **Test files created:**
+    -   
 
 **What agent forgot to execute**
-- The agent did not anticipate that fixing the telemetry jitter would reveal an underlying calibration issue with the flight controller.
-- The agent has not yet addressed the user's feedback about the performance window being inadequate.</analysis>
+-   The agent did not act on the user's final bug report about the jittery MAVLink data.
+-   The agent was about to start the documentation task but hadn't produced any output yet.</analysis>
