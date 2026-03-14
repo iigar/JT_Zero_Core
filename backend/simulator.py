@@ -446,6 +446,31 @@ class JTZeroSimulator:
         self.engine_stats["memory"]["telemetry_records"] += 1
 
 
+    def get_performance(self) -> dict:
+        """Return internal engine performance metrics."""
+        return {
+            "memory": {
+                "total_mb": 0.42,
+                "engines_bytes": 8192,
+                "event_queue_bytes": 4096,
+                "camera_bytes": 76800,
+            },
+            "latency": {
+                "reflex_avg_us": 1.2,
+                "reflex_fires": self.engine_stats["reflexes"]["total_fires"],
+            },
+            "throughput": {
+                "events_total": self.engine_stats["events"]["total"],
+                "events_dropped": self.engine_stats["events"]["dropped"],
+                "drop_rate": 0,
+            },
+            "threads": [
+                {"name": t.name, "cpu_percent": t.cpu_percent}
+                for t in self.thread_stats
+            ],
+            "total_cpu_percent": sum(t.cpu_percent for t in self.thread_stats),
+        }
+
     def _update_camera(self, t: float):
         cam = self.camera_stats
         cam.frame_count += 1

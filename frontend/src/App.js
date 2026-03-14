@@ -37,6 +37,7 @@ function App() {
   const [features, setFeatures] = useState([]);
   const [runtimeMode, setRuntimeMode] = useState('simulator');
   const [sensorModes, setSensorModes] = useState({});
+  const [systemMetrics, setSystemMetrics] = useState(null);
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
 
@@ -51,6 +52,7 @@ function App() {
       if (data.features) setFeatures(data.features);
       if (data.runtime_mode) setRuntimeMode(data.runtime_mode);
       if (data.sensor_modes) setSensorModes(data.sensor_modes);
+      if (data.system_metrics) setSystemMetrics(data.system_metrics);
       if (data.recent_events) {
         setEvents(prev => {
           const combined = [...prev, ...data.recent_events];
@@ -69,7 +71,9 @@ function App() {
           battery_voltage: s.battery_voltage,
           cpu_usage: s.cpu_usage,
           imu_gyro_x: s.imu?.gyro_x, imu_gyro_y: s.imu?.gyro_y, imu_gyro_z: s.imu?.gyro_z,
+          imu_acc_x: s.imu?.acc_x, imu_acc_y: s.imu?.acc_y, imu_acc_z: s.imu?.acc_z,
           baro_pressure: s.baro?.pressure,
+          baro_temp: s.baro?.temperature,
           range_distance: s.rangefinder?.distance,
           flow_x: s.optical_flow?.flow_x, flow_y: s.optical_flow?.flow_y,
         };
@@ -114,10 +118,10 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} runtimeMode={runtimeMode} events={events} features={features} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} />
         )}
         {activeTab === 'telemetry' && (
-          <TelemetryTab state={state} history={history} performance={performance} runtimeMode={runtimeMode} threads={threads} />
+          <TelemetryTab state={state} history={history} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} threads={threads} />
         )}
         {activeTab === 'camera' && (
           <div className="h-full p-3">
@@ -152,15 +156,15 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, runtimeMode, events, features }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features }) {
   return (
     <div className="h-full flex overflow-hidden">
       {/* Compact sidebar */}
       <aside className="w-36 shrink-0 bg-[#0A0C10] border-r border-[#1E293B] p-2 overflow-y-auto">
         <Section title="System">
-          <DataRow label="CPU" value={`${state?.cpu_usage?.toFixed(1) || 0}%`} />
-          <DataRow label="RAM" value={`${state?.ram_usage_mb?.toFixed(0) || 0}MB`} />
-          <DataRow label="TEMP" value={`${state?.cpu_temp?.toFixed(1) || 0}C`} />
+          <DataRow label="CPU" value={`${systemMetrics?.cpu?.total_percent ?? state?.cpu_usage?.toFixed(1) ?? 0}%`} />
+          <DataRow label="RAM" value={`${systemMetrics?.memory?.used_mb ?? state?.ram_usage_mb?.toFixed(0) ?? 0}MB`} />
+          <DataRow label="TEMP" value={`${systemMetrics?.temperature ?? state?.cpu_temp?.toFixed(1) ?? 0}C`} />
         </Section>
         <Section title="Sensors">
           {['IMU', 'BARO', 'GPS', 'RANGE', 'FLOW'].map(s => {
@@ -206,7 +210,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
         <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '220px' }}>
           <div className="col-span-4 overflow-hidden"><CameraPanel camera={camera} features={features} /></div>
           <div className="col-span-4 overflow-hidden"><MAVLinkPanel mavlink={mavlink} /></div>
-          <div className="col-span-4 overflow-hidden"><PerformancePanel performance={performance} runtimeMode={runtimeMode} /></div>
+          <div className="col-span-4 overflow-hidden"><PerformancePanel performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} /></div>
         </div>
         {/* Row 3: Mini event log */}
         <div className="shrink-0 overflow-hidden" style={{ height: '150px' }}>
@@ -221,7 +225,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
 /* Telemetry Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function TelemetryTab({ state, history, performance, runtimeMode, threads }) {
+function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode, threads }) {
   return (
     <div className="h-full flex flex-col gap-2 p-3 overflow-y-auto">
       <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '300px' }}>
@@ -229,7 +233,7 @@ function TelemetryTab({ state, history, performance, runtimeMode, threads }) {
           <TelemetryCharts history={history} />
         </div>
         <div className="col-span-4 overflow-hidden">
-          <PerformancePanel performance={performance} runtimeMode={runtimeMode} />
+          <PerformancePanel performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} />
         </div>
       </div>
       {/* Sensor detail grid */}

@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional
+from system_metrics import get_system_metrics
 
 # ─── Runtime Selection ────────────────────────────────────
 # Try native C++ runtime first, fall back to Python simulator
@@ -238,9 +239,11 @@ async def get_camera_frame():
 
 @app.get("/api/performance")
 async def get_performance():
+    result = {}
     if hasattr(runtime, 'get_performance'):
-        return runtime.get_performance()
-    return {"error": "Performance metrics only available with native runtime"}
+        result["engine"] = runtime.get_performance()
+    result["system"] = get_system_metrics()
+    return result
 
 @app.get("/api/simulator/config")
 async def get_sim_config():
@@ -327,6 +330,9 @@ async def websocket_telemetry(ws: WebSocket):
             # Add performance data if native
             if hasattr(runtime, 'get_performance'):
                 payload["performance"] = runtime.get_performance()
+            
+            # Always add real OS metrics
+            payload["system_metrics"] = get_system_metrics()
             
             await ws.send_json(payload)
             await asyncio.sleep(0.1)  # 10 Hz

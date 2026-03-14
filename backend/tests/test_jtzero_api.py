@@ -302,37 +302,138 @@ class TestMavlinkEndpoint:
 
 
 class TestPerformanceEndpoint:
-    """Tests for /api/performance endpoint - CPU/memory/latency metrics"""
+    """Tests for /api/performance endpoint - now returns 'engine' and 'system' keys with real OS metrics"""
     
     def test_performance_returns_200(self):
         """Performance endpoint returns 200"""
         response = requests.get(f"{BASE_URL}/api/performance")
         assert response.status_code == 200
     
-    def test_performance_cpu_metrics(self):
-        """Performance returns CPU metrics"""
+    def test_performance_has_engine_and_system_keys(self):
+        """Performance returns both 'engine' and 'system' keys at top level"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:  # Only available with native runtime
-            assert "total_cpu_percent" in data
-            assert "threads" in data
+        assert "engine" in data, "Missing 'engine' key in /api/performance response"
+        assert "system" in data, "Missing 'system' key in /api/performance response"
     
-    def test_performance_memory_metrics(self):
-        """Performance returns memory metrics"""
+    def test_performance_engine_has_cpu_metrics(self):
+        """Engine performance returns CPU metrics"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:
-            assert "memory" in data
-            mem = data["memory"]
-            assert "total_mb" in mem
+        engine = data.get("engine", {})
+        if engine:  # Only available with native runtime
+            assert "total_cpu_percent" in engine
+            assert "threads" in engine
     
-    def test_performance_latency_metrics(self):
-        """Performance returns latency metrics"""
+    def test_performance_engine_has_memory(self):
+        """Engine performance returns memory metrics"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:
-            assert "latency" in data
-            assert "throughput" in data
+        engine = data.get("engine", {})
+        if engine:
+            assert "memory" in engine
+            mem = engine["memory"]
+            assert "total_mb" in mem or "total_bytes" in mem
+    
+    def test_performance_engine_has_latency(self):
+        """Engine performance returns latency metrics"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        engine = data.get("engine", {})
+        if engine:
+            assert "latency" in engine
+            assert "throughput" in engine
+    
+    def test_performance_system_cpu_metrics(self):
+        """System metrics returns real OS CPU data via psutil"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "cpu" in system, "Missing 'cpu' in system metrics"
+        cpu = system["cpu"]
+        assert "total_percent" in cpu
+        assert "per_core" in cpu
+        assert "core_count" in cpu
+        assert "load_1m" in cpu
+        assert isinstance(cpu["per_core"], list)
+        assert cpu["total_percent"] >= 0
+    
+    def test_performance_system_memory_metrics(self):
+        """System metrics returns real OS RAM data via psutil"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "memory" in system, "Missing 'memory' in system metrics"
+        mem = system["memory"]
+        assert "total_mb" in mem
+        assert "used_mb" in mem
+        assert "available_mb" in mem
+        assert "percent" in mem
+        assert mem["total_mb"] > 0
+    
+    def test_performance_system_disk_metrics(self):
+        """System metrics returns disk usage data"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "disk" in system, "Missing 'disk' in system metrics"
+        disk = system["disk"]
+        assert "total_gb" in disk
+        assert "used_gb" in disk
+        assert "free_gb" in disk
+        assert "percent" in disk
+    
+    def test_performance_system_network_metrics(self):
+        """System metrics returns network I/O data"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "network" in system, "Missing 'network' in system metrics"
+        net = system["network"]
+        assert "send_kbps" in net
+        assert "recv_kbps" in net
+    
+    def test_performance_system_temperature(self):
+        """System metrics returns temperature (may be 0 in container env)"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "temperature" in system, "Missing 'temperature' in system metrics"
+        # Note: temperature may be 0 in container environment (works on real Pi)
+        assert isinstance(system["temperature"], (int, float))
+    
+    def test_performance_system_process_info(self):
+        """System metrics returns process info for JT-Zero backend"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "process" in system, "Missing 'process' in system metrics"
+        proc = system["process"]
+        assert "pid" in proc
+        assert "memory_mb" in proc
+        assert "threads" in proc
+    
+    def test_performance_system_histories(self):
+        """System metrics returns history arrays for charts"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "histories" in system, "Missing 'histories' in system metrics"
+        hist = system["histories"]
+        assert "cpu" in hist
+        assert "ram" in hist
+        assert "temp" in hist
+        assert "net" in hist
+        # Histories should be arrays
+        assert isinstance(hist["cpu"], list)
+        assert isinstance(hist["ram"], list)
 
 
 class TestSimulatorConfigEndpoint:
