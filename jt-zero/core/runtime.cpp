@@ -19,12 +19,53 @@ Runtime::~Runtime() {
 bool Runtime::initialize() {
     std::printf("[JT-Zero] Initializing runtime...\n");
     
-    // Initialize sensors
+    // Initialize sensors (default: simulated)
     imu_.set_simulated(simulator_mode_);
     baro_.set_simulated(simulator_mode_);
     gps_sensor_.set_simulated(simulator_mode_);
     range_.set_simulated(simulator_mode_);
     flow_.set_simulated(simulator_mode_);
+    
+    // Hardware auto-detection (only when not in simulator mode)
+    if (!simulator_mode_) {
+        std::printf("[JT-Zero] Probing hardware...\n");
+        hw_info_ = detect_hardware();
+        
+        // Open I2C bus and try real sensor drivers
+        if (hw_info_.i2c_available) {
+            if (i2c_bus_.open("/dev/i2c-1")) {
+                std::printf("[JT-Zero] I2C bus opened, probing sensors...\n");
+                
+                // Try MPU6050 IMU
+                if (hw_info_.imu_detected) {
+                    if (imu_.try_hardware(i2c_bus_)) {
+                        std::printf("[JT-Zero] IMU: using real MPU6050 via I2C\n");
+                    }
+                }
+                
+                // Try BMP280 Barometer
+                if (hw_info_.baro_detected) {
+                    if (baro_.try_hardware(i2c_bus_)) {
+                        std::printf("[JT-Zero] Baro: using real BMP280 via I2C\n");
+                    }
+                }
+            }
+        }
+        
+        // Open GPS UART
+        if (hw_info_.uart_available) {
+            if (gps_uart_.open("/dev/ttyS0", 9600)) {
+                if (gps_sensor_.try_hardware(gps_uart_)) {
+                    std::printf("[JT-Zero] GPS: using real NMEA via UART\n");
+                }
+            }
+        }
+        
+        std::printf("[JT-Zero] Hardware probe complete: IMU=%s, Baro=%s, GPS=%s\n",
+                    imu_.is_simulated() ? "SIM" : "HW",
+                    baro_.is_simulated() ? "SIM" : "HW",
+                    gps_sensor_.is_simulated() ? "SIM" : "HW");
+    }
     
     if (!imu_.initialize()) {
         std::printf("[JT-Zero] IMU init failed\n");

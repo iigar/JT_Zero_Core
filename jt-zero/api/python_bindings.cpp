@@ -386,6 +386,28 @@ PYBIND11_MODULE(jtzero_native, m) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")
         
+        .def("get_sensor_modes", [](const jtzero::Runtime& self) {
+            const auto& hw = self.hw_info();
+            return py::dict(
+                "imu"_a = self.imu().is_simulated() ? "simulated" : "hardware",
+                "baro"_a = self.baro().is_simulated() ? "simulated" : "hardware",
+                "gps"_a = self.gps().is_simulated() ? "simulated" : "hardware",
+                "rangefinder"_a = self.range().is_simulated() ? "simulated" : "hardware",
+                "optical_flow"_a = self.flow().is_simulated() ? "simulated" : "hardware",
+                "hw_info"_a = py::dict(
+                    "i2c_available"_a = hw.i2c_available,
+                    "imu_detected"_a = hw.imu_detected,
+                    "baro_detected"_a = hw.baro_detected,
+                    "gps_detected"_a = hw.gps_detected,
+                    "spi_available"_a = hw.spi_available,
+                    "uart_available"_a = hw.uart_available,
+                    "imu_model"_a = std::string(hw.imu_model),
+                    "baro_model"_a = std::string(hw.baro_model),
+                    "gps_model"_a = std::string(hw.gps_model)
+                )
+            );
+        }, "Get sensor modes (hardware vs simulated) and detection info")
+        
         .def("get_events", [](const jtzero::Runtime& self, size_t count) {
             return recent_events_to_list(self, count);
         }, py::arg("count") = 50, "Get recent events as list of dicts")

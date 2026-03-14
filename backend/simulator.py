@@ -471,6 +471,27 @@ class JTZeroSimulator:
             "total_cpu_percent": sum(t.cpu_percent for t in self.thread_stats),
         }
 
+    def get_sensor_modes(self) -> dict:
+        """Return sensor mode info (all simulated in simulator mode)."""
+        return {
+            "imu": "simulated",
+            "baro": "simulated",
+            "gps": "simulated",
+            "rangefinder": "simulated",
+            "optical_flow": "simulated",
+            "hw_info": {
+                "i2c_available": False,
+                "imu_detected": False,
+                "baro_detected": False,
+                "gps_detected": False,
+                "spi_available": False,
+                "uart_available": False,
+                "imu_model": "none",
+                "baro_model": "none",
+                "gps_model": "none",
+            },
+        }
+
     def _update_camera(self, t: float):
         cam = self.camera_stats
         cam.frame_count += 1

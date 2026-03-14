@@ -132,6 +132,12 @@ async def scan_diagnostics():
     mavlink = runtime.get_mavlink_stats()
     return run_diagnostics(mavlink_stats=mavlink)
 
+@app.get("/api/sensors")
+async def api_get_sensor_modes():
+    """Return sensor modes (hardware vs simulated) and detection info."""
+    result = runtime.get_sensor_modes()
+    return result
+
 @app.get("/api/events")
 async def get_events(count: int = 50):
     raw = runtime.get_events(200)
@@ -340,13 +346,7 @@ async def websocket_telemetry(ws: WebSocket):
                 "camera": camera,
                 "mavlink": mavlink,
                 "features": features,
-                "sensor_modes": {
-                    "imu": "hardware" if hasattr(runtime, '_hw_imu') and runtime._hw_imu else "simulation",
-                    "baro": "hardware" if hasattr(runtime, '_hw_baro') and runtime._hw_baro else "simulation",
-                    "gps": "hardware" if hasattr(runtime, '_hw_gps') and runtime._hw_gps else "simulation",
-                    "rangefinder": "simulation",
-                    "optical_flow": "simulation",
-                },
+                "sensor_modes": runtime.get_sensor_modes(),
             }
             
             # Add performance data if native

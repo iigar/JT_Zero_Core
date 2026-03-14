@@ -765,6 +765,78 @@ class TestDiagnosticsScanEndpoint:
         assert "mavlink" in scanned
 
 
+class TestSensorsEndpoint:
+    """Tests for /api/sensors endpoint - C++ sensor driver modes (new in iteration 12)"""
+    
+    def test_sensors_returns_200(self):
+        """Sensors endpoint returns 200"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        assert response.status_code == 200
+    
+    def test_sensors_has_all_sensor_keys(self):
+        """Sensors endpoint returns imu, baro, gps, rangefinder, optical_flow keys"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        required_keys = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        for key in required_keys:
+            assert key in data, f"Missing sensor key: {key}"
+    
+    def test_sensors_mode_values(self):
+        """Each sensor has 'simulated' or 'hardware' mode value"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        sensor_keys = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        for key in sensor_keys:
+            mode = data.get(key)
+            assert mode in ["simulated", "hardware"], f"Sensor {key} has invalid mode: {mode}"
+    
+    def test_sensors_hw_info_sub_object(self):
+        """Sensors endpoint returns hw_info sub-object with detection details"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        assert "hw_info" in data, "Missing hw_info sub-object"
+        hw_info = data["hw_info"]
+        
+        # Check expected hw_info fields
+        expected_fields = [
+            "i2c_available",
+            "imu_detected",
+            "baro_detected",
+            "gps_detected",
+            "spi_available",
+            "uart_available",
+            "imu_model",
+            "baro_model",
+            "gps_model",
+        ]
+        for field in expected_fields:
+            assert field in hw_info, f"Missing hw_info field: {field}"
+    
+    def test_sensors_hw_info_boolean_types(self):
+        """hw_info boolean fields have correct types"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        hw_info = data["hw_info"]
+        
+        boolean_fields = ["i2c_available", "imu_detected", "baro_detected", "gps_detected", 
+                          "spi_available", "uart_available"]
+        for field in boolean_fields:
+            assert isinstance(hw_info[field], bool), f"hw_info.{field} should be boolean"
+    
+    def test_sensors_hw_info_model_strings(self):
+        """hw_info model fields are strings"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        hw_info = data["hw_info"]
+        
+        model_fields = ["imu_model", "baro_model", "gps_model"]
+        for field in model_fields:
+            assert isinstance(hw_info[field], str), f"hw_info.{field} should be string"
+
+
 class TestHardwareEndpoint:
     """Tests for /api/hardware endpoint - sensor detection status (new in iteration 7)"""
     

@@ -114,6 +114,32 @@ class NativeRuntime:
     def get_mavlink_stats(self) -> dict:
         return dict(self._rt.get_mavlink())
     
+    def get_sensor_modes(self) -> dict:
+        try:
+            if hasattr(self._rt, 'get_sensor_modes'):
+                return dict(self._rt.get_sensor_modes())
+        except Exception:
+            pass
+        # Fallback: determine modes from state
+        return {
+            "imu": "simulated",
+            "baro": "simulated",
+            "gps": "simulated",
+            "rangefinder": "simulated",
+            "optical_flow": "simulated",
+            "hw_info": {
+                "i2c_available": False,
+                "imu_detected": False,
+                "baro_detected": False,
+                "gps_detected": False,
+                "spi_available": False,
+                "uart_available": False,
+                "imu_model": "none",
+                "baro_model": "none",
+                "gps_model": "none",
+            },
+        }
+    
     def get_performance(self) -> dict:
         return dict(self._rt.get_performance())
     

@@ -34,13 +34,18 @@ function SubSection({ title, icon: Icon, children }) {
 
 export default function DiagnosticsPanel() {
   const [diag, setDiag] = useState(null);
+  const [sensorModes, setSensorModes] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchDiag = useCallback(async () => {
     try {
-      const data = await apiCall('GET', '/api/diagnostics');
-      if (data && !data.error) setDiag(data);
+      const [diagData, sensorsData] = await Promise.all([
+        apiCall('GET', '/api/diagnostics'),
+        apiCall('GET', '/api/sensors'),
+      ]);
+      if (diagData && !diagData.error) setDiag(diagData);
+      if (sensorsData && !sensorsData.error) setSensorModes(sensorsData);
     } catch (e) {
       setError('Failed to fetch diagnostics');
     }
@@ -238,6 +243,40 @@ export default function DiagnosticsPanel() {
                 )}
               </div>
             </SubSection>
+
+            {/* C++ Sensor Drivers */}
+            {sensorModes && (
+              <SubSection title="C++ Sensor Drivers" icon={Cpu}>
+                <div className="space-y-1">
+                  {[
+                    { key: 'imu', label: 'IMU', model: sensorModes.hw_info?.imu_model },
+                    { key: 'baro', label: 'Baro', model: sensorModes.hw_info?.baro_model },
+                    { key: 'gps', label: 'GPS', model: sensorModes.hw_info?.gps_model },
+                    { key: 'rangefinder', label: 'Range' },
+                    { key: 'optical_flow', label: 'Flow' },
+                  ].map(({ key, label, model }) => {
+                    const mode = sensorModes[key];
+                    const isHw = mode === 'hardware';
+                    return (
+                      <div key={key} className="flex items-center justify-between py-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <StatusIcon status={isHw} />
+                          <span className="text-[9px] text-slate-400">{label}</span>
+                          {model && model !== 'none' && (
+                            <span className="text-[8px] text-slate-600 font-mono">{model}</span>
+                          )}
+                        </div>
+                        <span className={`text-[8px] font-bold uppercase px-1 py-0.5 rounded-sm border ${
+                          isHw
+                            ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
+                            : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
+                        }`}>{isHw ? 'HW' : 'SIM'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </SubSection>
+            )}
           </div>
         </div>
       )}
