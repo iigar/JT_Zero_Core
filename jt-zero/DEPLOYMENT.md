@@ -463,8 +463,9 @@ EK3_SRC1_VELXY = 6      (ExternalNav)
 
 ```bash
 cd ~/jt-zero && git pull
-cd jt-zero/build && make -j4
+cd jt-zero/build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
 cp jtzero_native*.so ../../backend/
+cd ~/jt-zero/backend && source venv/bin/activate && pip install -r requirements-pi.txt
 sudo systemctl restart jtzero
 ```
 
@@ -482,8 +483,10 @@ cd ~
 unzip -o JT_Zero_Core-main.zip
 rm -rf jt-zero
 mv JT_Zero_Core-main jt-zero
-cd ~/jt-zero/jt-zero/build && make -j4
+cd ~/jt-zero/jt-zero && rm -rf build && mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
 cp jtzero_native*.so ../../backend/
+cd ~/jt-zero/backend && source venv/bin/activate && pip install -r requirements-pi.txt
 sudo systemctl restart jtzero
 ```
 
