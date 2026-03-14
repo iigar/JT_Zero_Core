@@ -152,7 +152,11 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "height"_a = cs.height,
         "vo_features_detected"_a = cs.vo_features_detected,
         "vo_features_tracked"_a = cs.vo_features_tracked,
+        "vo_inlier_count"_a = cs.vo_inlier_count,
         "vo_tracking_quality"_a = cs.vo_tracking_quality,
+        "vo_confidence"_a = cs.vo_confidence,
+        "vo_position_uncertainty"_a = cs.vo_position_uncertainty,
+        "vo_total_distance"_a = cs.vo_total_distance,
         "vo_dx"_a = cs.vo_dx, "vo_dy"_a = cs.vo_dy, "vo_dz"_a = cs.vo_dz,
         "vo_vx"_a = cs.vo_vx, "vo_vy"_a = cs.vo_vy,
         "vo_valid"_a = cs.vo_valid

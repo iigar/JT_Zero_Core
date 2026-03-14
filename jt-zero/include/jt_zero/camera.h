@@ -46,14 +46,17 @@ struct VOResult {
     uint64_t timestamp_us{0};
     // Position estimate (body-frame delta)
     float dx{0}, dy{0}, dz{0};         // m
-    // Velocity estimate
+    // Velocity estimate (Kalman-filtered)
     float vx{0}, vy{0}, vz{0};         // m/s
     // Rotation delta
     float droll{0}, dpitch{0}, dyaw{0}; // rad
     // Quality metrics
     uint16_t features_detected{0};
     uint16_t features_tracked{0};
+    uint16_t inlier_count{0};           // features after outlier rejection
     float    tracking_quality{0};        // 0-1
+    float    confidence{0};              // 0-1, combined quality metric for EKF
+    float    position_uncertainty{0};    // meters, grows with drift
     bool     valid{false};
 };
 
@@ -212,6 +215,9 @@ public:
     // Process a new frame and compute VO estimate
     VOResult process(const FrameBuffer& frame, float ground_distance = 1.0f);
     
+    // Set IMU data for cross-validation (call before process())
+    void set_imu_hint(float ax, float ay, float gyro_z);
+    
     // Reset state
     void reset();
     
@@ -221,6 +227,11 @@ public:
     // Get feature positions (read-only access)
     const std::array<FeaturePoint, MAX_FEATURES>& features() const { return features_; }
     size_t feature_count() const { return active_count_; }
+    
+    // Get accumulated pose
+    float pose_x() const { return pose_x_; }
+    float pose_y() const { return pose_y_; }
+    float total_distance() const { return total_distance_; }
 
 private:
     FASTDetector detector_;
@@ -237,8 +248,26 @@ private:
     
     // Accumulated local pose (NED frame)
     float pose_x_{0}, pose_y_{0}, pose_z_{0};
+    float total_distance_{0};
     
     uint64_t prev_timestamp_us_{0};
+    
+    // ── Long-range drift reduction ──
+    
+    // Kalman filter state per axis (simple 1D: [position_rate])
+    float kf_vx_{0}, kf_vy_{0};           // filtered velocity
+    float kf_vx_var_{1.0f}, kf_vy_var_{1.0f}; // velocity variance
+    
+    // IMU hint for cross-validation
+    float imu_ax_{0}, imu_ay_{0}, imu_gz_{0};
+    bool  imu_hint_valid_{false};
+    
+    // Running confidence metric
+    float running_confidence_{0.5f};
+    
+    // Median + MAD computation helpers
+    static float compute_median(float* arr, int n);
+    static float compute_mad(float* arr, int n, float median);
 };
 
 // ─── Camera Pipeline (combines Camera + VO) ──────────────
@@ -253,7 +282,11 @@ struct CameraPipelineStats {
     // VO stats
     uint16_t   vo_features_detected{0};
     uint16_t   vo_features_tracked{0};
+    uint16_t   vo_inlier_count{0};
     float      vo_tracking_quality{0};
+    float      vo_confidence{0};          // 0-1 combined confidence
+    float      vo_position_uncertainty{0}; // meters
+    float      vo_total_distance{0};       // meters total path
     float      vo_dx{0}, vo_dy{0}, vo_dz{0};
     float      vo_vx{0}, vo_vy{0};
     bool       vo_valid{false};

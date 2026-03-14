@@ -310,12 +310,43 @@ VisualOdometry::VisualOdometry() {
     prev_features_.fill({});
 }
 
+void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
+    imu_ax_ = ax;
+    imu_ay_ = ay;
+    imu_gz_ = gyro_z;
+    imu_hint_valid_ = true;
+}
+
+float VisualOdometry::compute_median(float* arr, int n) {
+    if (n <= 0) return 0;
+    // Simple insertion sort for small arrays (n < 200)
+    for (int i = 1; i < n; i++) {
+        float key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j--;
+        }
+        arr[j + 1] = key;
+    }
+    if (n % 2 == 0) return (arr[n/2 - 1] + arr[n/2]) * 0.5f;
+    return arr[n/2];
+}
+
+float VisualOdometry::compute_mad(float* arr, int n, float median) {
+    if (n <= 0) return 0;
+    // Compute absolute deviations, reuse array
+    for (int i = 0; i < n; i++) {
+        arr[i] = std::fabs(arr[i] - median);
+    }
+    return compute_median(arr, n) * 1.4826f; // MAD to std dev estimator
+}
+
 VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance) {
     VOResult result;
     result.timestamp_us = frame.info.timestamp_us;
     
     if (!has_prev_frame_) {
-        // First frame: detect features only
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), MAX_FEATURES, 25));
@@ -326,73 +357,205 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         
         result.features_detected = static_cast<uint16_t>(active_count_);
         result.valid = false;
+        result.confidence = 0;
         return result;
     }
     
-    // Save previous feature positions BEFORE tracking updates them in-place
+    // Save previous feature positions
     for (size_t i = 0; i < active_count_; ++i) {
         prev_features_[i] = features_[i];
     }
     
-    // Track existing features (updates features_ positions in-place)
+    // Track existing features
     int tracked_count = tracker_.track(
         prev_frame_, frame.data,
         frame.info.width, frame.info.height,
         features_.data(), active_count_);
     
-    // Compute mean displacement from tracked features
-    float sum_flow_x = 0, sum_flow_y = 0;
+    // ════════════════════════════════════════════════════
+    // Phase 1: Median filter + MAD outlier rejection
+    // ════════════════════════════════════════════════════
+    
+    // Collect displacements from tracked features
+    float dx_arr[MAX_FEATURES];
+    float dy_arr[MAX_FEATURES];
+    float dx_copy[MAX_FEATURES];
+    float dy_copy[MAX_FEATURES];
     int valid_flow = 0;
     
     for (size_t i = 0; i < active_count_; ++i) {
         if (features_[i].tracked) {
-            float dx_px = features_[i].x - prev_features_[i].x;
-            float dy_px = features_[i].y - prev_features_[i].y;
-            sum_flow_x += dx_px;
-            sum_flow_y += dy_px;
+            dx_arr[valid_flow] = features_[i].x - prev_features_[i].x;
+            dy_arr[valid_flow] = features_[i].y - prev_features_[i].y;
             valid_flow++;
         }
     }
     
-    float avg_flow_x = (valid_flow > 0) ? sum_flow_x / static_cast<float>(valid_flow) : 0;
-    float avg_flow_y = (valid_flow > 0) ? sum_flow_y / static_cast<float>(valid_flow) : 0;
+    float median_dx = 0, median_dy = 0;
+    int inlier_count = 0;
+    float inlier_sum_x = 0, inlier_sum_y = 0;
+    
+    if (valid_flow >= 5) {
+        // Compute median displacement (robust to outliers)
+        std::memcpy(dx_copy, dx_arr, valid_flow * sizeof(float));
+        std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
+        median_dx = compute_median(dx_copy, valid_flow);
+        median_dy = compute_median(dy_copy, valid_flow);
+        
+        // Compute MAD for outlier threshold
+        std::memcpy(dx_copy, dx_arr, valid_flow * sizeof(float));
+        std::memcpy(dy_copy, dy_arr, valid_flow * sizeof(float));
+        float mad_x = compute_mad(dx_copy, valid_flow, median_dx);
+        float mad_y = compute_mad(dy_copy, valid_flow, median_dy);
+        
+        // Threshold: 2.5 * MAD (covers ~99% of inliers)
+        float thresh_x = std::max(2.5f * mad_x, 1.0f); // min 1 pixel
+        float thresh_y = std::max(2.5f * mad_y, 1.0f);
+        
+        // Reject outliers, compute inlier mean (more precise than median)
+        for (int i = 0; i < valid_flow; ++i) {
+            if (std::fabs(dx_arr[i] - median_dx) <= thresh_x &&
+                std::fabs(dy_arr[i] - median_dy) <= thresh_y) {
+                inlier_sum_x += dx_arr[i];
+                inlier_sum_y += dy_arr[i];
+                inlier_count++;
+            }
+        }
+    }
+    
+    float filtered_dx_px = (inlier_count > 3) ? inlier_sum_x / static_cast<float>(inlier_count) : median_dx;
+    float filtered_dy_px = (inlier_count > 3) ? inlier_sum_y / static_cast<float>(inlier_count) : median_dy;
+    
+    // ════════════════════════════════════════════════════
+    // Compute dt and convert to meters
+    // ════════════════════════════════════════════════════
+    
+    float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
+    if (dt <= 0 || dt > 1.0f) dt = 0.066f;
+    
+    constexpr float focal_length_px = 277.0f;
+    float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal_length_px : 0;
+    
+    float raw_dx = filtered_dx_px * pixel_to_meter;
+    float raw_dy = filtered_dy_px * pixel_to_meter;
+    float raw_vx = (dt > 0) ? raw_dx / dt : 0;
+    float raw_vy = (dt > 0) ? raw_dy / dt : 0;
+    
+    // ════════════════════════════════════════════════════
+    // Phase 2: Kalman filter for velocity smoothing
+    // ════════════════════════════════════════════════════
+    
+    // Process noise (acceleration uncertainty)
+    constexpr float Q_accel = 0.5f; // m/s^2 process noise
+    float Q = Q_accel * Q_accel * dt * dt;
+    
+    // Measurement noise based on tracking quality
+    float inlier_ratio = (valid_flow > 0) ? static_cast<float>(inlier_count) / static_cast<float>(valid_flow) : 0;
+    float R_base = 0.3f; // base measurement noise (m/s)
+    float R = R_base / std::max(0.1f, inlier_ratio); // higher noise when fewer inliers
+    
+    // Predict
+    // kf_vx_ stays the same (constant velocity model)
+    kf_vx_var_ += Q;
+    kf_vy_var_ += Q;
+    
+    // Update
+    float Kx = kf_vx_var_ / (kf_vx_var_ + R);
+    float Ky = kf_vy_var_ / (kf_vy_var_ + R);
+    kf_vx_ += Kx * (raw_vx - kf_vx_);
+    kf_vy_ += Ky * (raw_vy - kf_vy_);
+    kf_vx_var_ *= (1.0f - Kx);
+    kf_vy_var_ *= (1.0f - Ky);
+    
+    // Use Kalman-filtered velocity for position update
+    result.vx = kf_vx_;
+    result.vy = kf_vy_;
+    result.dx = kf_vx_ * dt;
+    result.dy = kf_vy_ * dt;
+    result.dz = 0;
+    result.vz = 0;
+    
+    // ════════════════════════════════════════════════════
+    // Phase 3: IMU-aided validation
+    // ════════════════════════════════════════════════════
+    
+    float imu_consistency = 1.0f; // 1.0 = perfectly consistent
+    
+    if (imu_hint_valid_ && dt > 0) {
+        // Expected velocity change from IMU acceleration
+        float expected_dvx = imu_ax_ * dt;
+        float expected_dvy = imu_ay_ * dt;
+        
+        // Actual velocity change from VO
+        float actual_dvx = raw_vx - kf_vx_;
+        float actual_dvy = raw_vy - kf_vy_;
+        
+        // Consistency: how well does VO agree with IMU?
+        float discrepancy = std::sqrt(
+            (actual_dvx - expected_dvx) * (actual_dvx - expected_dvx) +
+            (actual_dvy - expected_dvy) * (actual_dvy - expected_dvy));
+        
+        // Map discrepancy to consistency (0-1)
+        // 0 m/s difference → 1.0, 2+ m/s difference → 0.1
+        imu_consistency = std::max(0.1f, 1.0f - discrepancy * 0.5f);
+        
+        imu_hint_valid_ = false; // consume hint
+    }
+    
+    // ════════════════════════════════════════════════════
+    // Phase 4: Confidence metric
+    // ════════════════════════════════════════════════════
+    
+    // Combine multiple quality indicators
+    float track_quality = (active_count_ > 0) ? 
+        static_cast<float>(tracked_count) / static_cast<float>(active_count_) : 0;
+    
+    float feature_quality = std::min(1.0f, static_cast<float>(inlier_count) / 30.0f); // need 30+ inliers
+    
+    // Raw confidence: tracking × inlier_ratio × imu_consistency × feature_quality
+    float raw_confidence = track_quality * inlier_ratio * imu_consistency * feature_quality;
+    
+    // Smooth confidence with exponential moving average
+    constexpr float alpha = 0.3f; // smoothing factor
+    running_confidence_ = alpha * raw_confidence + (1.0f - alpha) * running_confidence_;
+    
+    // If confidence drops below threshold, don't update position (freeze)
+    bool position_update = running_confidence_ > 0.15f && inlier_count >= 5;
+    
+    if (position_update) {
+        pose_x_ += result.dx;
+        pose_y_ += result.dy;
+        total_distance_ += std::sqrt(result.dx * result.dx + result.dy * result.dy);
+    } else {
+        // Freeze position, report zero displacement
+        result.dx = 0;
+        result.dy = 0;
+        result.vx = 0;
+        result.vy = 0;
+    }
+    
+    // Position uncertainty: grows with distance, shrinks with confidence
+    float drift_rate = 0.03f * (1.0f - running_confidence_ * 0.5f); // 1.5-3% base drift
+    result.position_uncertainty = total_distance_ * drift_rate;
+    
+    // ════════════════════════════════════════════════════
+    // Fill result
+    // ════════════════════════════════════════════════════
     
     result.features_tracked = static_cast<uint16_t>(tracked_count);
-    result.tracking_quality = (active_count_ > 0) ? 
-        static_cast<float>(tracked_count) / static_cast<float>(active_count_) : 0;
+    result.features_detected = static_cast<uint16_t>(active_count_);
+    result.inlier_count = static_cast<uint16_t>(inlier_count);
+    result.tracking_quality = track_quality;
+    result.confidence = running_confidence_;
+    result.valid = position_update;
     
     // Re-detect features if too few tracked
     if (tracked_count < 20 || active_count_ < 30) {
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), MAX_FEATURES, 25));
+        result.features_detected = static_cast<uint16_t>(active_count_);
     }
-    
-    result.features_detected = static_cast<uint16_t>(active_count_);
-    
-    // Compute dt
-    float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
-    if (dt <= 0 || dt > 1.0f) dt = 0.066f; // Default ~15 FPS
-    
-    // Convert pixel displacement to meters using ground distance and FOV
-    // Approximate: pixel_to_meter = ground_distance / (focal_length_px)
-    // For 320x240 with ~60deg HFOV: focal_length ~= 160 / tan(30deg) ~= 277 px
-    constexpr float focal_length_px = 277.0f;
-    float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal_length_px : 0;
-    
-    result.dx = avg_flow_x * pixel_to_meter;
-    result.dy = avg_flow_y * pixel_to_meter;
-    result.dz = 0;
-    
-    result.vx = (dt > 0) ? result.dx / dt : 0;
-    result.vy = (dt > 0) ? result.dy / dt : 0;
-    result.vz = 0;
-    
-    // Accumulate local pose
-    pose_x_ += result.dx;
-    pose_y_ += result.dy;
-    
-    result.valid = valid_flow >= 5;
     
     // Update state
     std::memcpy(prev_frame_, frame.data, FRAME_SIZE);
@@ -405,6 +568,16 @@ void VisualOdometry::reset() {
     has_prev_frame_ = false;
     active_count_ = 0;
     prev_timestamp_us_ = 0;
+    pose_x_ = 0;
+    pose_y_ = 0;
+    pose_z_ = 0;
+    total_distance_ = 0;
+    kf_vx_ = 0;
+    kf_vy_ = 0;
+    kf_vx_var_ = 1.0f;
+    kf_vy_var_ = 1.0f;
+    running_confidence_ = 0.5f;
+    imu_hint_valid_ = false;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -495,7 +668,11 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     
     stats.vo_features_detected = vo_result_.features_detected;
     stats.vo_features_tracked  = vo_result_.features_tracked;
+    stats.vo_inlier_count      = vo_result_.inlier_count;
     stats.vo_tracking_quality  = vo_result_.tracking_quality;
+    stats.vo_confidence        = vo_result_.confidence;
+    stats.vo_position_uncertainty = vo_result_.position_uncertainty;
+    stats.vo_total_distance    = vo_.total_distance();
     stats.vo_dx = vo_result_.dx;
     stats.vo_dy = vo_result_.dy;
     stats.vo_dz = vo_result_.dz;

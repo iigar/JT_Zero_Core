@@ -291,15 +291,37 @@ bool MAVLinkInterface::send_odometry(const MAVOdometry& msg) {
         std::memcpy(payload + 52, &msg.pitchspeed, 4);
         std::memcpy(payload + 56, &msg.yawspeed, 4);
         
-        // pose_covariance[21] at offset 60 — fill with NaN (unknown)
-        float nan_val = std::nanf("");
-        for (int i = 0; i < 21; i++) {
-            std::memcpy(payload + 60 + i * 4, &nan_val, 4);
+        // pose_covariance[21] at offset 60 (upper triangle of 6x6 matrix)
+        // Use VO confidence to set covariance: high confidence → low covariance
+        float pos_var = 0.01f; // 10cm base uncertainty
+        if (msg.quality < 80) {
+            pos_var = 0.1f + (80.0f - msg.quality) * 0.05f; // up to 4.1m uncertainty
         }
+        if (msg.quality < 20) {
+            pos_var = 10.0f; // very low confidence → 10m uncertainty (EKF will mostly ignore)
+        }
+        float rot_var = 0.01f; // rotation variance (fixed, yaw from gyro)
+        // Diagonal elements: xx, yy, zz, roll, pitch, yaw
+        // Index mapping for upper triangle: [0]=xx, [6]=yy, [11]=zz, [15]=rr, [18]=pp, [20]=yy_rot
+        float zero_f = 0.0f;
+        for (int i = 0; i < 21; i++) {
+            std::memcpy(payload + 60 + i * 4, &zero_f, 4);
+        }
+        std::memcpy(payload + 60 + 0 * 4, &pos_var, 4);  // xx
+        std::memcpy(payload + 60 + 6 * 4, &pos_var, 4);  // yy
+        std::memcpy(payload + 60 + 11 * 4, &pos_var, 4); // zz
+        std::memcpy(payload + 60 + 15 * 4, &rot_var, 4); // roll
+        std::memcpy(payload + 60 + 18 * 4, &rot_var, 4); // pitch
+        std::memcpy(payload + 60 + 20 * 4, &rot_var, 4); // yaw
+        
         // velocity_covariance[21] at offset 144
+        float vel_var = pos_var * 2.0f; // velocity variance scales with position
         for (int i = 0; i < 21; i++) {
-            std::memcpy(payload + 144 + i * 4, &nan_val, 4);
+            std::memcpy(payload + 144 + i * 4, &zero_f, 4);
         }
+        std::memcpy(payload + 144 + 0 * 4, &vel_var, 4);  // vx
+        std::memcpy(payload + 144 + 6 * 4, &vel_var, 4);  // vy
+        std::memcpy(payload + 144 + 11 * 4, &vel_var, 4); // vz
         
         payload[228] = msg.frame_id;
         payload[229] = msg.child_frame_id;
@@ -800,14 +822,14 @@ MAVOdometry MAVLinkInterface::build_odometry(
     msg.x = vo_pose_x_;
     msg.y = vo_pose_y_;
     msg.z = -state.altitude_agl;
-    msg.vx = state.vx + vo.vx;
-    msg.vy = state.vy + vo.vy;
-    msg.vz = state.vz + vo.vz;
+    msg.vx = vo.vx;
+    msg.vy = vo.vy;
+    msg.vz = state.vz;
     msg.rollspeed  = state.imu.gyro_x;
     msg.pitchspeed = state.imu.gyro_y;
     msg.yawspeed   = state.imu.gyro_z;
-    // Set quality based on VO validity: high when tracking, lower when dead-reckoning
-    msg.quality = vo.valid ? vo.tracking_quality : 30.0f;
+    // Set quality 0-100 based on VO confidence (not just tracking_quality)
+    msg.quality = vo.valid ? (vo.confidence * 100.0f) : 10.0f;
     msg.frame_id = 0;       // MAV_FRAME_LOCAL_NED
     msg.child_frame_id = 1; // MAV_FRAME_BODY_FRD
     

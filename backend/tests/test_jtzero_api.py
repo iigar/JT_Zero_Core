@@ -241,6 +241,41 @@ class TestCameraEndpoint:
         # We check for existence and type, actual non-zero depends on drone movement
         print(f"VO Displacement values: vo_dx={vo_dx}, vo_dy={vo_dy}")
 
+    # New tests for long-range VO fields (iteration 14)
+    def test_camera_vo_inlier_count(self):
+        """Camera returns vo_inlier_count field (median+MAD outlier rejection)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_inlier_count" in data, "vo_inlier_count field missing"
+        assert isinstance(data["vo_inlier_count"], (int, float)), "vo_inlier_count should be numeric"
+        # Should be <= vo_features_tracked (inliers are subset of tracked)
+        assert data["vo_inlier_count"] <= data.get("vo_features_tracked", 0) + 1
+    
+    def test_camera_vo_confidence(self):
+        """Camera returns vo_confidence field (Kalman-filtered velocity confidence)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_confidence" in data, "vo_confidence field missing"
+        assert isinstance(data["vo_confidence"], (int, float)), "vo_confidence should be numeric"
+        # Confidence should be 0-1 range
+        assert 0 <= data["vo_confidence"] <= 1.0
+    
+    def test_camera_vo_position_uncertainty(self):
+        """Camera returns vo_position_uncertainty field (accumulated drift in meters)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_position_uncertainty" in data, "vo_position_uncertainty field missing"
+        assert isinstance(data["vo_position_uncertainty"], (int, float)), "vo_position_uncertainty should be numeric"
+        assert data["vo_position_uncertainty"] >= 0  # Can't be negative
+    
+    def test_camera_vo_total_distance(self):
+        """Camera returns vo_total_distance field (total distance traveled in meters)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_total_distance" in data, "vo_total_distance field missing"
+        assert isinstance(data["vo_total_distance"], (int, float)), "vo_total_distance should be numeric"
+        assert data["vo_total_distance"] >= 0  # Can't be negative
+
 
 class TestThreadCount:
     """Tests for thread count - should be 8 threads including T7_API"""

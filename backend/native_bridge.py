@@ -95,7 +95,13 @@ class NativeRuntime:
         return dict(self._rt.get_engines())
     
     def get_camera_stats(self) -> dict:
-        return dict(self._rt.get_camera())
+        d = dict(self._rt.get_camera())
+        # Add new long-range VO fields with defaults (C++ module may not have them yet)
+        d.setdefault("vo_inlier_count", d.get("vo_features_tracked", 0))
+        d.setdefault("vo_confidence", d.get("vo_tracking_quality", 0))
+        d.setdefault("vo_position_uncertainty", 0)
+        d.setdefault("vo_total_distance", 0)
+        return d
     
     def get_frame_data(self) -> bytes:
         """Get latest camera frame as raw grayscale bytes (320x240)."""

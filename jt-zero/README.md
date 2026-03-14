@@ -18,6 +18,7 @@ JT-Zero — це **companion computer система** для дронів. Во
 | **[DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)** | Покрокова встановлення від нуля (для початківців). **Два способи: через GitHub або офлайн (архів/USB)** |
 | **[COMMANDS.md](jt-zero/COMMANDS.md)** | Всі команди: збірка, запуск, API (curl), діагностика, troubleshooting |
 | **[FC_CONNECTION.md](jt-zero/FC_CONNECTION.md)** | Підключення до польотного контролера (Matek H743, Pixhawk, etc.) |
+| **[LONG_RANGE_FLIGHT.md](jt-zero/LONG_RANGE_FLIGHT.md)** | Конфігурація для 5+ км польотів (VO+IMU, без GPS) |
 
 ---
 
@@ -89,9 +90,12 @@ chmod +x install.sh
 ## Можливості
 
 - Visual Odometry з точністю ±5-20 см
+- **Далекий політ: до 5+ км з RTL (VO+IMU, без GPS)**
 - Ефективна швидкість: до 2-3 м/с
 - Робоча висота: 0.3-10 м (оптимально 1-3 м)
 - Частота VO: ~12 Hz (ArduPilot EKF приймає)
+- Kalman-фільтрована швидкість + outlier rejection
+- Confidence-based covariance для EKF
 - 7-вкладковий Dashboard з реальним часом
 - Автовизначення обладнання
 - Підтримка Pi Camera v2/v3 та USB камер

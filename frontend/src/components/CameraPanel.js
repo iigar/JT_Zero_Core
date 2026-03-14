@@ -20,7 +20,11 @@ export default function CameraPanel({ camera, features = [] }) {
     height = 240,
     vo_features_detected = 0,
     vo_features_tracked = 0,
+    vo_inlier_count = 0,
     vo_tracking_quality = 0,
+    vo_confidence = 0,
+    vo_position_uncertainty = 0,
+    vo_total_distance = 0,
     vo_dx = 0,
     vo_dy = 0,
     vo_valid = false,
@@ -185,7 +189,8 @@ export default function CameraPanel({ camera, features = [] }) {
 
   const isCSI = camera_type === 'PI_CSI';
   const typeColor = isCSI ? 'text-emerald-400' : camera_type === 'USB' ? 'text-amber-400' : 'text-slate-500';
-  const qualityPct = (vo_tracking_quality * 100).toFixed(0);
+  const confPct = (vo_confidence * 100).toFixed(0);
+  const confColor = vo_confidence > 0.6 ? 'text-emerald-400' : vo_confidence > 0.3 ? 'text-amber-400' : 'text-red-400';
 
   return (
     <div className="h-full flex flex-col bg-[#080A0E] border border-[#1E293B] rounded-sm overflow-hidden" data-testid="camera-panel">
@@ -225,11 +230,12 @@ export default function CameraPanel({ camera, features = [] }) {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-px bg-[#1E293B]/30 shrink-0">
+      <div className="grid grid-cols-5 gap-px bg-[#1E293B]/30 shrink-0">
         <Stat icon={<Eye className="w-3 h-3" />} label="DET" value={vo_features_detected} color="text-cyan-400" />
-        <Stat icon={<Crosshair className="w-3 h-3" />} label="TRK" value={vo_features_tracked} color="text-emerald-400" />
-        <Stat icon={<Zap className="w-3 h-3" />} label="Q" value={`${qualityPct}%`} color={Number(qualityPct) > 50 ? 'text-emerald-400' : 'text-amber-400'} />
-        <Stat icon={null} label="TYPE" value={camera_type} color={typeColor} small />
+        <Stat icon={<Crosshair className="w-3 h-3" />} label="INL" value={vo_inlier_count} color="text-emerald-400" />
+        <Stat icon={<Zap className="w-3 h-3" />} label="CONF" value={`${confPct}%`} color={confColor} />
+        <Stat icon={null} label="DIST" value={vo_total_distance > 1000 ? `${(vo_total_distance/1000).toFixed(1)}km` : `${vo_total_distance.toFixed(0)}m`} color="text-slate-300" />
+        <Stat icon={null} label="ERR" value={`±${vo_position_uncertainty.toFixed(0)}m`} color={vo_position_uncertainty > 100 ? 'text-red-400' : vo_position_uncertainty > 30 ? 'text-amber-400' : 'text-emerald-400'} />
       </div>
     </div>
   );

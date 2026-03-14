@@ -146,7 +146,11 @@ class CameraStats:
     height: int = 240
     vo_features_detected: int = 0
     vo_features_tracked: int = 0
+    vo_inlier_count: int = 0
     vo_tracking_quality: float = 0.0
+    vo_confidence: float = 0.0
+    vo_position_uncertainty: float = 0.0
+    vo_total_distance: float = 0.0
     vo_dx: float = 0.0
     vo_dy: float = 0.0
     vo_dz: float = 0.0
@@ -501,7 +505,9 @@ class JTZeroSimulator:
         base_features = 80 + int(30 * math.sin(t * 0.1))
         cam.vo_features_detected = max(10, base_features + random.randint(-10, 10))
         cam.vo_features_tracked = max(5, int(cam.vo_features_detected * (0.7 + random.gauss(0, 0.05))))
+        cam.vo_inlier_count = max(3, int(cam.vo_features_tracked * (0.85 + random.gauss(0, 0.03))))
         cam.vo_tracking_quality = min(1.0, max(0.0, cam.vo_features_tracked / max(1, cam.vo_features_detected)))
+        cam.vo_confidence = min(1.0, max(0.0, cam.vo_tracking_quality * (cam.vo_inlier_count / max(1, cam.vo_features_tracked)) * 0.95))
         
         # VO motion estimate
         cam.vo_dx = 0.001 * math.sin(t * 0.3) + random.gauss(0, 0.0005)
@@ -510,6 +516,10 @@ class JTZeroSimulator:
         cam.vo_vx = cam.vo_dx * 15.0  # ~15 FPS
         cam.vo_vy = cam.vo_dy * 15.0
         cam.vo_valid = cam.vo_features_tracked >= 5
+        
+        # Accumulate distance and uncertainty
+        cam.vo_total_distance += abs(cam.vo_dx) + abs(cam.vo_dy)
+        cam.vo_position_uncertainty = cam.vo_total_distance * 0.03 * (1.0 - cam.vo_confidence * 0.5)
         
         # Camera events
         if self._tick % 60 == 15:
