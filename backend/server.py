@@ -132,6 +132,9 @@ async def get_diagnostics():
     diag["mavlink"]["fc_type"] = mavlink.get("fc_type", "N/A")
     diag["mavlink"]["fc_firmware"] = mavlink.get("fc_firmware", "N/A")
     diag["summary"]["mavlink_connected"] = connected
+    # Recalculate overall based on live MAVLink status
+    cam_ok = diag["summary"].get("camera", "NONE") != "NONE"
+    diag["summary"]["overall"] = "ok" if cam_ok and connected else "partial"
     return diag
 
 @app.post("/api/diagnostics/scan")
