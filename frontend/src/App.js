@@ -152,10 +152,10 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} />
         )}
         {activeTab === 'telemetry' && (
-          <TelemetryTab state={state} history={history} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} threads={threads} />
+          <TelemetryTab state={state} history={history} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} threads={threads} sensorModes={sensorModes} />
         )}
         {activeTab === 'camera' && (
           <div className="h-full p-3">
@@ -190,7 +190,7 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes }) {
   return (
     <div className="h-full flex overflow-hidden">
       {/* Compact sidebar */}
@@ -238,7 +238,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
         <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '240px' }}>
           <div className="col-span-3 overflow-hidden"><Drone3DPanel state={state} /></div>
           <div className="col-span-3 overflow-hidden"><DronePanel state={state} history={history} /></div>
-          <div className="col-span-6 overflow-hidden"><SensorPanels state={state} history={history} /></div>
+          <div className="col-span-6 overflow-hidden"><SensorPanels state={state} history={history} sensorModes={sensorModes} /></div>
         </div>
         {/* Row 2: Camera + MAVLink + Performance */}
         <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '220px' }}>
@@ -259,7 +259,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
 /* Telemetry Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode, threads }) {
+function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode, threads, sensorModes }) {
   return (
     <div className="h-full flex flex-col gap-2 p-3 overflow-y-auto">
       <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '300px' }}>
@@ -273,7 +273,7 @@ function TelemetryTab({ state, history, performance, systemMetrics, runtimeMode,
       {/* Sensor detail grid */}
       <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '220px' }}>
         <div className="col-span-12 overflow-hidden">
-          <SensorPanels state={state} history={history} />
+          <SensorPanels state={state} history={history} sensorModes={sensorModes} />
         </div>
       </div>
     </div>

@@ -300,6 +300,8 @@ private:
     size_t  rx_tail_{0};
     uint8_t seq_{0};               // MAVLink frame sequence counter
     bool    streams_requested_{false};  // Have we requested data streams?
+    int     stream_request_count_{0};  // Number of times streams requested
+    uint64_t last_stream_request_us_{0};  // Last request timestamp
     
     // Process incoming bytes: parse MAVLink frames and update fc_telem_
     void process_incoming();

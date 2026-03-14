@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FileText, Server, Cpu, Terminal, HardDrive, ExternalLink, Download, ChevronRight, Camera } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { FileText, Server, Cpu, Terminal, HardDrive, ExternalLink, Download, ChevronRight, Camera, CheckCircle, XCircle, RefreshCw, Zap } from 'lucide-react';
 
 const API_ENDPOINTS = [
   { method: 'GET', path: '/api/health', desc: 'System health + runtime mode + build info' },
@@ -105,9 +105,10 @@ const HARDWARE_REQS = [
 ];
 
 export default function DocumentationTab() {
-  const [section, setSection] = useState('install');
+  const [section, setSection] = useState('quickstart');
 
   const sections = [
+    { id: 'quickstart', label: 'Quick Start', icon: Zap },
     { id: 'install', label: 'Pi Zero Install', icon: Download },
     { id: 'camera', label: 'Camera Setup', icon: Camera },
     { id: 'fc', label: 'Flight Controller', icon: ExternalLink },
@@ -141,6 +142,7 @@ export default function DocumentationTab() {
 
       {/* Content */}
       <div className="flex-1 p-4 overflow-y-auto">
+        {section === 'quickstart' && <QuickStartSection />}
         {section === 'install' && <InstallSection />}
         {section === 'camera' && <CameraSetupSection />}
         {section === 'fc' && <FCSection />}
@@ -150,6 +152,168 @@ export default function DocumentationTab() {
         {section === 'files' && <FilesSection />}
         {section === 'hardware' && <HardwareSection />}
       </div>
+    </div>
+  );
+}
+
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+const CHECKS = [
+  { id: 'server', label: 'JT-Zero Server', desc: 'Backend is running and responding', endpoint: '/api/health', validate: d => d?.status === 'ok' },
+  { id: 'runtime', label: 'C++ Runtime', desc: 'Native C++ module loaded (not Python simulator)', endpoint: '/api/health', validate: d => d?.mode === 'native' },
+  { id: 'camera', label: 'Camera', desc: 'CSI or USB camera detected and streaming', endpoint: '/api/camera', validate: d => d?.camera_open === true },
+  { id: 'mavlink', label: 'MAVLink Connection', desc: 'Flight controller connected via UART', endpoint: '/api/mavlink', validate: d => d?.state === 'CONNECTED' },
+  { id: 'fc_type', label: 'FC Identified', desc: 'Flight controller type recognized', endpoint: '/api/mavlink', validate: d => d?.fc_autopilot && d.fc_autopilot !== 'Unknown' && d.fc_autopilot !== 'N/A' },
+  { id: 'vo', label: 'Visual Odometry', desc: 'VO messages being sent to FC', endpoint: '/api/mavlink', validate: d => (d?.vision_pos_sent || 0) > 0 },
+  { id: 'sensors', label: 'IMU Data', desc: 'IMU sensor receiving data (hardware or MAVLink)', endpoint: '/api/sensors', validate: d => d?.imu === 'mavlink' || d?.imu === 'hardware' },
+  { id: 'gps', label: 'GPS Fix', desc: 'GPS has valid fix (3D)', endpoint: '/api/state', validate: d => (d?.gps?.fix_type || 0) >= 3 && d?.gps?.satellites >= 4 },
+];
+
+function QuickStartSection() {
+  const [results, setResults] = useState({});
+  const [checking, setChecking] = useState(false);
+  const [lastCheck, setLastCheck] = useState(null);
+
+  const runChecks = useCallback(async () => {
+    setChecking(true);
+    const newResults = {};
+    const endpoints = {};
+
+    for (const check of CHECKS) {
+      if (!endpoints[check.endpoint]) {
+        try {
+          const res = await fetch(`${BACKEND_URL}${check.endpoint}`);
+          endpoints[check.endpoint] = await res.json();
+        } catch {
+          endpoints[check.endpoint] = null;
+        }
+      }
+      const data = endpoints[check.endpoint];
+      try {
+        newResults[check.id] = { ok: data ? check.validate(data) : false, data };
+      } catch {
+        newResults[check.id] = { ok: false, data: null };
+      }
+    }
+
+    setResults(newResults);
+    setChecking(false);
+    setLastCheck(new Date());
+  }, []);
+
+  useEffect(() => { runChecks(); }, [runChecks]);
+
+  const passed = Object.values(results).filter(r => r.ok).length;
+  const total = CHECKS.length;
+
+  return (
+    <div className="max-w-3xl space-y-4" data-testid="quickstart-section">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">Quick Start Check</h2>
+          <p className="text-xs text-slate-400 mt-1">Automatic system health check. Verifies all components are working.</p>
+        </div>
+        <button
+          onClick={runChecks}
+          disabled={checking}
+          data-testid="run-checks-btn"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-sm text-[10px] text-[#00F0FF] font-bold uppercase tracking-wider hover:bg-[#00F0FF]/20 transition-all disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${checking ? 'animate-spin' : ''}`} />
+          {checking ? 'Checking...' : 'Re-check'}
+        </button>
+      </div>
+
+      {/* Score */}
+      <div className="p-4 bg-[#0A0C10] border border-[#1E293B] rounded-sm">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">System Readiness</span>
+          <span className={`text-lg font-bold tabular-nums ${passed === total ? 'text-emerald-400' : passed > total / 2 ? 'text-amber-400' : 'text-red-400'}`}>
+            {passed}/{total}
+          </span>
+        </div>
+        <div className="h-2 bg-black/50 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${passed === total ? 'bg-emerald-500' : passed > total / 2 ? 'bg-amber-500' : 'bg-red-500'}`}
+            style={{ width: `${(passed / total) * 100}%` }}
+          />
+        </div>
+        {lastCheck && (
+          <p className="text-[8px] text-slate-600 mt-2">
+            Last check: {lastCheck.toLocaleTimeString()}
+          </p>
+        )}
+      </div>
+
+      {/* Check items */}
+      <div className="space-y-1.5">
+        {CHECKS.map(check => {
+          const result = results[check.id];
+          const ok = result?.ok;
+          const pending = !result && checking;
+          return (
+            <div key={check.id} data-testid={`check-${check.id}`}
+              className={`flex items-center gap-3 p-3 rounded-sm border transition-all ${
+                ok ? 'bg-emerald-500/5 border-emerald-500/20' :
+                pending ? 'bg-slate-800/30 border-slate-700/30 animate-pulse' :
+                result ? 'bg-red-500/5 border-red-500/20' :
+                'bg-[#0A0C10] border-[#1E293B]'
+              }`}>
+              <div className="shrink-0">
+                {ok ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                ) : pending ? (
+                  <RefreshCw className="w-4 h-4 text-slate-500 animate-spin" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-400" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-[11px] font-bold text-slate-200">{check.label}</h4>
+                <p className="text-[9px] text-slate-500">{check.desc}</p>
+              </div>
+              <span className={`text-[9px] font-bold uppercase ${ok ? 'text-emerald-400' : pending ? 'text-slate-600' : 'text-red-400'}`}>
+                {ok ? 'PASS' : pending ? '...' : 'FAIL'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tips based on results */}
+      {Object.keys(results).length > 0 && passed < total && (
+        <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm space-y-2">
+          <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Fix suggestions</h4>
+          <div className="space-y-1">
+            {!results.server?.ok && (
+              <p className="text-[9px] text-slate-400">Server: Check <code className="text-cyan-400">sudo systemctl status jtzero</code></p>
+            )}
+            {!results.runtime?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">C++ Runtime: Rebuild with <code className="text-cyan-400">cd ~/jt-zero/jt-zero/build && make -j4</code></p>
+            )}
+            {!results.camera?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">Camera: Check <code className="text-cyan-400">rpicam-hello --list-cameras</code></p>
+            )}
+            {!results.mavlink?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">MAVLink: Check UART wiring and <code className="text-cyan-400">ls -la /dev/ttyAMA0</code></p>
+            )}
+            {!results.vo?.ok && results.mavlink?.ok && (
+              <p className="text-[9px] text-slate-400">VO: Camera must be working. Check <code className="text-cyan-400">curl localhost:8001/api/camera</code></p>
+            )}
+            {!results.gps?.ok && (
+              <p className="text-[9px] text-slate-400">GPS: Connect GPS module or this is expected for indoor flights</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {passed === total && (
+        <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-sm text-center">
+          <p className="text-[11px] text-emerald-400 font-bold">All systems operational! Ready for flight testing.</p>
+          <p className="text-[9px] text-slate-500 mt-1">Remember: First test WITHOUT propellers!</p>
+        </div>
+      )}
     </div>
   );
 }

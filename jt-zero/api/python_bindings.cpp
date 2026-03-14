@@ -180,10 +180,20 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         switch (fc.fc_type) {
             case 1: type_str = "FIXED_WING"; break;
             case 2: type_str = "QUADROTOR"; break;
+            case 3: type_str = "COAXIAL"; break;
+            case 4: type_str = "HELICOPTER"; break;
+            case 10: type_str = "GROUND_ROVER"; break;
+            case 11: type_str = "SURFACE_BOAT"; break;
+            case 12: type_str = "SUBMARINE"; break;
             case 13: type_str = "HEXAROTOR"; break;
             case 14: type_str = "OCTOROTOR"; break;
             case 15: type_str = "TRICOPTER"; break;
-            default: type_str = "TYPE_" + std::to_string(fc.fc_type); break;
+            case 19: type_str = "VTOL_TAILSITTER"; break;
+            case 20: type_str = "VTOL_TILTROTOR"; break;
+            case 21: type_str = "VTOL_FIXEDROTOR"; break;
+            case 22: type_str = "VTOL_TAILSITTER_DUOROTOR"; break;
+            case 29: type_str = "DODECAROTOR"; break;
+            default: type_str = "MAV_TYPE_" + std::to_string(fc.fc_type); break;
         }
     }
     

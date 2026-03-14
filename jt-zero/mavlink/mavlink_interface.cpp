@@ -429,8 +429,7 @@ bool MAVLinkInterface::send_mavlink_v2(uint32_t msg_id, const uint8_t* payload, 
 void MAVLinkInterface::request_data_streams() {
     if (simulated_) return;
     
-    // REQUEST_DATA_STREAM (msg_id=66, CRC_EXTRA=148)
-    // Request specific streams from FC at given Hz
+    // Method 1: Legacy REQUEST_DATA_STREAM (msg_id=66, CRC_EXTRA=148)
     struct { uint8_t stream_id; uint16_t rate_hz; } streams[] = {
         { 1,  2 },  // RAW_SENSORS (SCALED_IMU, SCALED_PRESSURE)
         { 2,  2 },  // EXTENDED_STATUS (SYS_STATUS)
@@ -441,23 +440,56 @@ void MAVLinkInterface::request_data_streams() {
     
     for (auto& s : streams) {
         uint8_t payload[6];
-        // uint16_t req_message_rate (little-endian)
         payload[0] = s.rate_hz & 0xFF;
         payload[1] = (s.rate_hz >> 8) & 0xFF;
-        // uint8_t target_system
         payload[2] = fc_system_id_;
-        // uint8_t target_component
         payload[3] = 1;  // MAV_COMP_ID_AUTOPILOT1
-        // uint8_t req_stream_id
         payload[4] = s.stream_id;
-        // uint8_t start_stop (1=start)
-        payload[5] = 1;
-        
+        payload[5] = 1;  // start
         send_mavlink_v2(66, payload, 6, 148);
         msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     }
     
-    std::printf("[MAVLink] Requested data streams (5 types) from FC sysid=%d\n", fc_system_id_);
+    // Method 2: Modern COMMAND_LONG / MAV_CMD_SET_MESSAGE_INTERVAL (cmd=511)
+    // msg_id=76, CRC_EXTRA=152
+    // More reliable: requests specific message IDs at specific intervals
+    struct { uint32_t mavlink_msg_id; int32_t interval_us; } intervals[] = {
+        { 30,  250000 },  // ATTITUDE @ 4 Hz
+        { 29,  500000 },  // SCALED_PRESSURE @ 2 Hz
+        { 27,  500000 },  // RAW_IMU / SCALED_IMU @ 2 Hz
+        { 24,  500000 },  // GPS_RAW_INT @ 2 Hz
+        { 33,  500000 },  // GLOBAL_POSITION_INT @ 2 Hz
+        { 74,  500000 },  // VFR_HUD @ 2 Hz
+        { 1,   500000 },  // SYS_STATUS @ 2 Hz
+    };
+    
+    for (auto& m : intervals) {
+        uint8_t payload[33] = {};
+        // COMMAND_LONG fields (wire order: largest first)
+        // param1 (float): MAVLink message ID
+        float p1;
+        std::memcpy(&p1, &(m.mavlink_msg_id), 0);  // cast to float
+        p1 = static_cast<float>(m.mavlink_msg_id);
+        std::memcpy(payload + 0, &p1, 4);
+        // param2 (float): interval in microseconds (-1 = default, 0 = disable)
+        float p2 = static_cast<float>(m.interval_us);
+        std::memcpy(payload + 4, &p2, 4);
+        // param3-param7: unused (0)
+        // command (uint16_t) at offset 28
+        uint16_t cmd = 511;  // MAV_CMD_SET_MESSAGE_INTERVAL
+        std::memcpy(payload + 28, &cmd, 2);
+        // target_system
+        payload[30] = fc_system_id_;
+        // target_component
+        payload[31] = 1;  // MAV_COMP_ID_AUTOPILOT1
+        // confirmation
+        payload[32] = 0;
+        
+        send_mavlink_v2(76, payload, 33, 152);
+        msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+    }
+    
+    std::printf("[MAVLink] Requested data streams + message intervals from FC sysid=%d\n", fc_system_id_);
     std::fflush(stdout);
 }
 
@@ -609,9 +641,14 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         
     case 0: {  // HEARTBEAT — min 7 bytes (custom_mode + type + autopilot + base_mode)
         if (len < 7) break;
+        uint8_t hb_type      = safe_u8(4);
+        uint8_t hb_autopilot = safe_u8(5);
+        // Skip GCS heartbeats (MAV_TYPE_GCS=6) and generic/unknown (type=0)
+        // Only accept heartbeats from actual vehicles
+        if (hb_type == 6 || hb_type == 0 || hb_type == 27 || hb_type == 18) break;
         fc_telem_.custom_mode  = safe_u32(0);
-        fc_telem_.fc_type      = safe_u8(4);
-        fc_telem_.fc_autopilot = safe_u8(5);
+        fc_telem_.fc_type      = hb_type;
+        fc_telem_.fc_autopilot = hb_autopilot;
         fc_telem_.base_mode    = safe_u8(6);
         fc_telem_.system_status = safe_u8(7);
         fc_telem_.armed        = (safe_u8(6) & 0x80) != 0;
@@ -819,10 +856,21 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     if (!simulated_) {
         process_incoming();
         
-        // Request data streams once after connection is established
-        if (state_ == MAVLinkState::CONNECTED && !streams_requested_ && fc_telem_.heartbeat_valid) {
-            request_data_streams();
-            streams_requested_ = true;
+        // Request data streams with retry (up to 3 times, every 5 seconds)
+        if (state_ == MAVLinkState::CONNECTED && fc_telem_.heartbeat_valid) {
+            if (!streams_requested_) {
+                request_data_streams();
+                streams_requested_ = true;
+                stream_request_count_ = 1;
+                last_stream_request_us_ = now_us();
+            } else if (stream_request_count_ < 3) {
+                uint64_t elapsed = now_us() - last_stream_request_us_;
+                if (elapsed > 5000000) {  // 5 seconds
+                    request_data_streams();
+                    stream_request_count_++;
+                    last_stream_request_us_ = now_us();
+                }
+            }
         }
     }
     
@@ -879,10 +927,14 @@ MAVLinkStats MAVLinkInterface::get_stats() const {
     // FC firmware string based on detected autopilot type
     if (fc_telem_.heartbeat_valid) {
         const char* ap = (fc_telem_.fc_autopilot == 3) ? "ArduPilot" : 
-                         (fc_telem_.fc_autopilot == 12) ? "PX4" : "Unknown";
+                         (fc_telem_.fc_autopilot == 12) ? "PX4" :
+                         (fc_telem_.fc_autopilot == 8) ? "MAVPilot" : "Autopilot";
         const char* tp = (fc_telem_.fc_type == 2) ? "QUADROTOR" :
                          (fc_telem_.fc_type == 1) ? "FIXED_WING" :
-                         (fc_telem_.fc_type == 13) ? "HEXAROTOR" : "OTHER";
+                         (fc_telem_.fc_type == 13) ? "HEXAROTOR" :
+                         (fc_telem_.fc_type == 14) ? "OCTOROTOR" :
+                         (fc_telem_.fc_type == 15) ? "TRICOPTER" :
+                         (fc_telem_.fc_type == 4) ? "HELICOPTER" : "VEHICLE";
         std::snprintf(stats.fc_firmware, sizeof(stats.fc_firmware), "%s %s", ap, tp);
     } else {
         std::strncpy(stats.fc_firmware, simulated_ ? "Simulated" : "Waiting...", sizeof(stats.fc_firmware) - 1);
