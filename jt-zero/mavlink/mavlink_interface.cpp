@@ -746,8 +746,11 @@ MAVVisionPositionEstimate MAVLinkInterface::build_vision_position(
     msg.pitch = state.pitch * 0.0174533f;
     msg.yaw   = state.yaw * 0.0174533f;
     
-    vo_pose_x_ += vo.dx;
-    vo_pose_y_ += vo.dy;
+    // Only accumulate VO displacement when tracking is valid
+    if (vo.valid) {
+        vo_pose_x_ += vo.dx;
+        vo_pose_y_ += vo.dy;
+    }
     
     return msg;
 }
@@ -766,7 +769,8 @@ MAVOdometry MAVLinkInterface::build_odometry(
     msg.rollspeed  = state.imu.gyro_x;
     msg.pitchspeed = state.imu.gyro_y;
     msg.yawspeed   = state.imu.gyro_z;
-    msg.quality = vo.tracking_quality;
+    // Set quality based on VO validity: high when tracking, lower when dead-reckoning
+    msg.quality = vo.valid ? vo.tracking_quality : 30.0f;
     msg.frame_id = 0;       // MAV_FRAME_LOCAL_NED
     msg.child_frame_id = 1; // MAV_FRAME_BODY_FRD
     
@@ -831,13 +835,13 @@ void MAVLinkInterface::tick(const SystemState& state, const VOResult& vo) {
     
     uint64_t current = now_us();
     if (current - last_vision_us_ >= 33333) {
-        if (vo.valid) {
-            auto vis_msg = build_vision_position(state, vo);
-            send_vision_position(vis_msg);
-            
-            auto odom_msg = build_odometry(state, vo);
-            send_odometry(odom_msg);
-        }
+        // Always send VISION_POSITION_ESTIMATE at ~30Hz
+        // ArduPilot requires consistent updates to consider VisOdom "healthy"
+        auto vis_msg = build_vision_position(state, vo);
+        send_vision_position(vis_msg);
+        
+        auto odom_msg = build_odometry(state, vo);
+        send_odometry(odom_msg);
         
         if (state.flow.valid) {
             auto flow_msg = build_optical_flow_rad(state.flow, vo);
