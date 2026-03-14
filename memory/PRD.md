@@ -102,7 +102,7 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
 - Fix CRC for outgoing REQUEST_DATA_STREAM (currently needs SR4_* manual config)
 
 ### P2
-- Direct I2C/SPI sensor drivers (MPU6050, BMP280)
+- Direct I2C/SPI sensor drivers (MPU6050, BMP280) — C++ code complete, needs recompile on Pi
 - Autonomous mission planning (waypoint navigation)
 - Camera IP_STREAM (RTSP/HTTP), thermal camera
 - Performance optimization (ARM NEON intrinsics)
@@ -127,5 +127,13 @@ C++ core, Python bindings (pybind11), FastAPI backend, React dashboard.
   - Frontend `DiagnosticsPanel.js`: 3-column layout with summary badges, Re-Scan button
   - Integrated into Settings tab, replacing old "Hardware Sensors" section
   - Known I2C addresses: MPU6050 (0x68), BMP280 (0x76), HMC5883L (0x1E), etc.
-- **Backend tests:** 71 tests passing
+- **Direct I2C/SPI Sensor Driver Integration:**
+  - C++ runtime.cpp now calls `try_hardware()` during `initialize()` when not in simulator mode
+  - Opens I2C bus, probes MPU6050 (0x68/0x69) and BMP280 (0x76/0x77) automatically
+  - Opens UART for NMEA GPS on /dev/ttyS0
+  - runtime.h: Added I2CBus, UARTBus, HardwareInfo members
+  - python_bindings.cpp: Added `get_sensor_modes()` exposing hardware vs simulated status
+  - `/api/sensors` endpoint returns sensor modes + hw_info
+  - DiagnosticsPanel shows "C++ Sensor Drivers" section with HW/SIM badges
+- **Backend tests:** 77 tests passing
 
