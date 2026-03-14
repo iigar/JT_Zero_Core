@@ -250,8 +250,17 @@ bool MAVLinkInterface::send_vision_position(const MAVVisionPositionEstimate& msg
     if (state_ != MAVLinkState::CONNECTED) return false;
     
     if (!simulated_ && (serial_fd_ >= 0 || udp_fd_ >= 0)) {
-        // TODO: Serialize MAVLink v2 frame for VISION_POSITION_ESTIMATE (ID=102)
-        // For now, just count
+        // VISION_POSITION_ESTIMATE (msg_id=102, CRC_EXTRA=158)
+        // Wire order: usec(8), x(4), y(4), z(4), roll(4), pitch(4), yaw(4) = 32 bytes
+        uint8_t payload[32];
+        std::memcpy(payload + 0,  &msg.usec,  8);
+        std::memcpy(payload + 8,  &msg.x,     4);
+        std::memcpy(payload + 12, &msg.y,     4);
+        std::memcpy(payload + 16, &msg.z,     4);
+        std::memcpy(payload + 20, &msg.roll,  4);
+        std::memcpy(payload + 24, &msg.pitch, 4);
+        std::memcpy(payload + 28, &msg.yaw,   4);
+        send_mavlink_v2(102, payload, 32, 158);
     }
     
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
@@ -261,12 +270,80 @@ bool MAVLinkInterface::send_vision_position(const MAVVisionPositionEstimate& msg
 bool MAVLinkInterface::send_odometry(const MAVOdometry& msg) {
     if (state_ != MAVLinkState::CONNECTED) return false;
     
+    if (!simulated_ && (serial_fd_ >= 0 || udp_fd_ >= 0)) {
+        // ODOMETRY (msg_id=331, CRC_EXTRA=91)
+        // Wire order: time_usec(8), x(4),y(4),z(4), q[4](16), vx(4),vy(4),vz(4),
+        //   rollspeed(4),pitchspeed(4),yawspeed(4), pose_cov[21](84), vel_cov[21](84),
+        //   frame_id(1), child_frame_id(1) = 230 bytes base
+        //   + extensions: reset_counter(1), estimator_type(1), quality(1) = 233 total
+        uint8_t payload[233];
+        std::memset(payload, 0, sizeof(payload));
+        
+        std::memcpy(payload + 0, &msg.time_usec, 8);
+        std::memcpy(payload + 8, &msg.x, 4);
+        std::memcpy(payload + 12, &msg.y, 4);
+        std::memcpy(payload + 16, &msg.z, 4);
+        std::memcpy(payload + 20, msg.q, 16);   // float[4]
+        std::memcpy(payload + 36, &msg.vx, 4);
+        std::memcpy(payload + 40, &msg.vy, 4);
+        std::memcpy(payload + 44, &msg.vz, 4);
+        std::memcpy(payload + 48, &msg.rollspeed, 4);
+        std::memcpy(payload + 52, &msg.pitchspeed, 4);
+        std::memcpy(payload + 56, &msg.yawspeed, 4);
+        
+        // pose_covariance[21] at offset 60 — fill with NaN (unknown)
+        float nan_val = std::nanf("");
+        for (int i = 0; i < 21; i++) {
+            std::memcpy(payload + 60 + i * 4, &nan_val, 4);
+        }
+        // velocity_covariance[21] at offset 144
+        for (int i = 0; i < 21; i++) {
+            std::memcpy(payload + 144 + i * 4, &nan_val, 4);
+        }
+        
+        payload[228] = msg.frame_id;
+        payload[229] = msg.child_frame_id;
+        
+        // Extensions
+        payload[230] = 0;  // reset_counter
+        payload[231] = 2;  // estimator_type = MAV_ESTIMATOR_TYPE_VIO
+        payload[232] = static_cast<uint8_t>(std::max(0, std::min(100, msg.quality)));
+        
+        send_mavlink_v2(331, payload, 233, 91);
+    }
+    
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
 bool MAVLinkInterface::send_optical_flow_rad(const MAVOpticalFlowRad& msg) {
     if (state_ != MAVLinkState::CONNECTED) return false;
+    
+    if (!simulated_ && (serial_fd_ >= 0 || udp_fd_ >= 0)) {
+        // OPTICAL_FLOW_RAD (msg_id=106, CRC_EXTRA=138)
+        // Wire order (sorted by size): time_usec(8), integration_time_us(4),
+        //   integrated_x(4), integrated_y(4), integrated_xgyro(4), integrated_ygyro(4),
+        //   integrated_zgyro(4), time_delta_distance_us(4), distance(4),
+        //   temperature(2), sensor_id(1), quality(1) = 44 bytes
+        uint8_t payload[44];
+        std::memset(payload, 0, sizeof(payload));
+        
+        std::memcpy(payload + 0,  &msg.time_usec, 8);
+        std::memcpy(payload + 8,  &msg.integration_time_us, 4);
+        std::memcpy(payload + 12, &msg.integrated_x, 4);
+        std::memcpy(payload + 16, &msg.integrated_y, 4);
+        std::memcpy(payload + 20, &msg.integrated_xgyro, 4);
+        std::memcpy(payload + 24, &msg.integrated_ygyro, 4);
+        std::memcpy(payload + 28, &msg.integrated_zgyro, 4);
+        std::memcpy(payload + 32, &msg.time_delta_distance_us, 4);
+        std::memcpy(payload + 36, &msg.distance, 4);
+        int16_t temp = msg.temperature;
+        std::memcpy(payload + 40, &temp, 2);
+        payload[42] = 0;  // sensor_id
+        payload[43] = msg.quality;
+        
+        send_mavlink_v2(106, payload, 44, 175);
+    }
     
     msgs_sent_.fetch_add(1, std::memory_order_relaxed);
     return true;
