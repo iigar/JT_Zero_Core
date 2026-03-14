@@ -783,14 +783,15 @@ class TestSensorsEndpoint:
             assert key in data, f"Missing sensor key: {key}"
     
     def test_sensors_mode_values(self):
-        """Each sensor has 'simulated' or 'hardware' mode value"""
+        """Each sensor has 'simulated', 'hardware', or 'mavlink' mode value"""
         response = requests.get(f"{BASE_URL}/api/sensors")
         data = response.json()
         
         sensor_keys = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        valid_modes = ["simulated", "hardware", "mavlink"]  # mavlink = data from flight controller
         for key in sensor_keys:
             mode = data.get(key)
-            assert mode in ["simulated", "hardware"], f"Sensor {key} has invalid mode: {mode}"
+            assert mode in valid_modes, f"Sensor {key} has invalid mode: {mode}"
     
     def test_sensors_hw_info_sub_object(self):
         """Sensors endpoint returns hw_info sub-object with detection details"""

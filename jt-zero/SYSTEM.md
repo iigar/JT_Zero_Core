@@ -60,6 +60,35 @@ VO дані + IMU + Baro + GPS → EKF3 → Фінальна позиція
 ```
 ArduPilot EKF3 об'єднує VO з іншими сенсорами. Це дає надійнішу навігацію ніж кожне джерело окремо.
 
+**Статус інтеграції:** ArduPilot EKF3 успішно приймає VO дані від JT-Zero як ExternalNav джерело. Це підтверджено повідомленням `u-blox 1 EKF3 IMU0 is using external nav` у логах FC.
+
+### 8. Конфігурація ArduPilot для VO
+
+Мінімальні параметри (Mission Planner > Config > Full Parameter List):
+
+```
+# UART порт (SERIAL4 для Matek H743)
+SERIAL4_PROTOCOL = 2          # MAVLink2
+SERIAL4_BAUD = 115            # 115200 baud
+
+# Visual Odometry
+VISO_TYPE = 1                 # MAVLink
+VISO_DELAY_MS = 50            # Затримка обробки
+
+# EKF3: джерело навігації = ExternalNav
+EK3_SRC1_POSXY = 6            # ExternalNav (VO позиція)
+EK3_SRC1_VELXY = 6            # ExternalNav (VO швидкість)
+EK3_SRC1_POSZ = 1             # Barometer (висота)
+EK3_SRC1_YAW = 1              # Compass (курс)
+
+# Stream rates для Pi (SERIAL4)
+SR4_EXTRA1 = 10               # Attitude @ 10 Hz
+SR4_EXTRA2 = 10               # VFR_HUD @ 10 Hz
+SR4_EXTRA3 = 2                # AHRS @ 2 Hz
+SR4_POSITION = 5              # Position @ 5 Hz
+SR4_RAW_SENS = 5              # Raw sensors @ 5 Hz
+```
+
 ---
 
 ## Характеристики системи

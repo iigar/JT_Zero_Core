@@ -26,7 +26,7 @@ function Spark({ data, color = '#00F0FF', height = 20 }) {
   );
 }
 
-export default function PerformancePanel({ performance, systemMetrics, runtimeMode }) {
+function PerformancePanelInner({ performance, systemMetrics, runtimeMode }) {
   const sys = systemMetrics || {};
   const cpu = sys.cpu || {};
   const mem = sys.memory || {};
@@ -185,3 +185,6 @@ function Stat({ label, value, color }) {
     </div>
   );
 }
+
+const PerformancePanel = React.memo(PerformancePanelInner);
+export default PerformancePanel;

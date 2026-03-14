@@ -1,211 +1,123 @@
-# JT-Zero: Lightweight Drone Autonomy Runtime
+# JT-Zero: Система Visual Odometry для дронів
 
-## Overview
+## Що це?
 
-JT-Zero is a high-performance robotics runtime designed for the Raspberry Pi Zero 2 W, enabling lightweight autonomous drone operations. Built in C++17 with embedded best practices, it provides a real-time event-driven architecture with lock-free data structures.
+JT-Zero -- це програма-компаньйон для дрона, яка працює на **Raspberry Pi Zero 2 W**. Вона використовує камеру для визначення позиції дрона у просторі (Visual Odometry) і передає ці дані на польотний контролер через MAVLink.
 
-## Architecture
+**Простими словами:** камера дивиться вниз, бачить як рухається підлога, і каже дрону "ти змістився на 10 см вліво". Польотний контролер використовує цю інформацію для стабільного зависання навіть без GPS (наприклад, у приміщенні).
+
+## Що входить до складу?
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     JT-Zero Runtime                         │
-│                                                             │
-│  ┌─── T0: Supervisor (10 Hz) ───────────────────────────┐   │
-│  │  System health, battery monitor, telemetry recording  │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T1: Sensor Pipeline (200 Hz) ─────────────────────┐   │
-│  │  IMU(200Hz) BARO(50Hz) GPS(10Hz) RANGE(50Hz) FLOW    │   │
-│  └──────────────────┬────────────────────────────────────┘   │
-│                     │ Lock-free Ring Buffer                  │
-│  ┌─── T2: Event Engine (200 Hz) ────────────────────────┐   │
-│  │  Event queue dispatch, memory recording               │   │
-│  └──────────────────┬────────────────────────────────────┘   │
-│                     │                                        │
-│  ┌─── T3: Reflex Engine (200 Hz) ───────────────────────┐   │
-│  │  Ultra-fast reactions (<5ms): E-stop, proximity alert │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T4: Rule Engine (20 Hz) ──────────────────────────┐   │
-│  │  Complex logic: auto-RTL, GPS-lost hold, mode mgmt   │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T7: API Bridge (HTTP/WebSocket) ──────────────────┐   │
-│  │  FastAPI server, real-time telemetry streaming        │   │
-│  └───────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+JT-Zero
+  |
+  |-- C++ ядро         швидка обробка відео та сенсорів
+  |-- Python сервер    FastAPI бекенд для API та WebSocket
+  |-- Web Dashboard    7-вкладковий моніторинг у браузері
+  |-- MAVLink          двосторонній зв'язок з польотним контролером
 ```
 
-## System Constraints
+## Можливості
 
-| Parameter       | Target            |
-|----------------|-------------------|
-| CPU usage       | <= 65%            |
-| RAM usage       | <= 300 MB         |
-| Reflex latency  | < 5 ms            |
-| Platform        | Pi Zero 2 W (ARM) |
-| C++ standard    | C++17             |
+- Визначення позиції камерою (Visual Odometry) з точністю 5-20 см
+- Реальний час: обробка 15 кадрів/сек на Pi Zero 2 W
+- Інтеграція з ArduPilot EKF3 як External Navigation
+- Живий Dashboard з телеметрією, 3D моделлю, графіками
+- Автовизначення обладнання (камера, I2C сенсори, UART)
+- Підтримка Pi Camera v2/v3 та USB камер
 
-## Core Components
+## Що потрібно для початку?
 
-### Event Engine (`core/event_engine.cpp`)
-- Lock-free SPSC ring buffer (1024 events)
-- O(1) push/pop operations
-- Zero dynamic allocation
-- Event types: sensor, system, flight, camera, MAVLink, command
+| Компонент | Обов'язково | Опціонально |
+|-----------|-------------|-------------|
+| Raspberry Pi Zero 2 W | Так | Pi 3B+, Pi 4, Pi 5 теж підходять |
+| SD-карта 8+ ГБ | Так | Рекомендовано 16 ГБ |
+| Pi Camera v2 | Так | USB камера як альтернатива |
+| Польотний контролер | Так | ArduPilot 4.3+, перевірено з Matek H743 |
+| 3 дроти (TX, RX, GND) | Так | Для UART з'єднання |
+| IMU (MPU6050) | Ні | Для незалежного AHRS |
+| Барометр (BMP280) | Ні | Для точнішої висоти |
+| GPS модуль | Ні | Для outdoor навігації |
 
-### Reflex Engine (`core/reflex_engine.cpp`)
-- Pattern matching: Event → Condition → Action
-- < 5ms latency guaranteed
-- Cooldown support to prevent rapid firing
-- Default reflexes: emergency stop, low battery, altitude limit
+## Швидкий старт
 
-### Rule Engine (`core/rule_engine.cpp`)
-- Priority-based behavior evaluation
-- Flight mode state machine
-- Default rules: auto-RTL on low battery, GPS-lost hold, takeoff detection
+### 1. Встановлення на Pi
 
-### Memory Engine (`core/memory_engine.cpp`)
-- Ring buffer telemetry history (2048 records)
-- Event history (512 records)
-- Fixed memory: ~424 KB total
+Детальна покрокова інструкція (для початківців):
+**[DEPLOYMENT.md](DEPLOYMENT.md)**
 
-### Output Engine (`core/output_engine.cpp`)
-- Queued output commands
-- Support for GPIO, MAVLink, logging, buzzer, LED
-- Pluggable output handler
+### 2. Підключення до польотного контролера
 
-## Sensor Modules
+Схема проводки та параметри ArduPilot:
+**[FC_CONNECTION.md](FC_CONNECTION.md)**
 
-| Sensor       | Rate   | Data                                    |
-|-------------|--------|----------------------------------------|
-| IMU          | 200 Hz | gyro_xyz, acc_xyz (rad/s, m/s²)        |
-| Barometer    | 50 Hz  | pressure (hPa), altitude (m), temp (°C)|
-| GPS          | 10 Hz  | lat, lon (°), alt (m), speed (m/s)     |
-| Rangefinder  | 50 Hz  | distance (m), signal_quality (0-1)     |
-| Optical Flow | 50 Hz  | flow_xy (rad/s), quality (0-255)       |
+### 3. Перевірка роботи
 
-## Building
-
-### Native (development/test)
-```bash
-cd jt-zero
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-./jt-zero --duration 10
+Відкрийте у браузері (з комп'ютера у тій самій мережі):
+```
+http://jtzero.local:8001
 ```
 
-### Cross-compile for Pi Zero 2 W
-```bash
-cd jt-zero
-mkdir build-pi && cd build-pi
-cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake ..
-make -j$(nproc)
-scp jt-zero pi@raspberrypi:/home/pi/
+## Документація
+
+| Документ | Опис |
+|----------|------|
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Встановлення на Pi (з GitHub або офлайн) |
+| [FC_CONNECTION.md](FC_CONNECTION.md) | Підключення до Matek H743 / інших FC |
+| [SYSTEM.md](SYSTEM.md) | Архітектура, алгоритми, характеристики |
+| [COMMANDS.md](COMMANDS.md) | Всі команди для збірки, запуску, дебагу |
+
+## Архітектура (коротко)
+
+```
+  Pi Camera (CSI)     Matek H743-SLIM V3 (FC)
+       |                      |
+  [C++ ядро]            [MAVLink UART]
+  15fps VO               115200 baud
+  FAST + LK              |
+       |                  |
+  [Python FastAPI]--------+
+       |
+  [React Dashboard]
+  7 вкладок, WebSocket @ 10 Hz
 ```
 
-## Thread Model
+### 8 потоків реального часу
 
-| Thread | Name          | Rate     | Priority | Core | Purpose                   |
-|--------|--------------|----------|----------|------|---------------------------|
-| T0     | Supervisor    | 10 Hz    | 90       | 0    | Health, telemetry, output |
-| T1     | Sensors       | 200 Hz   | 95       | 1    | Read all sensors          |
-| T2     | Events        | 200 Hz   | 85       | 2    | Dispatch events           |
-| T3     | Reflex        | 200 Hz   | 98       | 2    | Fast reactions            |
-| T4     | Rules         | 20 Hz    | 70       | 3    | Complex behavior logic    |
-| T5     | MAVLink       | 50 Hz    | 80       | 1    | Flight controller comm    |
-| T6     | Camera        | 15 FPS   | 60       | 3    | Visual pipeline           |
-| T7     | API           | 30 Hz    | 50       | any  | HTTP/WS bridge            |
+| Потік | Частота | Роль |
+|-------|---------|------|
+| T0 Supervisor | 10 Hz | Здоров'я системи, телеметрія |
+| T1 Sensors | 200 Hz | Читання IMU, Baro, GPS |
+| T2 Events | 200 Hz | Диспетчер подій |
+| T3 Reflex | 200 Hz | Швидкі реакції (<5ms) |
+| T4 Rules | 20 Hz | Складна логіка поведінки |
+| T5 MAVLink | 50 Hz | Зв'язок з FC |
+| T6 Camera | 15 FPS | Visual Odometry |
+| T7 API | 30 Hz | HTTP/WebSocket бридж |
 
 ## API Endpoints
 
-| Method | Endpoint               | Description                    |
-|--------|----------------------|--------------------------------|
-| GET    | /api/health           | Runtime health check           |
-| GET    | /api/state            | Full system state              |
-| GET    | /api/events           | Recent events (query: count)   |
-| GET    | /api/telemetry        | State + threads + engines      |
-| GET    | /api/telemetry/history| Historical telemetry records   |
-| GET    | /api/threads          | Thread statistics              |
-| GET    | /api/engines          | Engine statistics              |
-| POST   | /api/command          | Send command (arm/disarm/etc)  |
-| WS     | /api/ws/telemetry     | Real-time telemetry stream     |
-| WS     | /api/ws/events        | Real-time event stream         |
+| Метод | Endpoint | Опис |
+|-------|----------|------|
+| GET | `/api/health` | Стан сервера |
+| GET | `/api/state` | Повна телеметрія |
+| GET | `/api/mavlink` | MAVLink статистика |
+| GET | `/api/sensors` | Режими сенсорів |
+| GET | `/api/diagnostics` | Діагностика обладнання |
+| GET | `/api/camera/frame` | Кадр з камери (PNG) |
+| GET | `/api/camera/features` | Feature points |
+| GET | `/api/performance` | CPU, RAM, Temp |
+| WS | `/api/ws/telemetry` | Потік телеметрії (10 Hz) |
+| POST | `/api/command` | Відправити команду (arm, disarm, etc.) |
 
-### Commands
-- `arm` / `disarm` — Arm/disarm motors
-- `takeoff` — Start takeoff (param1: altitude)
-- `land` — Initiate landing
-- `hold` — Position hold
-- `rtl` — Return to launch
-- `emergency` — Emergency stop
+## Поточний статус
 
-## Extending the System
+- Visual Odometry: працює, ~12 Hz
+- MAVLink: працює, ArduPilot EKF приймає VO дані
+- Dashboard: 7 вкладок, все функціонує
+- Камера: Pi Camera v2 (OV5647), 15 FPS
+- FC: Matek H743-SLIM V3, ArduCopter V4.3.6
 
-### Adding a new sensor
-1. Define data struct in `include/jt_zero/common.h`
-2. Create sensor class in `include/jt_zero/sensors.h`
-3. Implement in `sensors/` directory
-4. Add to sensor loop in `runtime.cpp`
+## Ліцензія
 
-### Adding a reflex rule
-```cpp
-ReflexRule my_rule;
-my_rule.name = "my_reflex";
-my_rule.trigger = EventType::SENSOR_IMU_UPDATE;
-my_rule.condition = [](const Event& e, const SystemState& s) {
-    return s.imu.acc_z > -5.0f; // Free-fall detection
-};
-my_rule.action = [](const Event&, SystemState& s, EventEngine& ev) {
-    s.flight_mode = FlightMode::EMERGENCY;
-    ev.emit(EventType::SYSTEM_ERROR, 255, "Free-fall detected!");
-};
-reflex_engine_.add_rule(my_rule);
-```
-
-### Adding a behavior rule
-```cpp
-BehaviorRule my_rule;
-my_rule.name = "altitude_fence";
-my_rule.priority = 80;
-my_rule.evaluate = [](const SystemState& s, RuleResult& r) -> bool {
-    if (s.altitude_agl > 50.0f) {
-        r.action = RuleAction::HOLD;
-        strncpy(r.message, "Altitude fence triggered", sizeof(r.message));
-        return true;
-    }
-    return false;
-};
-rule_engine_.add_rule(my_rule);
-```
-
-## File Structure
-```
-jt-zero/
-├── include/jt_zero/
-│   ├── common.h          # Types, ring buffer, memory pool
-│   ├── event_engine.h    # Event queue interface
-│   ├── reflex_engine.h   # Fast reaction interface
-│   ├── rule_engine.h     # Behavior logic interface
-│   ├── memory_engine.h   # Telemetry history interface
-│   ├── output_engine.h   # Hardware output interface
-│   ├── sensors.h         # Sensor interfaces
-│   └── runtime.h         # Main runtime orchestrator
-├── core/
-│   ├── event_engine.cpp
-│   ├── reflex_engine.cpp
-│   ├── rule_engine.cpp
-│   ├── memory_engine.cpp
-│   ├── output_engine.cpp
-│   └── runtime.cpp
-├── sensors/
-│   └── sensors.cpp       # Simulated sensor implementations
-├── main.cpp              # Standalone entry point
-├── CMakeLists.txt        # Build system
-└── README.md             # This file
-```
-
-## License
-
-MIT License - see LICENSE file for details.
+MIT License

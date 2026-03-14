@@ -149,11 +149,98 @@ sudo i2cdetect -y 1
 
 ## Етап 6: Завантаження проєкту
 
+### Варіант А: Через GitHub (потрібен інтернет + git)
+
 ```bash
 git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
 ```
 
 **Що робить:** завантажує весь проєкт з GitHub у папку `~/jt-zero` на Pi.
+
+### Варіант Б: Без GitHub (офлайн встановлення через ZIP/SCP)
+
+Якщо у вас немає `git` або доступу до GitHub, можна перенести проєкт вручну.
+
+#### Крок 1: Завантажте архів на комп'ютер
+
+На вашому комп'ютері (не на Pi) завантажте ZIP архів проєкту:
+
+```
+https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip
+```
+
+Або: на сторінці GitHub натисніть зелену кнопку **"Code"** > **"Download ZIP"**.
+
+#### Крок 2: Скопіюйте архів на Pi
+
+Відкрийте термінал на вашому комп'ютері (не SSH, а локальний):
+
+**Windows (PowerShell):**
+```powershell
+scp C:\Users\ВАШ_ЛОГІН\Downloads\JT_Zero_Core-main.zip pi@jtzero.local:~/
+```
+
+**Mac/Linux:**
+```bash
+scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+```
+
+Система запитає пароль Pi -- введіть його.
+
+#### Крок 3: Розпакуйте на Pi
+
+Підключіться до Pi через SSH і виконайте:
+
+```bash
+# Встановити unzip (якщо не встановлений)
+sudo apt install -y unzip
+
+# Розпакувати
+cd ~
+unzip JT_Zero_Core-main.zip
+
+# Перейменувати папку
+mv JT_Zero_Core-main jt-zero
+
+# Перевірити
+ls ~/jt-zero/
+# Маєте побачити: backend/  frontend/  jt-zero/  memory/  ...
+```
+
+#### Крок 4: Видалити ZIP (не обов'язково)
+```bash
+rm ~/JT_Zero_Core-main.zip
+```
+
+#### Як оновлювати без GitHub?
+
+Кожного разу коли потрібно оновити:
+1. На комп'ютері: завантажте новий ZIP з GitHub
+2. Скопіюйте на Pi через `scp`
+3. Розпакуйте з заміною:
+```bash
+cd ~
+unzip -o JT_Zero_Core-main.zip
+rm -rf jt-zero
+mv JT_Zero_Core-main jt-zero
+cd ~/jt-zero/jt-zero/build && make -j4
+cp jtzero_native*.so ../../backend/
+sudo systemctl restart jtzero
+```
+
+#### Альтернатива: USB флешка
+
+Якщо Pi не підключений до мережі:
+1. Скачайте ZIP на флешку
+2. Вставте флешку в Pi через OTG-адаптер
+3. Змонтуйте:
+```bash
+sudo mkdir -p /mnt/usb
+sudo mount /dev/sda1 /mnt/usb
+cp /mnt/usb/JT_Zero_Core-main.zip ~/
+sudo umount /mnt/usb
+```
+4. Далі -- як у кроці 3 вище
 
 ---
 
@@ -532,3 +619,48 @@ JT-Zero працює і без зовнішніх сенсорів:
 ### Збірка C++ падає з помилкою
 - Перевірте що всі залежності встановлені (Етап 4)
 - Спробуйте чисту збірку: `cd ~/jt-zero/jt-zero && rm -rf build && mkdir build && cd build && cmake .. && make -j4`
+
+### ArduPilot Pre-Arm помилки
+
+#### "Rangefinder 1: No Data"
+
+Ця помилка з'являється якщо ArduPilot очікує дані від далекоміра, але він не підключений.
+
+**Рішення:** Відключити далекомір у Mission Planner:
+```
+RNGFND1_TYPE = 0
+```
+Після зміни -- натисніть **"Write Params"** і перезавантажте FC.
+
+#### "Battery 1 below minimum arming voltage"
+
+Напруга батареї нижче мінімального порогу для arm.
+
+**Рішення (виберіть одне):**
+1. **Зарядіть батарею** до робочої напруги (для 4S LiPo -- мінімум 14.8V)
+2. **Знизіть поріг** (для тестування без батареї):
+```
+BATT_ARM_VOLT = 0
+```
+**УВАГА:** Не літайте з `BATT_ARM_VOLT = 0` -- це лише для наземного тестування!
+
+#### "VisOdom: not healthy"
+
+Visual Odometry не отримує дані від JT-Zero.
+
+**Перевірте:**
+1. JT-Zero запущений: `sudo systemctl status jtzero`
+2. MAVLink підключений: `curl -s http://localhost:8001/api/mavlink | python3 -c "import sys,json;print(json.load(sys.stdin)['state'])"`
+3. VO повідомлення відправляються: лічильник `vision_pos_sent` росте
+4. Параметри FC: `VISO_TYPE = 1`, `EK3_SRC1_POSXY = 6`
+
+---
+
+## Порядок дій після встановлення
+
+1. Перевірте Dashboard у браузері: `http://jtzero.local:8001`
+2. Перевірте вкладку **Settings** > **Hardware Diagnostics**
+3. Перевірте вкладку **MAVLink** -- статус має бути **CONNECTED**
+4. У Mission Planner перевірте Pre-Arm Messages
+5. Виправте Pre-Arm помилки (див. вище)
+6. Перший тест: **БЕЗ ПРОПЕЛЕРІВ!**

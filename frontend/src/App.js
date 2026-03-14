@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Header from './components/Header';
 import SensorPanels from './components/SensorPanels';
 import DronePanel from './components/DronePanel';
@@ -41,27 +41,56 @@ function App() {
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
 
+  // Throttled update: accumulate data in refs, flush to state at ~5Hz
+  const pendingRef = useRef(null);
+  const eventsAccRef = useRef([]);
+  const flushTimerRef = useRef(null);
+  const FLUSH_INTERVAL = 200; // ms — 5Hz UI updates instead of 10Hz
+
+  const flushPending = useCallback(() => {
+    const d = pendingRef.current;
+    if (!d) return;
+    pendingRef.current = null;
+
+    setState(d.state);
+    setThreads(d.threads || []);
+    setEngines(d.engines || {});
+    if (d.camera) setCamera(d.camera);
+    if (d.mavlink) setMavlink(d.mavlink);
+    if (d.performance) setPerformance(d.performance);
+    if (d.features) setFeatures(d.features);
+    if (d.runtime_mode) setRuntimeMode(d.runtime_mode);
+    if (d.sensor_modes) setSensorModes(d.sensor_modes);
+    if (d.system_metrics) setSystemMetrics(d.system_metrics);
+
+    // Flush accumulated events
+    if (eventsAccRef.current.length > 0) {
+      const newEvents = eventsAccRef.current;
+      eventsAccRef.current = [];
+      setEvents(prev => {
+        const combined = [...prev, ...newEvents];
+        const unique = combined.filter((e, i, arr) =>
+          i === arr.findIndex(x => x.timestamp === e.timestamp && x.type === e.type && x.message === e.message)
+        );
+        return unique.slice(-500);
+      });
+    }
+
+    // Flush history (single copy, not per-message)
+    setHistory([...historyRef.current]);
+  }, []);
+
   const handleMessage = useCallback((data) => {
     if (data.type === 'telemetry') {
-      setState(data.state);
-      setThreads(data.threads || []);
-      setEngines(data.engines || {});
-      if (data.camera) setCamera(data.camera);
-      if (data.mavlink) setMavlink(data.mavlink);
-      if (data.performance) setPerformance(data.performance);
-      if (data.features) setFeatures(data.features);
-      if (data.runtime_mode) setRuntimeMode(data.runtime_mode);
-      if (data.sensor_modes) setSensorModes(data.sensor_modes);
-      if (data.system_metrics) setSystemMetrics(data.system_metrics);
+      // Store latest payload (overwrite previous if not yet flushed)
+      pendingRef.current = data;
+
+      // Accumulate events (don't lose between flushes)
       if (data.recent_events) {
-        setEvents(prev => {
-          const combined = [...prev, ...data.recent_events];
-          const unique = combined.filter((e, i, arr) =>
-            i === arr.findIndex(x => x.timestamp === e.timestamp && x.type === e.type && x.message === e.message)
-          );
-          return unique.slice(-500);
-        });
+        eventsAccRef.current = [...eventsAccRef.current, ...data.recent_events];
       }
+
+      // Accumulate history in ref (no React re-render)
       if (data.state) {
         const s = data.state;
         const record = {
@@ -78,10 +107,15 @@ function App() {
           flow_x: s.optical_flow?.flow_x, flow_y: s.optical_flow?.flow_y,
         };
         historyRef.current = [...historyRef.current.slice(-200), record];
-        setHistory([...historyRef.current]);
       }
     }
   }, []);
+
+  // Throttle: flush to React state at fixed interval
+  useEffect(() => {
+    flushTimerRef.current = setInterval(flushPending, FLUSH_INTERVAL);
+    return () => clearInterval(flushTimerRef.current);
+  }, [flushPending]);
 
   const { connected } = useWebSocket('/api/ws/telemetry', handleMessage);
 

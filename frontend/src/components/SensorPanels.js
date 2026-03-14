@@ -26,7 +26,7 @@ function TelemetryRow({ label, value, unit, color }) {
   );
 }
 
-export default function SensorPanels({ state, history }) {
+function SensorPanelsInner({ state, history }) {
   return (
     <div className="grid grid-cols-2 gap-2 h-full" data-testid="sensor-panels">
       {/* IMU Panel */}
@@ -92,3 +92,6 @@ export default function SensorPanels({ state, history }) {
     </div>
   );
 }
+
+const SensorPanels = React.memo(SensorPanelsInner);
+export default SensorPanels;

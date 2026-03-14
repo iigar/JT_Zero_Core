@@ -47,7 +47,8 @@ JT-Zero — це companion computer система, яка перетворює 
 
 | Файл | Опис |
 |------|------|
-| [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md) | Встановлення та налаштування |
+| [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md) | Встановлення та налаштування (з GitHub або офлайн) |
+| [FC_CONNECTION.md](jt-zero/FC_CONNECTION.md) | Підключення до польотного контролера |
 | [SYSTEM.md](jt-zero/SYSTEM.md) | Технічний опис системи, алгоритми, характеристики |
 | [COMMANDS.md](jt-zero/COMMANDS.md) | Всі команди для взаємодії з системою |
 

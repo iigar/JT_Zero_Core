@@ -338,6 +338,7 @@ async def websocket_telemetry(ws: WebSocket):
     await manager.connect(ws)
     try:
         while True:
+            # Build a consistent data snapshot (all reads happen together)
             state = runtime.get_state()
             threads = runtime.get_thread_stats()
             engines = runtime.get_engine_stats()
@@ -345,6 +346,9 @@ async def websocket_telemetry(ws: WebSocket):
             camera = runtime.get_camera_stats()
             mavlink = runtime.get_mavlink_stats()
             features = runtime.get_features() if hasattr(runtime, 'get_features') else []
+            sensor_modes = runtime.get_sensor_modes()
+            perf = runtime.get_performance() if hasattr(runtime, 'get_performance') else None
+            sys_metrics = get_system_metrics()
             
             payload = {
                 "type": "telemetry",
@@ -357,15 +361,12 @@ async def websocket_telemetry(ws: WebSocket):
                 "camera": camera,
                 "mavlink": mavlink,
                 "features": features,
-                "sensor_modes": runtime.get_sensor_modes(),
+                "sensor_modes": sensor_modes,
+                "system_metrics": sys_metrics,
             }
             
-            # Add performance data if native
-            if hasattr(runtime, 'get_performance'):
-                payload["performance"] = runtime.get_performance()
-            
-            # Always add real OS metrics
-            payload["system_metrics"] = get_system_metrics()
+            if perf:
+                payload["performance"] = perf
             
             await ws.send_json(payload)
             await asyncio.sleep(0.1)  # 10 Hz

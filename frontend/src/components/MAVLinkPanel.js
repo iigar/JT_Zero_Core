@@ -1,7 +1,7 @@
 import React from 'react';
 import { Radio, Send, Download, Link2, AlertCircle } from 'lucide-react';
 
-export default function MAVLinkPanel({ mavlink }) {
+function MAVLinkPanelInner({ mavlink }) {
   const stateColor = {
     CONNECTED: 'text-emerald-400',
     CONNECTING: 'text-amber-400 animate-pulse',
@@ -105,3 +105,6 @@ function MsgTag({ label, count }) {
     </div>
   );
 }
+
+const MAVLinkPanel = React.memo(MAVLinkPanelInner);
+export default MAVLinkPanel;
