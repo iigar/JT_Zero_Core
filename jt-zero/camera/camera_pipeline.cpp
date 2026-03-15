@@ -308,8 +308,9 @@ VisualOdometry::VisualOdometry() {
     std::memset(prev_frame_, 0, FRAME_SIZE);
     features_.fill({});
     prev_features_.fill({});
-    // Default profile: Pi Zero 2W
-    profile_ = HW_PROFILES[0];
+    // Default platform: Pi Zero 2W, default mode: Balanced
+    platform_ = PLATFORMS[0];
+    vo_mode_ = VO_MODES[1]; // Balanced
 }
 
 void VisualOdometry::set_imu_hint(float ax, float ay, float gyro_z) {
@@ -329,75 +330,63 @@ void VisualOdometry::set_yaw_hint(float yaw_rad) {
     yaw_hint_valid_ = true;
 }
 
-void VisualOdometry::set_profile(const HardwareProfile& profile) {
-    // Only update algorithm parameters, preserve resolution and VO state
-    // Camera resolution stays as-is (determined by hardware, not profile)
-    uint16_t actual_w = profile_.frame_width;
-    uint16_t actual_h = profile_.frame_height;
-    float actual_focal = profile_.focal_length_px;
-    
-    profile_ = profile;
-    
-    // If camera is already running, keep actual resolution and scale focal length
-    if (has_prev_frame_ && actual_w > 0) {
-        profile_.frame_width = actual_w;
-        profile_.frame_height = actual_h;
-        // Scale focal length proportionally if resolution differs
-        if (profile.frame_width > 0 && profile.frame_width != actual_w) {
-            profile_.focal_length_px = actual_focal;
-        }
-    }
-    
-    // Update adaptive params with new profile thresholds — no VO reset
+void VisualOdometry::set_platform(const PlatformConfig& platform) {
+    platform_ = platform;
+    // Platform change = resolution change, requires full reset
+    reset();
+}
+
+void VisualOdometry::set_vo_mode(const VOMode& mode) {
+    // Mode change = only algorithm parameters, NO reset, NO lost tracking
+    vo_mode_ = mode;
     update_adaptive_params();
 }
 
 // ── Adaptive parameter interpolation ──
+// Base values come from active VO mode, then scaled by altitude zone
 void VisualOdometry::update_adaptive_params() {
     float alt = current_altitude_;
+    uint8_t base_fast = vo_mode_.fast_threshold;
+    int base_lk = vo_mode_.lk_window_size;
+    int base_iter = vo_mode_.lk_iterations;
     
-    // Determine zone and interpolation factor within zone
     if (alt < ALT_ZONE_LOW_MAX) {
         adaptive_.zone = AltitudeZone::LOW;
-        // LOW zone: aggressive tracking
-        adaptive_.fast_threshold = profile_.fast_threshold;
-        adaptive_.lk_window_size = profile_.lk_window_size;
-        adaptive_.lk_iterations = profile_.lk_iterations;
+        adaptive_.fast_threshold = base_fast;
+        adaptive_.lk_window_size = base_lk;
+        adaptive_.lk_iterations = base_iter;
         adaptive_.min_inliers = 5;
         adaptive_.kalman_q = 0.5f;
         adaptive_.kalman_r_base = 0.3f;
         adaptive_.redetect_ratio = 0.15f;
     } else if (alt < ALT_ZONE_MEDIUM_MAX) {
         adaptive_.zone = AltitudeZone::MEDIUM;
-        // Interpolate between LOW and MEDIUM settings
         float t = (alt - ALT_ZONE_LOW_MAX) / (ALT_ZONE_MEDIUM_MAX - ALT_ZONE_LOW_MAX);
         adaptive_.fast_threshold = static_cast<uint8_t>(
-            profile_.fast_threshold + t * (-5)); // threshold decreases (more sensitive at height)
-        adaptive_.lk_window_size = profile_.lk_window_size + static_cast<int>(t * 2);
-        adaptive_.lk_iterations = profile_.lk_iterations + static_cast<int>(t * 1);
+            std::max(12, static_cast<int>(base_fast) - static_cast<int>(t * 5)));
+        adaptive_.lk_window_size = base_lk + static_cast<int>(t * 2);
+        adaptive_.lk_iterations = base_iter + static_cast<int>(t * 1);
         adaptive_.min_inliers = 5 + static_cast<int>(t * 3);
-        adaptive_.kalman_q = 0.5f - t * 0.15f;   // less process noise
-        adaptive_.kalman_r_base = 0.3f + t * 0.1f; // more measurement caution
+        adaptive_.kalman_q = 0.5f - t * 0.15f;
+        adaptive_.kalman_r_base = 0.3f + t * 0.1f;
         adaptive_.redetect_ratio = 0.15f + t * 0.05f;
     } else if (alt < ALT_ZONE_HIGH_MAX) {
         adaptive_.zone = AltitudeZone::HIGH;
-        // Conservative: larger windows, stricter thresholds
         float t = (alt - ALT_ZONE_MEDIUM_MAX) / (ALT_ZONE_HIGH_MAX - ALT_ZONE_MEDIUM_MAX);
         adaptive_.fast_threshold = static_cast<uint8_t>(
-            std::max(15, static_cast<int>(profile_.fast_threshold) - 5 - static_cast<int>(t * 5)));
-        adaptive_.lk_window_size = profile_.lk_window_size + 2 + static_cast<int>(t * 2);
-        adaptive_.lk_iterations = profile_.lk_iterations + 1 + static_cast<int>(t * 1);
+            std::max(12, static_cast<int>(base_fast) - 5 - static_cast<int>(t * 5)));
+        adaptive_.lk_window_size = base_lk + 2 + static_cast<int>(t * 2);
+        adaptive_.lk_iterations = base_iter + 1 + static_cast<int>(t * 1);
         adaptive_.min_inliers = 8 + static_cast<int>(t * 4);
         adaptive_.kalman_q = 0.35f - t * 0.1f;
         adaptive_.kalman_r_base = 0.4f + t * 0.15f;
         adaptive_.redetect_ratio = 0.20f + t * 0.05f;
     } else {
         adaptive_.zone = AltitudeZone::CRUISE;
-        // Maximum stability: biggest windows, strictest filtering
         adaptive_.fast_threshold = static_cast<uint8_t>(
-            std::max(12, static_cast<int>(profile_.fast_threshold) - 10));
-        adaptive_.lk_window_size = profile_.lk_window_size + 4;
-        adaptive_.lk_iterations = profile_.lk_iterations + 2;
+            std::max(12, static_cast<int>(base_fast) - 10));
+        adaptive_.lk_window_size = base_lk + 4;
+        adaptive_.lk_iterations = base_iter + 2;
         adaptive_.min_inliers = 12;
         adaptive_.kalman_q = 0.25f;
         adaptive_.kalman_r_base = 0.55f;
@@ -422,8 +411,8 @@ void VisualOdometry::update_hover_state(float median_dx, float median_dy, float 
             // Estimate yaw drift from micro-motion pattern
             // During hover, systematic x-displacement indicates yaw rotation
             // drift_rate ≈ median_dx / focal_length (radians per frame)
-            if (profile_.focal_length_px > 0 && dt > 0) {
-                float frame_yaw_drift = median_dx / profile_.focal_length_px; // rad per frame
+            if (platform_.focal_length_px > 0 && dt > 0) {
+                float frame_yaw_drift = median_dx / platform_.focal_length_px; // rad per frame
                 float rate = frame_yaw_drift / dt; // rad/s
                 
                 // Smooth the drift rate estimate
@@ -479,16 +468,17 @@ float VisualOdometry::compute_mad(float* arr, int n, float median) {
 VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance) {
     VOResult result;
     result.timestamp_us = frame.info.timestamp_us;
-    result.active_profile = static_cast<uint8_t>(profile_.type);
+    result.platform = static_cast<uint8_t>(platform_.type);
+    result.vo_mode = static_cast<uint8_t>(vo_mode_.type);
     result.altitude_zone = static_cast<uint8_t>(adaptive_.zone);
     result.adaptive_fast_thresh = static_cast<float>(adaptive_.fast_threshold);
     result.adaptive_lk_window = static_cast<float>(adaptive_.lk_window_size);
     
-    // Use adaptive or profile FAST threshold
+    // Use adaptive or mode FAST threshold
     uint8_t fast_thresh = adaptive_.fast_threshold;
     int lk_win = adaptive_.lk_window_size;
     int lk_iter = adaptive_.lk_iterations;
-    size_t max_feat = profile_.max_features;
+    size_t max_feat = vo_mode_.max_features;
     
     if (!has_prev_frame_) {
         active_count_ = static_cast<size_t>(
@@ -575,8 +565,8 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     float dt = static_cast<float>(frame.info.timestamp_us - prev_timestamp_us_) / 1'000'000.0f;
     if (dt <= 0 || dt > 1.0f) dt = 0.066f;
     
-    // Use profile-specific focal length
-    float focal = profile_.focal_length_px;
+    // Use platform-specific focal length
+    float focal = platform_.focal_length_px;
     float pixel_to_meter = (ground_distance > 0.1f) ? ground_distance / focal : 0;
     
     float raw_dx = filtered_dx_px * pixel_to_meter;
@@ -770,56 +760,67 @@ bool CameraPipeline::initialize(CameraType type) {
     start_time_us_ = now_us();
     vo_.reset();
     
-    // Auto-detect hardware profile based on platform
+    // Auto-detect platform based on Pi model (sets resolution + focal length)
 #ifdef __aarch64__
-    // Check /proc/device-tree/model for Pi model
     FILE* f = std::fopen("/proc/device-tree/model", "r");
     if (f) {
         char model[128]{};
         std::fread(model, 1, 127, f);
         std::fclose(f);
         if (std::strstr(model, "Pi 5")) {
-            set_profile(HWProfileType::PI_5);
+            set_platform(PlatformType::PI_5);
         } else if (std::strstr(model, "Pi 4")) {
-            set_profile(HWProfileType::PI_4);
+            set_platform(PlatformType::PI_4);
         } else {
-            set_profile(HWProfileType::PI_ZERO_2W);
+            set_platform(PlatformType::PI_ZERO_2W);
         }
-        std::printf("[CameraPipeline] Detected: %s -> Profile: %s\n", 
-                    model, vo_.active_profile().name);
+        std::printf("[CameraPipeline] Detected: %s -> Platform: %s (%ux%u)\n", 
+                    model, vo_.platform().name,
+                    vo_.platform().frame_width, vo_.platform().frame_height);
     } else {
-        set_profile(HWProfileType::PI_ZERO_2W);
+        set_platform(PlatformType::PI_ZERO_2W);
     }
 #else
-    set_profile(HWProfileType::PI_ZERO_2W);
-    std::printf("[CameraPipeline] Non-ARM platform, using Pi Zero 2W profile\n");
+    set_platform(PlatformType::PI_ZERO_2W);
+    std::printf("[CameraPipeline] Non-ARM platform, using Pi Zero 2W\n");
 #endif
+    
+    // Default VO mode: Balanced
+    set_vo_mode(VOModeType::BALANCED);
     
     return true;
 }
 
-void CameraPipeline::set_profile(HWProfileType type) {
+void CameraPipeline::set_platform(PlatformType type) {
     size_t idx = static_cast<size_t>(type);
-    if (idx < NUM_HW_PROFILES) {
-        HardwareProfile p = HW_PROFILES[idx];
-        // Keep actual camera resolution — don't change what rpicam-vid outputs
-        if (current_frame_.info.width > 0 && current_frame_.info.height > 0) {
-            float scale = static_cast<float>(current_frame_.info.width) / 
-                         static_cast<float>(p.frame_width);
-            p.frame_width = current_frame_.info.width;
-            p.frame_height = current_frame_.info.height;
-            p.focal_length_px *= scale;  // scale focal length to actual resolution
-        }
-        vo_.set_profile(p);
-        std::printf("[CameraPipeline] Profile set: %s (algo params only, cam=%ux%u)\n",
-                    HW_PROFILES[idx].name,
-                    current_frame_.info.width,
-                    current_frame_.info.height);
+    if (idx < NUM_PLATFORMS) {
+        vo_.set_platform(PLATFORMS[idx]);
+        std::printf("[CameraPipeline] Platform: %s (%ux%u, focal=%.0fpx)\n",
+                    PLATFORMS[idx].name,
+                    PLATFORMS[idx].frame_width,
+                    PLATFORMS[idx].frame_height,
+                    PLATFORMS[idx].focal_length_px);
     }
 }
 
-HWProfileType CameraPipeline::active_profile() const {
-    return vo_.active_profile().type;
+PlatformType CameraPipeline::active_platform() const {
+    return vo_.platform().type;
+}
+
+void CameraPipeline::set_vo_mode(VOModeType type) {
+    size_t idx = static_cast<size_t>(type);
+    if (idx < NUM_VO_MODES) {
+        vo_.set_vo_mode(VO_MODES[idx]);
+        std::printf("[CameraPipeline] VO Mode: %s (FAST=%u, LK=%dpx, features=%zu)\n",
+                    VO_MODES[idx].name,
+                    VO_MODES[idx].fast_threshold,
+                    VO_MODES[idx].lk_window_size,
+                    VO_MODES[idx].max_features);
+    }
+}
+
+VOModeType CameraPipeline::active_vo_mode() const {
+    return vo_.vo_mode().type;
 }
 
 void CameraPipeline::set_altitude(float altitude_agl) {
@@ -883,10 +884,15 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.vo_vy = vo_result_.vy;
     stats.vo_valid = vo_result_.valid;
     
-    // Hardware profile
-    stats.active_profile = static_cast<uint8_t>(vo_.active_profile().type);
-    std::strncpy(stats.profile_name, vo_.active_profile().name, 31);
-    stats.profile_name[31] = '\0';
+    // Platform info
+    stats.platform = static_cast<uint8_t>(vo_.platform().type);
+    std::strncpy(stats.platform_name, vo_.platform().name, 31);
+    stats.platform_name[31] = '\0';
+    
+    // VO Mode info
+    stats.vo_mode = static_cast<uint8_t>(vo_.vo_mode().type);
+    std::strncpy(stats.vo_mode_name, vo_.vo_mode().name, 31);
+    stats.vo_mode_name[31] = '\0';
     
     // Adaptive parameters
     stats.altitude_zone = static_cast<uint8_t>(vo_.adaptive_params().zone);

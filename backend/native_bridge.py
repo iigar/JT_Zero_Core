@@ -23,16 +23,22 @@ except ImportError:
 class NativeRuntime:
     """Adapter wrapping C++ Runtime with simulator-compatible interface."""
     
-    _VO_PROFILES = [
-        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W", "width": 320, "height": 240,
-         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100,
-         "focal_length": 277.0, "target_fps": 15.0},
-        {"id": 1, "name": "Pi 4", "type": "PI_4", "width": 640, "height": 480,
-         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 200,
-         "focal_length": 554.0, "target_fps": 30.0},
-        {"id": 2, "name": "Pi 5", "type": "PI_5", "width": 800, "height": 600,
-         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 300,
-         "focal_length": 693.0, "target_fps": 30.0},
+    _VO_MODES = [
+        {"id": 0, "name": "Light", "type": "LIGHT",
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100},
+        {"id": 1, "name": "Balanced", "type": "BALANCED",
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 180},
+        {"id": 2, "name": "Performance", "type": "PERFORMANCE",
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 250},
+    ]
+    
+    _PLATFORMS = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W",
+         "width": 640, "height": 480, "focal_length": 554.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4",
+         "width": 1280, "height": 720, "focal_length": 830.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5",
+         "width": 1280, "height": 960, "focal_length": 1108.0, "target_fps": 30.0},
     ]
     
     def __init__(self):
@@ -40,7 +46,7 @@ class NativeRuntime:
             raise RuntimeError("jtzero_native module not found")
         
         self._rt = _native.Runtime()
-        self._active_profile_id = 0
+        self._active_vo_mode = 1  # Balanced
         
         # Auto-detect: use real hardware on Pi, simulator elsewhere
         # Override with JT_ZERO_SIMULATE=1 to force simulation
@@ -109,24 +115,22 @@ class NativeRuntime:
     
     def get_camera_stats(self) -> dict:
         d = dict(self._rt.get_camera())
-        # Add new long-range VO fields with defaults (C++ module may not have them yet)
         d.setdefault("vo_inlier_count", d.get("vo_features_tracked", 0))
         d.setdefault("vo_confidence", d.get("vo_tracking_quality", 0))
         d.setdefault("vo_position_uncertainty", 0)
         d.setdefault("vo_total_distance", 0)
-        # Hardware profile — inject from managed state
-        p = self._VO_PROFILES[self._active_profile_id]
-        d["active_profile"] = self._active_profile_id
-        d["profile_name"] = p["name"]
-        # Only override resolution if C++ hasn't set it
-        if d.get("width", 320) == 320 and self._active_profile_id != 0:
-            d["width"] = p["width"]
-            d["height"] = p["height"]
+        # Platform info (auto-detected by C++)
+        d.setdefault("platform", 0)
+        d.setdefault("platform_name", "Pi Zero 2W")
+        # VO Mode — inject from managed state
+        m = self._VO_MODES[self._active_vo_mode]
+        d["vo_mode"] = self._active_vo_mode
+        d["vo_mode_name"] = m["name"]
         # Adaptive parameters defaults
         d.setdefault("altitude_zone", 0)
         d.setdefault("altitude_zone_name", "LOW")
-        d.setdefault("adaptive_fast_thresh", float(p["fast_threshold"]))
-        d.setdefault("adaptive_lk_window", float(p["lk_window"]))
+        d.setdefault("adaptive_fast_thresh", float(m["fast_threshold"]))
+        d.setdefault("adaptive_lk_window", float(m["lk_window"]))
         # Hover yaw correction defaults
         d.setdefault("hover_detected", False)
         d.setdefault("hover_duration", 0.0)
@@ -192,17 +196,17 @@ class NativeRuntime:
                 return [dict(p) for p in self._rt.get_vo_profiles()]
         except Exception:
             pass
-        return list(self._VO_PROFILES)
+        return list(self._VO_MODES)
     
-    def set_vo_profile(self, profile_id: int) -> bool:
-        if 0 <= profile_id < len(self._VO_PROFILES):
+    def set_vo_profile(self, mode_id: int) -> bool:
+        if 0 <= mode_id < len(self._VO_MODES):
             # Try C++ first
             try:
                 if hasattr(self._rt, 'set_vo_profile'):
-                    self._rt.set_vo_profile(profile_id)
+                    self._rt.set_vo_profile(mode_id)
             except Exception:
                 pass
             # Always update managed state
-            self._active_profile_id = profile_id
+            self._active_vo_mode = mode_id
             return True
         return False

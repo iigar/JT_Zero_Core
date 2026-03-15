@@ -160,9 +160,12 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "vo_dx"_a = cs.vo_dx, "vo_dy"_a = cs.vo_dy, "vo_dz"_a = cs.vo_dz,
         "vo_vx"_a = cs.vo_vx, "vo_vy"_a = cs.vo_vy,
         "vo_valid"_a = cs.vo_valid,
-        // Hardware profile
-        "active_profile"_a = static_cast<int>(cs.active_profile),
-        "profile_name"_a = std::string(cs.profile_name),
+        // Platform (auto-detected)
+        "platform"_a = static_cast<int>(cs.platform),
+        "platform_name"_a = std::string(cs.platform_name),
+        // VO Mode (switchable)
+        "vo_mode"_a = static_cast<int>(cs.vo_mode),
+        "vo_mode_name"_a = std::string(cs.vo_mode_name),
         // Adaptive parameters
         "altitude_zone"_a = static_cast<int>(cs.altitude_zone),
         "adaptive_fast_thresh"_a = cs.adaptive_fast_thresh,
@@ -413,33 +416,29 @@ PYBIND11_MODULE(jtzero_native, m) {
         }, "Get MAVLink interface stats as dict")
         
         .def("set_vo_profile", [](jtzero::Runtime& self, int profile_id) {
-            if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_HW_PROFILES)) {
-                self.camera().set_profile(static_cast<jtzero::HWProfileType>(profile_id));
+            if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_VO_MODES)) {
+                self.camera().set_vo_mode(static_cast<jtzero::VOModeType>(profile_id));
                 return true;
             }
             return false;
-        }, py::arg("profile_id"), "Set VO hardware profile (0=PiZero, 1=Pi4, 2=Pi5)")
+        }, py::arg("profile_id"), "Set VO mode (0=Light, 1=Balanced, 2=Performance)")
         
         .def("get_vo_profiles", []() {
-            py::list profiles;
-            for (size_t i = 0; i < jtzero::NUM_HW_PROFILES; ++i) {
-                auto& p = jtzero::HW_PROFILES[i];
-                profiles.append(py::dict(
+            py::list modes;
+            for (size_t i = 0; i < jtzero::NUM_VO_MODES; ++i) {
+                auto& m = jtzero::VO_MODES[i];
+                modes.append(py::dict(
                     "id"_a = static_cast<int>(i),
-                    "name"_a = std::string(p.name),
-                    "type"_a = jtzero::hw_profile_str(p.type),
-                    "width"_a = p.frame_width,
-                    "height"_a = p.frame_height,
-                    "fast_threshold"_a = static_cast<int>(p.fast_threshold),
-                    "lk_window"_a = p.lk_window_size,
-                    "lk_iterations"_a = p.lk_iterations,
-                    "max_features"_a = static_cast<int>(p.max_features),
-                    "focal_length"_a = p.focal_length_px,
-                    "target_fps"_a = p.target_fps
+                    "name"_a = std::string(m.name),
+                    "type"_a = jtzero::vo_mode_str(m.type),
+                    "fast_threshold"_a = static_cast<int>(m.fast_threshold),
+                    "lk_window"_a = m.lk_window_size,
+                    "lk_iterations"_a = m.lk_iterations,
+                    "max_features"_a = static_cast<int>(m.max_features)
                 ));
             }
-            return profiles;
-        }, "Get available hardware profiles")
+            return modes;
+        }, "Get available VO modes")
         
         .def("get_sensor_modes", [](const jtzero::Runtime& self) {
             const auto& hw = self.hw_info();
@@ -566,7 +565,8 @@ PYBIND11_MODULE(jtzero_native, m) {
             "frame_height"_a = jtzero::FRAME_HEIGHT,
             "max_frame_width"_a = jtzero::MAX_FRAME_WIDTH,
             "max_frame_height"_a = jtzero::MAX_FRAME_HEIGHT,
-            "hw_profiles"_a = static_cast<int>(jtzero::NUM_HW_PROFILES),
+            "num_platforms"_a = static_cast<int>(jtzero::NUM_PLATFORMS),
+            "num_vo_modes"_a = static_cast<int>(jtzero::NUM_VO_MODES),
             "telemetry_history"_a = jtzero::MemoryEngine::TELEMETRY_HISTORY,
             "event_history"_a = jtzero::MemoryEngine::EVENT_HISTORY
         );

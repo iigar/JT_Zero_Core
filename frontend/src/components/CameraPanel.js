@@ -16,8 +16,8 @@ export default function CameraPanel({ camera, features = [] }) {
     camera_open = false,
     frame_count = 0,
     fps_actual = 0,
-    width = 320,
-    height = 240,
+    width = 640,
+    height = 480,
     vo_features_detected = 0,
     vo_features_tracked = 0,
     vo_inlier_count = 0,
@@ -28,13 +28,15 @@ export default function CameraPanel({ camera, features = [] }) {
     vo_dx = 0,
     vo_dy = 0,
     vo_valid = false,
-    // New adaptive + hover fields
-    active_profile = 0,
-    profile_name = 'Pi Zero 2W',
+    // Platform + VO Mode
+    platform = 0,
+    platform_name = 'Pi Zero 2W',
+    vo_mode = 1,
+    vo_mode_name = 'Balanced',
     altitude_zone = 0,
     altitude_zone_name = '',
-    adaptive_fast_thresh = 30,
-    adaptive_lk_window = 5,
+    adaptive_fast_thresh = 25,
+    adaptive_lk_window = 7,
     hover_detected = false,
     hover_duration = 0,
     yaw_drift_rate = 0,
@@ -221,8 +223,15 @@ export default function CameraPanel({ camera, features = [] }) {
           }`}>
             {isReal ? (isCSI ? 'CSI' : 'USB') : 'SIM'}
           </span>
-          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-[#1E293B]/50 text-slate-400 border border-[#1E293B]/60" data-testid="camera-profile-badge">
-            {profile_name || 'Pi Zero 2W'}
+          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-[#1E293B]/50 text-slate-400 border border-[#1E293B]/60" data-testid="camera-platform-badge">
+            {platform_name || 'Pi Zero 2W'}
+          </span>
+          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm border ${
+            vo_mode === 2 ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+            vo_mode === 1 ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' :
+            'bg-slate-700/30 text-slate-500 border-slate-600/30'
+          }`} data-testid="camera-vomode-badge">
+            {vo_mode_name || 'Balanced'}
           </span>
           {streamActive && (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">

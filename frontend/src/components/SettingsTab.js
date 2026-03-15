@@ -53,7 +53,7 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
     mass_kg: 1.2, drag_coeff: 0.3,
   });
   const [voProfiles, setVoProfiles] = useState([]);
-  const [activeProfile, setActiveProfile] = useState(0);
+  const [activeMode, setActiveMode] = useState(1);
 
   useEffect(() => {
     apiCall('GET', '/api/simulator/config').then(data => {
@@ -64,12 +64,12 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
     }).catch(() => {});
   }, []);
 
-  // Track active profile from camera data
+  // Track active mode from camera data
   useEffect(() => {
-    if (camera?.active_profile !== undefined) {
-      setActiveProfile(camera.active_profile);
+    if (camera?.vo_mode !== undefined) {
+      setActiveMode(camera.vo_mode);
     }
-  }, [camera?.active_profile]);
+  }, [camera?.vo_mode]);
 
   async function updateConfig(key, value) {
     const next = { ...config, [key]: value };
@@ -90,11 +90,12 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
 
   async function switchProfile(id) {
     const res = await apiCall('POST', `/api/vo/profile/${id}`);
-    if (res?.success) setActiveProfile(id);
+    if (res?.success) setActiveMode(id);
   }
 
   const ZONE_NAMES = ['LOW', 'MEDIUM', 'HIGH', 'CRUISE'];
   const ZONE_COLORS = ['text-emerald-400', 'text-cyan-400', 'text-amber-400', 'text-red-400'];
+  const MODE_COLORS = ['text-slate-400', 'text-cyan-400', 'text-red-400'];
 
   const activeThreads = threads?.filter(t => t.running).length || 0;
 
@@ -201,36 +202,39 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
 
         {/* Row 2: VO Configuration */}
         <div className="grid grid-cols-12 gap-4">
-          {/* Hardware Profiles */}
+          {/* VO Mode Selection */}
           <div className="col-span-7">
-            <SectionCard title="VO Hardware Profile" icon={Camera} testId="settings-vo-profiles">
+            <SectionCard title="VO Mode" icon={Camera} testId="settings-vo-modes">
               <div className="space-y-2">
                 <div className="grid grid-cols-3 gap-2">
                   {voProfiles.map(p => (
                     <button
                       key={p.id}
                       onClick={() => switchProfile(p.id)}
-                      data-testid={`vo-profile-${p.id}`}
+                      data-testid={`vo-mode-${p.id}`}
                       className={`relative p-2 border rounded-sm text-left transition-all ${
-                        activeProfile === p.id
+                        activeMode === p.id
                           ? 'border-[#00F0FF]/60 bg-[#00F0FF]/5'
                           : 'border-[#1E293B] bg-black/20 hover:border-[#1E293B]/80'
                       }`}
                     >
-                      {activeProfile === p.id && (
+                      {activeMode === p.id && (
                         <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#00F0FF]" />
                       )}
-                      <div className="text-[10px] font-bold text-slate-300">{p.name}</div>
+                      <div className={`text-[10px] font-bold ${MODE_COLORS[p.id] || 'text-slate-300'}`}>{p.name}</div>
                       <div className="text-[8px] text-slate-500 mt-1 space-y-0.5">
-                        <div>{p.width}x{p.height} @ {p.target_fps}fps</div>
                         <div>FAST={p.fast_threshold} LK={p.lk_window}px</div>
-                        <div>{p.max_features} features, f={p.focal_length}px</div>
+                        <div>{p.max_features} features, {p.lk_iterations} iter</div>
                       </div>
                     </button>
                   ))}
                   {voProfiles.length === 0 && (
-                    <p className="text-[9px] text-slate-600 col-span-3">Loading profiles...</p>
+                    <p className="text-[9px] text-slate-600 col-span-3">Loading modes...</p>
                   )}
+                </div>
+                <div className="text-[8px] text-slate-600 mt-1">
+                  Platform: <span className="text-slate-400">{camera?.platform_name || 'Pi Zero 2W'}</span> ({camera?.width || 640}x{camera?.height || 480})
+                  — resolution fixed at startup
                 </div>
               </div>
             </SectionCard>
@@ -243,10 +247,12 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
                 <InfoRow label="Altitude Zone" 
                   value={camera?.altitude_zone_name || ZONE_NAMES[camera?.altitude_zone || 0] || 'LOW'}
                   color={ZONE_COLORS[camera?.altitude_zone || 0]} />
-                <InfoRow label="FAST Threshold" value={camera?.adaptive_fast_thresh?.toFixed(0) || 30} />
-                <InfoRow label="LK Window" value={`${camera?.adaptive_lk_window?.toFixed(0) || 5}px`} />
-                <InfoRow label="Profile" value={camera?.profile_name || 'Pi Zero 2W'}
-                  color="text-[#00F0FF]" />
+                <InfoRow label="FAST Threshold" value={camera?.adaptive_fast_thresh?.toFixed(0) || 25} />
+                <InfoRow label="LK Window" value={`${camera?.adaptive_lk_window?.toFixed(0) || 7}px`} />
+                <InfoRow label="VO Mode" value={camera?.vo_mode_name || 'Balanced'}
+                  color={MODE_COLORS[camera?.vo_mode ?? 1] || 'text-cyan-400'} />
+                <InfoRow label="Platform" value={`${camera?.platform_name || 'Pi Zero 2W'} (${camera?.width || 640}x${camera?.height || 480})`}
+                  color="text-slate-400" />
                 <div className="h-px bg-[#1E293B]/50 my-1" />
                 <InfoRow label="Hover Detected" 
                   value={camera?.hover_detected ? 'YES' : 'NO'}

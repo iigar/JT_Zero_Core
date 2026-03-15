@@ -160,6 +160,9 @@ class CameraStats:
     # Hardware profile
     active_profile: int = 0
     profile_name: str = "Pi Zero 2W"
+    # VO Mode (switchable)
+    vo_mode: int = 1
+    vo_mode_name: str = "Balanced"
     # Adaptive parameters
     altitude_zone: int = 0
     altitude_zone_name: str = "LOW"
@@ -509,35 +512,42 @@ class JTZeroSimulator:
             },
         }
 
-    # ── VO Profile Management ──
+    # ── VO Mode Management ──
 
-    _profiles = [
-        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W", "width": 320, "height": 240,
-         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100,
-         "focal_length": 277.0, "target_fps": 15.0},
-        {"id": 1, "name": "Pi 4", "type": "PI_4", "width": 640, "height": 480,
-         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 200,
-         "focal_length": 554.0, "target_fps": 30.0},
-        {"id": 2, "name": "Pi 5", "type": "PI_5", "width": 800, "height": 600,
-         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 300,
-         "focal_length": 693.0, "target_fps": 30.0},
+    _vo_modes = [
+        {"id": 0, "name": "Light", "type": "LIGHT",
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100},
+        {"id": 1, "name": "Balanced", "type": "BALANCED",
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 180},
+        {"id": 2, "name": "Performance", "type": "PERFORMANCE",
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 250},
+    ]
+
+    _platforms = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W",
+         "width": 640, "height": 480, "focal_length": 554.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4",
+         "width": 1280, "height": 720, "focal_length": 830.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5",
+         "width": 1280, "height": 960, "focal_length": 1108.0, "target_fps": 30.0},
     ]
 
     def get_vo_profiles(self) -> list:
-        return self._profiles
+        return self._vo_modes
 
-    def set_vo_profile(self, profile_id: int) -> bool:
-        if 0 <= profile_id < len(self._profiles):
-            p = self._profiles[profile_id]
+    def set_vo_profile(self, mode_id: int) -> bool:
+        if 0 <= mode_id < len(self._vo_modes):
+            m = self._vo_modes[mode_id]
             with self._lock:
-                self.camera_stats.active_profile = profile_id
-                self.camera_stats.profile_name = p["name"]
-                self.camera_stats.width = p["width"]
-                self.camera_stats.height = p["height"]
-                self.camera_stats.adaptive_fast_thresh = float(p["fast_threshold"])
-                self.camera_stats.adaptive_lk_window = float(p["lk_window"])
+                self.camera_stats.vo_mode = mode_id
+                self.camera_stats.vo_mode_name = m["name"]
+                self.camera_stats.adaptive_fast_thresh = float(m["fast_threshold"])
+                self.camera_stats.adaptive_lk_window = float(m["lk_window"])
             return True
         return False
+
+    def get_platforms(self) -> list:
+        return self._platforms
 
     def _update_camera(self, t: float):
         cam = self.camera_stats
