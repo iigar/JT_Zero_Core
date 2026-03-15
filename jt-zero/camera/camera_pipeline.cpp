@@ -330,9 +330,26 @@ void VisualOdometry::set_yaw_hint(float yaw_rad) {
 }
 
 void VisualOdometry::set_profile(const HardwareProfile& profile) {
+    // Only update algorithm parameters, preserve resolution and VO state
+    // Camera resolution stays as-is (determined by hardware, not profile)
+    uint16_t actual_w = profile_.frame_width;
+    uint16_t actual_h = profile_.frame_height;
+    float actual_focal = profile_.focal_length_px;
+    
     profile_ = profile;
-    // Reset VO state when switching profiles (resolution change)
-    reset();
+    
+    // If camera is already running, keep actual resolution and scale focal length
+    if (has_prev_frame_ && actual_w > 0) {
+        profile_.frame_width = actual_w;
+        profile_.frame_height = actual_h;
+        // Scale focal length proportionally if resolution differs
+        if (profile.frame_width > 0 && profile.frame_width != actual_w) {
+            profile_.focal_length_px = actual_focal;
+        }
+    }
+    
+    // Update adaptive params with new profile thresholds — no VO reset
+    update_adaptive_params();
 }
 
 // ── Adaptive parameter interpolation ──
@@ -784,12 +801,20 @@ bool CameraPipeline::initialize(CameraType type) {
 void CameraPipeline::set_profile(HWProfileType type) {
     size_t idx = static_cast<size_t>(type);
     if (idx < NUM_HW_PROFILES) {
-        vo_.set_profile(HW_PROFILES[idx]);
-        std::printf("[CameraPipeline] Profile set: %s (%ux%u @ %.0ffps)\n",
+        HardwareProfile p = HW_PROFILES[idx];
+        // Keep actual camera resolution — don't change what rpicam-vid outputs
+        if (current_frame_.info.width > 0 && current_frame_.info.height > 0) {
+            float scale = static_cast<float>(current_frame_.info.width) / 
+                         static_cast<float>(p.frame_width);
+            p.frame_width = current_frame_.info.width;
+            p.frame_height = current_frame_.info.height;
+            p.focal_length_px *= scale;  // scale focal length to actual resolution
+        }
+        vo_.set_profile(p);
+        std::printf("[CameraPipeline] Profile set: %s (algo params only, cam=%ux%u)\n",
                     HW_PROFILES[idx].name,
-                    HW_PROFILES[idx].frame_width,
-                    HW_PROFILES[idx].frame_height,
-                    HW_PROFILES[idx].target_fps);
+                    current_frame_.info.width,
+                    current_frame_.info.height);
     }
 }
 
