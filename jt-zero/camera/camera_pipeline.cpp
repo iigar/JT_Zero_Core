@@ -485,14 +485,16 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
         
-        // Adaptive: if few features found, retry with lower threshold
-        if (active_count_ < 10 && fast_thresh > 8) {
-            uint8_t lower = fast_thresh / 2;
-            if (lower < 5) lower = 5;
-            size_t retry = static_cast<size_t>(
+        // Thermal/low-contrast fallback: retry at threshold 5 then 3
+        if (active_count_ < 15 && fast_thresh > 5) {
+            active_count_ = static_cast<size_t>(
                 detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, lower));
-            if (retry > active_count_) active_count_ = retry;
+                               features_.data(), max_feat, 5));
+        }
+        if (active_count_ < 15) {
+            active_count_ = static_cast<size_t>(
+                detector_.detect(frame.data, frame.info.width, frame.info.height,
+                               features_.data(), max_feat, 3));
         }
         
         size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
@@ -697,14 +699,16 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
-        // Adaptive: retry with lower threshold for thermal/low-contrast images
-        if (active_count_ < 10 && fast_thresh > 8) {
-            uint8_t lower = fast_thresh / 2;
-            if (lower < 5) lower = 5;
-            size_t retry = static_cast<size_t>(
+        // Thermal/low-contrast fallback: retry at threshold 5 then 3
+        if (active_count_ < 15 && fast_thresh > 5) {
+            active_count_ = static_cast<size_t>(
                 detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, lower));
-            if (retry > active_count_) active_count_ = retry;
+                               features_.data(), max_feat, 5));
+        }
+        if (active_count_ < 15) {
+            active_count_ = static_cast<size_t>(
+                detector_.detect(frame.data, frame.info.width, frame.info.height,
+                               features_.data(), max_feat, 3));
         }
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
