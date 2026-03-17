@@ -1,22 +1,23 @@
 # JT-Zero Runtime - Product Requirements Document
 
 ## Original Problem Statement
-Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi Zero 2 W with:
+Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - High-performance C++ core for event processing and real-time control
 - Python bindings via pybind11
 - FastAPI backend + React monitoring dashboard
-- CSI camera integration with Visual Odometry
+- Camera integration (CSI + USB/thermal) with Visual Odometry
 - MAVLink flight controller integration
 - Visual Odometry as navigation source for ArduPilot EKF
 
 ## Target Hardware
 - Primary: Raspberry Pi Zero 2 W (ARM Cortex-A53, 512MB RAM)
 - Extended: Raspberry Pi 4 (4GB), Raspberry Pi 5
+- Cameras: Pi CSI Camera Module v2/v3, USB thermal cameras (Caddx 256)
 
 ## Core Requirements
 1. Stable C++ core for event processing and real-time control
 2. FastAPI backend + React frontend monitoring dashboard
-3. CSI camera + MAVLink flight controller integration
+3. CSI camera + USB camera + MAVLink flight controller integration
 4. Robust Visual Odometry: 5km flight with <300m RTL error (no GPS, no compass)
 5. VO resilient to drift during long hover periods (up to 20 minutes)
 6. Adaptive configurations for different hardware (Pi Zero/4/5) and flight envelopes
@@ -30,7 +31,7 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi Zero 2 W 
 ├── frontend/          # React dashboard (Tailwind CSS)
 ├── jt-zero/           # C++ core (camera, VO, MAVLink, runtime)
 │   ├── core/          # runtime.cpp, visual_odometry logic
-│   ├── camera/        # camera_pipeline.cpp
+│   ├── camera/        # camera_pipeline.cpp, camera_drivers.cpp
 │   ├── mavlink/       # mavlink_interface.cpp
 │   ├── api/           # python_bindings.cpp
 │   └── include/       # Header files
@@ -60,15 +61,20 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi Zero 2 W 
 - **Profile Management UI**: Settings tab with clickable profile cards and Adaptive VO Status panel
 - **Camera Panel Enhanced**: Profile badge, zone badge, HOVER badge, 2-row stats (FAST/LK/ZONE/DRIFT/YAW)
 - **New API Endpoints**: GET /api/vo/profiles, POST /api/vo/profile/{id}
-- **Documentation Updated**: LONG_RANGE_FLIGHT.md with new features documented
+- **Platform/VO Mode Refactor**: Separated "Platform" (auto-detected, sets resolution) from "VO Mode" (user-selectable, adjusts algorithm parameters)
+
+### Completed - Feb 2026
+- **USB Camera V4L2 MMAP Fix (P0)**: Rewrote USB camera driver to use proper V4L2 MMAP streaming instead of simple read(). Fixed Caddx thermal camera on Pi 4 (480x320 YUYV @ 25fps). Verified working with 395+ frames captured at 15fps.
 
 ## Backlog
 
 ### P2 - Future
-- IP camera (RTSP) and thermal camera support
+- IP camera (RTSP) and further thermal camera support
 - ARM NEON optimization for C++ core
 - Autonomous Mission Planning UI/features
+- Focal length calibration for USB thermal cameras (current Pi 4 focal assumes CSI camera)
 
 ## Testing
 - Backend: /app/backend/tests/test_jtzero_api.py, /app/backend/tests/test_vo_features.py
 - Test reports: /app/test_reports/iteration_15.json (24/24 tests pass)
+- USB camera fix verified on Pi 4 hardware with Caddx thermal 256
