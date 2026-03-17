@@ -25,6 +25,7 @@
 // V4L2 headers (Linux only)
 #ifdef __linux__
 #include <linux/videodev2.h>
+#include <sys/select.h>
 #endif
 
 namespace jtzero {
@@ -193,31 +194,40 @@ bool USBCamera::detect(const char* device) {
 
 bool USBCamera::open() {
 #ifdef __linux__
-    fd_ = ::open(device_, O_RDWR | O_NONBLOCK);
+    // Open in blocking mode (no O_NONBLOCK — we use select() for timeout)
+    fd_ = ::open(device_, O_RDWR);
     if (fd_ < 0) {
         std::printf("[USB] Failed to open %s\n", device_);
         return false;
     }
     
-    // First try YUYV at camera's preferred resolution
-    struct v4l2_format fmt{};
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
-    // Query current format (camera's default)
-    if (ioctl(fd_, VIDIOC_G_FMT, &fmt) < 0) {
-        std::printf("[USB] Failed to get format\n");
+    // Check capabilities
+    struct v4l2_capability cap{};
+    if (ioctl(fd_, VIDIOC_QUERYCAP, &cap) < 0) {
+        std::printf("[USB] QUERYCAP failed\n");
         close();
         return false;
     }
+    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
+        !(cap.capabilities & V4L2_CAP_STREAMING)) {
+        std::printf("[USB] Device lacks CAPTURE or STREAMING capability\n");
+        close();
+        return false;
+    }
+    std::printf("[USB] Device: %s (%s)\n", cap.card, cap.driver);
     
-    std::printf("[USB] Camera default: %ux%u fmt=0x%X\n",
-                fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
+    // Query current format to log camera default
+    struct v4l2_format fmt{};
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(fd_, VIDIOC_G_FMT, &fmt) == 0) {
+        std::printf("[USB] Camera default: %ux%u fmt=0x%X\n",
+                    fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
+    }
     
-    // Try YUYV at best available resolution
-    // Priority: 640x480 > 480x320 > camera default
+    // Try YUYV at common resolutions (driver may silently adjust)
     struct { uint32_t w, h; } try_res[] = {
         {640, 480}, {480, 320}, {720, 480},
-        {fmt.fmt.pix.width, fmt.fmt.pix.height}  // fallback to current
+        {fmt.fmt.pix.width, fmt.fmt.pix.height}
     };
     
     bool format_set = false;
@@ -230,25 +240,98 @@ bool USBCamera::open() {
         try_fmt.fmt.pix.field = V4L2_FIELD_NONE;
         
         if (ioctl(fd_, VIDIOC_S_FMT, &try_fmt) >= 0) {
-            // Read back actual format (driver may adjust)
+            // Read back actual (driver may adjust to nearest supported)
             cap_w_ = try_fmt.fmt.pix.width;
             cap_h_ = try_fmt.fmt.pix.height;
-            format_set = true;
-            std::printf("[USB] Format set: %ux%u YUYV\n", cap_w_, cap_h_);
-            break;
+            // Verify it's actually YUYV
+            if (try_fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV) {
+                format_set = true;
+                std::printf("[USB] Format set: %ux%u YUYV\n", cap_w_, cap_h_);
+                break;
+            }
         }
     }
     
     if (!format_set) {
-        std::printf("[USB] Failed to set any format\n");
+        std::printf("[USB] Failed to set YUYV format at any resolution\n");
         close();
         return false;
     }
     
+    // Verify resolution fits in our frame buffer
+    if (static_cast<size_t>(cap_w_) * cap_h_ > FRAME_SIZE) {
+        std::printf("[USB] Resolution %ux%u exceeds max frame buffer (%zu)\n",
+                    cap_w_, cap_h_, FRAME_SIZE);
+        close();
+        return false;
+    }
+    
+    // ── V4L2 MMAP buffer setup ──
+    struct v4l2_requestbuffers req{};
+    req.count = MAX_V4L2_BUFS;
+    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory = V4L2_MEMORY_MMAP;
+    
+    if (ioctl(fd_, VIDIOC_REQBUFS, &req) < 0 || req.count < 2) {
+        std::printf("[USB] REQBUFS failed (got %u buffers)\n", req.count);
+        close();
+        return false;
+    }
+    n_buffers_ = static_cast<int>(req.count);
+    std::printf("[USB] Allocated %d MMAP buffers\n", n_buffers_);
+    
+    // Query and mmap each buffer
+    for (int i = 0; i < n_buffers_; ++i) {
+        struct v4l2_buffer buf{};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = static_cast<uint32_t>(i);
+        
+        if (ioctl(fd_, VIDIOC_QUERYBUF, &buf) < 0) {
+            std::printf("[USB] QUERYBUF %d failed\n", i);
+            close();
+            return false;
+        }
+        
+        buffers_[i].length = buf.length;
+        buffers_[i].start = mmap(nullptr, buf.length,
+                                 PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 fd_, buf.m.offset);
+        if (buffers_[i].start == MAP_FAILED) {
+            buffers_[i].start = nullptr;
+            std::printf("[USB] mmap %d failed\n", i);
+            close();
+            return false;
+        }
+    }
+    
+    // Queue all buffers
+    for (int i = 0; i < n_buffers_; ++i) {
+        struct v4l2_buffer buf{};
+        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index = static_cast<uint32_t>(i);
+        if (ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+            std::printf("[USB] QBUF %d failed\n", i);
+            close();
+            return false;
+        }
+    }
+    
+    // Start streaming
+    int buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(fd_, VIDIOC_STREAMON, &buf_type) < 0) {
+        std::printf("[USB] STREAMON failed\n");
+        close();
+        return false;
+    }
+    streaming_ = true;
+    
     open_ = true;
     frame_counter_ = 0;
     last_capture_us_ = now_us();
-    std::printf("[USB] Camera opened: %s %ux%u\n", device_, cap_w_, cap_h_);
+    std::printf("[USB] Camera opened: %s %ux%u YUYV (MMAP streaming)\n",
+                device_, cap_w_, cap_h_);
     return true;
 #else
     return false;
@@ -257,20 +340,38 @@ bool USBCamera::open() {
 
 bool USBCamera::capture(FrameBuffer& frame) {
 #ifdef __linux__
-    if (!open_ || fd_ < 0 || cap_w_ == 0 || cap_h_ == 0) return false;
+    if (!open_ || !streaming_ || fd_ < 0 || cap_w_ == 0 || cap_h_ == 0) return false;
     
-    // Read YUYV frame at camera's actual resolution
-    const size_t yuyv_size = static_cast<size_t>(cap_w_) * cap_h_ * 2;
-    uint8_t yuyv_buf[MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT * 2]; // max buffer
-    if (yuyv_size > sizeof(yuyv_buf)) return false;
+    // Wait for a frame with select() (2s timeout)
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(fd_, &fds);
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    int r = select(fd_ + 1, &fds, nullptr, nullptr, &tv);
+    if (r <= 0) {
+        if (r == 0) std::printf("[USB] select() timeout\n");
+        return false;
+    }
     
-    ssize_t n = ::read(fd_, yuyv_buf, yuyv_size);
-    if (n <= 0) return false;
+    // Dequeue a filled buffer
+    struct v4l2_buffer buf{};
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    if (ioctl(fd_, VIDIOC_DQBUF, &buf) < 0) return false;
     
-    // Convert YUYV to grayscale (take Y channel) at native resolution
+    // Convert YUYV to grayscale (extract Y channel)
+    const uint8_t* src = static_cast<const uint8_t*>(buffers_[buf.index].start);
     const size_t pixels = static_cast<size_t>(cap_w_) * cap_h_;
-    for (size_t i = 0; i < pixels && i * 2 < static_cast<size_t>(n); ++i) {
-        frame.data[i] = yuyv_buf[i * 2];
+    const size_t src_bytes = buf.bytesused;
+    for (size_t i = 0; i < pixels && i * 2 < src_bytes; ++i) {
+        frame.data[i] = src[i * 2];  // Y from YUYV
+    }
+    
+    // Re-queue the buffer
+    if (ioctl(fd_, VIDIOC_QBUF, &buf) < 0) {
+        std::printf("[USB] QBUF re-queue failed\n");
     }
     
     uint64_t current_us = now_us();
@@ -293,6 +394,19 @@ bool USBCamera::capture(FrameBuffer& frame) {
 
 void USBCamera::close() {
 #ifdef __linux__
+    if (streaming_ && fd_ >= 0) {
+        int buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        ioctl(fd_, VIDIOC_STREAMOFF, &buf_type);
+        streaming_ = false;
+    }
+    for (int i = 0; i < n_buffers_; ++i) {
+        if (buffers_[i].start && buffers_[i].start != MAP_FAILED) {
+            munmap(buffers_[i].start, buffers_[i].length);
+        }
+        buffers_[i].start = nullptr;
+        buffers_[i].length = 0;
+    }
+    n_buffers_ = 0;
     if (fd_ >= 0) {
         ::close(fd_);
         fd_ = -1;

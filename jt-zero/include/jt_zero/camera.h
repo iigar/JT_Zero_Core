@@ -319,6 +319,12 @@ private:
     uint16_t cap_h_{0};
     uint32_t frame_counter_{0};
     uint64_t last_capture_us_{0};
+    // V4L2 MMAP streaming
+    static constexpr int MAX_V4L2_BUFS = 4;
+    struct MappedBuffer { void* start{nullptr}; size_t length{0}; };
+    MappedBuffer buffers_[MAX_V4L2_BUFS]{};
+    int n_buffers_{0};
+    bool streaming_{false};
 };
 
 // ─── FAST Corner Detector ────────────────────────────────
