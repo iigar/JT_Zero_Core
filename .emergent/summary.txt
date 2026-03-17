@@ -1,122 +1,183 @@
 <analysis>**original_problem_statement:**
-The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi Zero 2 W. The project includes a high-performance C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard.
+The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi. The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard.
 
-The primary goal is to get the full system running on the physical Pi, displaying real-time data from a CSI camera and a flight controller, and critically, to use the system's visual odometry as a navigation source for the flight controller's EKF.
+The primary goal is to get the full system running on the physical Pi, displaying real-time data from a camera and a flight controller. The core requirement is a robust Visual Odometry (VO) system capable of long-range navigation (5km flight with <300m RTL error) without GPS, resilient to drift during long hovers.
 
 PRODUCT REQUIREMENTS:
 1.  A stable C++ core for event processing and real-time control.
 2.  A FastAPI backend and React frontend for monitoring.
 3.  Integration with a CSI camera and a MAVLink-based flight controller.
-4.  A robust Visual Odometry (VO) system capable of long-range navigation (5km flight with <300m RTL error) without GPS or a compass.
-5.  The VO system must be resilient to drift during long hover periods (up to 20 minutes).
-6.  The system must support adaptive configurations for different hardware (Pi Zero vs. Pi 4/5) and flight envelopes (high-altitude/high-speed vs. low-altitude/low-speed).
-7.  A comprehensive, beginner-friendly deployment guide, including an offline installation method ( archive).
-8.  Detailed system documentation and a functional, intuitive UI.
+4.  A robust Visual Odometry (VO) system for long-range, high-speed flight and long hovers.
+5.  Support for adaptive configurations for different hardware (Pi Zero vs. Pi 4/5).
+6.  A beginner-friendly deployment guide, including an offline installation method.
+7.  Detailed system documentation and an intuitive UI.
 
 **User's preferred language**: The user communicates in both **Ukrainian** and **English**. The agent MUST continue to respond in **Ukrainian**.
 
 **what currently exists?**
-The full-stack application is stable and running. The C++ core provides basic visual odometry, which has been enhanced with median filtering, outlier rejection, and a Kalman filter for velocity smoothing. The FastAPI backend serves data via REST and WebSockets. The React frontend provides a comprehensive dashboard for monitoring all system aspects.
+A full-stack application with a C++ core, FastAPI backend, and React frontend. A major VO enhancement was implemented and then refactored into a two-tier system:
+1.  **Platform:** Auto-detected at startup (e.g., Pi Zero, Pi 4), which sets the hardware-specific camera resolution.
+2.  **VO Mode:** User-selectable in the UI (Light, Balanced, Performance), which adjusts algorithmic parameters (FAST threshold, LK window, etc.) on the fly without restarting the camera stream.
 
-A major documentation overhaul was completed, including an offline installation guide and a  script. Several critical bugs were fixed, including a UI jitter regression and incorrect MAVLink data display. An interactive Quick Start checklist was added to the UI to verify system health in real-time.
-
-The agent has analyzed the requirements for the 5km RTL task and has a detailed, multi-phase plan to implement the necessary C++ core enhancements.
+The user has now set up a new Raspberry Pi 4 with a Caddx thermal USB (UVC) camera, which is not working. The system correctly identifies the Pi 4 platform, but the camera stream is not starting.
 
 **Last working item**:
-The agent was about to begin a major C++-level implementation to meet the user's long-range VO navigation requirements.
+The agent was debugging why the new Caddx thermal USB camera is not producing a video stream on the user's Raspberry Pi 4.
 
--   **Last item agent was working:** Planning the implementation of advanced Visual Odometry features to enable a 5km RTL flight with <300m error. This involves three main components:
-    1.  **Hardware Profiles:** Support for different camera resolutions (e.g., 640x480 for Pi Zero, 800x600 for Pi 4/5).
-    2.  **Adaptive Parameters:** Automatically adjust VO algorithm settings (e.g., FAST threshold, LK window) based on altitude from the barometer.
-    3.  **Hover Yaw Correction:** A new algorithm to mitigate gyroscopic yaw drift during long periods of hovering by analyzing micro-movements.
--   **Status:** NOT STARTED (The agent has a complete plan and has reviewed the necessary files, but no code has been implemented for this task yet).
+-   **Last item agent was working:** The agent identified that the C++ USB camera driver () was attempting to force a hardcoded resolution (e.g., 320x240), which the Caddx camera does not support. The camera supports YUYV at 480x320. The agent began modifying the C++ driver to query the camera for its supported format and use that resolution instead of forcing one.
+-   **Status:** IN PROGRESS
 -   **Agent Testing Done:** N
--   **Which testing method agent to use?** Both. The C++ core changes will require manual user testing on the Raspberry Pi. After implementation, the  should be used to run regression tests on the backend and frontend to ensure no existing functionality was broken.
+-   **Which testing method agent to use?** Manual testing by the user on the Raspberry Pi. The agent needs to provide clear compilation and verification commands (, , , , ).
 -   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-There are no pending bugs. The focus is on a major feature implementation.
+-   **Issue 1: (P0) USB Thermal Camera (Caddx) shows no video on Raspberry Pi 4.**
+
+  **Issues Detail:**
+  - **Issue 1:** USB Thermal Camera (Caddx) shows no video on Raspberry Pi 4.
+     - **Attempted fixes:** The agent correctly diagnosed that the C++ USB camera driver hardcodes a resolution, causing a failure when the connected UVC camera doesn't support it. The agent started editing the C++ source files to fix this.
+     - **Next debug checklist:**
+        1.  Resume editing . Ensure member variables like  and  are added to the  class to store the actual camera resolution.
+        2.  Resume editing . In the  method, remove the hardcoded resolution values. Instead, after opening the device, query the device for its current format () and store the width and height in  and . Use these variables for subsequent operations.
+        3.  Guide the user to recompile the C++ native module on the Pi ().
+        4.  Guide the user to copy the new  file and restart the service.
+        5.  Ask the user to verify the fix by checking the API endpoint ({"camera_type":"SIM","camera_open":true,"frame_count":102,"fps_actual":15.086041450500488,"width":320,"height":240,"vo_features_detected":14,"vo_features_tracked":1,"vo_tracking_quality":0.0714285746216774,"vo_dx":7.366576028289273e-05,"vo_dy":-0.00012918670836370438,"vo_dz":0.0,"vo_vx":0.0011050471803173423,"vo_vy":-0.001937907305546105,"vo_valid":false,"vo_inlier_count":1,"vo_confidence":0.0714285746216774,"vo_position_uncertainty":0,"vo_total_distance":0,"platform":0,"platform_name":"Pi Zero 2W","vo_mode":1,"vo_mode_name":"Balanced","altitude_zone":0,"altitude_zone_name":"LOW","adaptive_fast_thresh":25.0,"adaptive_lk_window":7.0,"hover_detected":false,"hover_duration":0.0,"yaw_drift_rate":0.0,"corrected_yaw":0.0}) and confirming the resolution is now  and the video stream appears on the dashboard.
+     - **Why fix this issue and what will be achieved with the fix?** This is a critical blocker. The application is unusable without a working video feed for the Visual Odometry system.
+     - **Status:** IN PROGRESS
+     - **Is recurring issue?** N
+     - **Should Test frontend/backend/both after fix?** Backend (specifically the C++ core running on the user's Pi).
+     - **Blocked on other issue:** No.
 
 **In progress Task List**:
--   **Task 1: (P0) Implement Long-Range, High-Speed Visual Odometry.**
-
-**Task Detail:**
--   **Task 1: Implement Long-Range, High-Speed Visual Odometry.**
-    -   **Where to resume:** The next step is to begin modifying the C++ code. Start with  and  to add member variables and structures for hardware profiles, adaptive parameters, and the hover yaw correction logic. Then, implement the core logic in the corresponding  files.
-    -   **What will be achieved with this?** The drone will be capable of performing a 5km flight and returning via RTL with an error of <300m, using only VO+IMU. It will support high speeds (25m/s) at high altitudes (200m) and long hover periods (up to 20 mins).
-    -   **Status:** NOT STARTED
-    -   **Should Test frontend/backend/both after fix?** Both.
-    -   **Blocked on something:** No.
+The only in-progress task is resolving the P0 camera issue.
 
 **Upcoming and Future Tasks**
--   **(P2)** IP camera (RTSP) and thermal camera support.
+-   **(P2)** IP camera (RTSP) and further thermal camera support.
 -   **(P2)** ARM NEON optimization for the C++ core.
 -   **(P2)** Autonomous Mission Planning UI/features.
 
 **Completed work in this session**
--   **Resolved MAVLink Data Jitter (P0 Regression):** Optimized the frontend with , , and  to eliminate excessive re-renders. Made backend WebSocket data gathering atomic.
--   **Comprehensive Documentation Overhaul:** Created a new  directory with guides for deployment (), system architecture (), commands (), and long-range flight tuning (). Added a  script for offline installation.
--   **Fixed MAVLink & GPS Data Bugs:** Corrected C++ logic to ignore GCS  messages causing Unknown status flicker. Added sensor source badges (MAV/SIM) to the UI to clarify data origins.
--   **Implemented Interactive Quick Start Checklist:** Added a new UI section that uses live API data to verify the status of all critical subsystems.
--   **Improved MAVLink Stream Reliability:** Updated C++ code to use the modern  command with retry logic, replacing the deprecated .
--   **Initial VO Enhancements:** Implemented median filtering, outlier rejection, a Kalman filter for velocity, and confidence-based covariance reporting in the C++  module.
--   **Project Audit:** Conducted a full audit against the original prompt, confirming 95%+ compliance and identifying IP Camera Support as the main missing item.
+-   **Refactored VO Configuration (P0):** Re-architected the entire VO settings system into a two-level concept:
+    -   **Platform:** Auto-detected on startup (Pi Zero/4/5), sets the camera resolution.
+    -   **VO Mode:** User-selectable (Light/Balanced/Performance), adjusts algorithm parameters on-the-fly without interrupting the video stream. This was a major change across the entire stack (, , python bindings, backend, simulator, and React UI).
+-   **Fixed VO Profile Switching Bug (P1):** Corrected an issue where switching VO profiles would incorrectly try to reset the camera resolution, causing the stream to fail. The fix ensures only algorithmic parameters are changed.
+-   **Resolved Deployment/Build Issues (P0):**
+    -   Fixed the React production build, which had a hardcoded preview URL, making it fail on the user's local network. The  is now correctly handled for local deployments.
+    -   Guided the user through resolving usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. conflicts caused by local build artifacts.
+    -   Created a  file to solve dependency issues () during installation on the Pi.
+    -   Helped set up the  for systemd on a fresh Pi installation.
+    -   Diagnosed and fixed a missing  Python dependency.
+
+**Earlier issues found/mentioned but not fixed**
+-   None.
 
 **Known issue recurrence from previous fork**
--   **Issue recurrence in previous fork:** MAVLink data jittery on the frontend.
--   **Recurrence count:** 1
--   **Status:** RESOLVED. A robust frontend and backend fix was implemented.
+-   None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **Visual Odometry (Advanced):** The current task involves implementing state-of-the-art VO techniques, including adaptive parameters based on altitude, hardware-specific profiles, and a novel Hover Yaw Correction algorithm to mitigate gyroscopic drift.
--   **Frontend Performance Optimization:** Extensive use of , , and  to manage high-frequency data streams without UI degradation.
--   **MAVLink Protocol (Advanced):** Correct usage of  and populating the  matrix in  messages to communicate uncertainty to ArduPilot's EKF.
+-   **VO Architecture:** Refactored into Platform (hardware-specific, sets resolution) and VO Mode (algorithmic, user-selectable).
+-   **UVC (USB Video Class):** The current debugging effort is focused on the C++ driver for UVC cameras, using  to interact with devices like .
+-   **Remote Deployment & Debugging:** The entire session involved guiding a user through compiling, deploying, and debugging on a physical Raspberry Pi over SSH.
 
 **key DB schema**
 -   No database is used.
 
 **All files of reference**
--   **Files to be modified for the next task:**
+-   **Files being actively modified for the current issue:**
+    -   
+    -   
+-   **Other key files modified in this session:**
     -   
     -   
     -   
     -   
     -   
     -   
-    -    (potentially for profile switching UI)
+    -   
+    -   
+    -    (created)
 
 **Critical Info for New Agent**
--   Your primary and only task is to implement the advanced Visual Odometry features as planned. The user's goal of a 5km RTL flight with <300m error is the top priority.
--   You are starting a large C++ implementation. Resume by modifying the header files (, ) to define the structures for hardware profiles, adaptive parameters, and hover correction.
--   Remember the three core components of the request:
-    1.  **Hardware Profiles:** Different camera resolutions for different Pis.
-    2.  **Adaptive Parameters:** VO algorithm settings change with altitude.
-    3.  **Hover Yaw Correction:** Mitigate yaw drift when the drone is stationary.
--   This is a deep algorithmic change. Be systematic and follow the plan laid out in the previous agent's thoughts.
+-   **Your immediate task is to fix the USB camera stream.** The user is on a Raspberry Pi 4 with a Caddx thermal camera. The root cause is a hardcoded resolution in the C++ USB driver.
+-   **Resume the fix:** The previous agent was editing  and . You must complete these edits to allow the driver to use the resolution reported by the camera, not a hardcoded one.
+-   **Guide the user:** All testing for this issue must happen on the user's physical Pi. You need to provide clear, step-by-step shell commands for compilation and verification. Be prepared for a multi-turn debugging conversation.
+-   **Architecture:** Understand the Platform vs. VO Mode concept. The goal is for the platform (and its resolution) to be fixed at startup, while the VO mode can be changed dynamically.
 
 **documents and test reports created in this job**
--   All documentation is now in the  directory.
 -   
--    (updated)
--   
+-    (and others)
+-   Updated documentation for deployment and new features in  and  (the location was inconsistent, but changes were made).
 
 **Last 10 User Messages and any pending HUMAN messages**
-- The user's recent messages have focused entirely on defining the requirements for the long-range Visual Odometry task. They have requested a 5km flight with a return-to-launch (RTL) error of less than 300m, which includes scenarios with high speeds (25m/s), high altitudes (200m), and long hover periods (5-20 minutes). They have confirmed that they want the agent to implement adaptive hardware profiles (for different Raspberry Pi models), adaptive algorithm parameters (based on altitude), and a hover yaw correction feature to meet these demanding requirements. All these requests are part of the pending **P0 Task**.
+1.  **User:** Reports a blank screen on the Pi 4.
+2.  **Agent:** Identifies the build was using a preview URL. Rebuilds the frontend.
+3.  **User:** Confirms the UI now loads on the Pi.
+4.  **User:** Reports that switching profiles to Pi 4 on a Pi Zero board breaks the video stream.
+5.  **Agent:** Explains the problem and proposes a major refactor: separate Platform (hardware-defined resolution) from VO Mode (user-selectable algorithm settings).
+6.  **User:** Agrees to the refactor plan.
+7.  **Agent:** Implements the full-stack refactor.
+8.  **User:** Sets up a new Pi 4 with a Caddx thermal camera and follows the deployment guide.
+9.  **Agent:** Guides the user through fixing deployment issues ( not found, missing  dependency).
+10. **User:** Reports the dashboard now appears, but there is no video. Mentions the camera is a caddx termal 256. This is the current issue.
 
 **Project Health Check:**
--   **Broken:** None. The application is stable.
--   **Mocked:** The  provides mock data for development when hardware is not present.
+-   **Broken:** The core video feed functionality is broken on the user's target hardware (Pi 4 with Caddx thermal camera).
 
 **3rd Party Integrations**
 -   None.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES.
--   **Test files created:**  was updated.
--   **Known regressions:** None.
+-   **Testing agent used after significant changes:** YES, after the VO refactor.
+-   **Troubleshoot agent used after agent stuck in loop:** NO
+-   **Test files created:**  was created.
+-   **Known regressions:** None from the implemented code, but the switch to new hardware has revealed a new bug.
 
 **What agent forgot to execute**
-- The agent was at a natural stopping point, having finished planning a major new feature. It did not forget to execute anything; the next step is to begin the implementation.</analysis>
+The agent did not finish the C++ code modifications to fix the USB camera driver. The  method in  and the  class definition in  are incomplete.</analysis>

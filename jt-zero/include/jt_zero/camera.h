@@ -315,6 +315,8 @@ private:
     const char* device_;
     bool open_{false};
     int fd_{-1};
+    uint16_t cap_w_{0};
+    uint16_t cap_h_{0};
     uint32_t frame_counter_{0};
     uint64_t last_capture_us_{0};
 };

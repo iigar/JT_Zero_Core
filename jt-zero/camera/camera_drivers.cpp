@@ -199,16 +199,48 @@ bool USBCamera::open() {
         return false;
     }
     
-    // Set format
+    // First try YUYV at camera's preferred resolution
     struct v4l2_format fmt{};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = FRAME_WIDTH;
-    fmt.fmt.pix.height = FRAME_HEIGHT;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
     
-    if (ioctl(fd_, VIDIOC_S_FMT, &fmt) < 0) {
-        std::printf("[USB] Failed to set format\n");
+    // Query current format (camera's default)
+    if (ioctl(fd_, VIDIOC_G_FMT, &fmt) < 0) {
+        std::printf("[USB] Failed to get format\n");
+        close();
+        return false;
+    }
+    
+    std::printf("[USB] Camera default: %ux%u fmt=0x%X\n",
+                fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
+    
+    // Try YUYV at best available resolution
+    // Priority: 640x480 > 480x320 > camera default
+    struct { uint32_t w, h; } try_res[] = {
+        {640, 480}, {480, 320}, {720, 480},
+        {fmt.fmt.pix.width, fmt.fmt.pix.height}  // fallback to current
+    };
+    
+    bool format_set = false;
+    for (auto& r : try_res) {
+        struct v4l2_format try_fmt{};
+        try_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        try_fmt.fmt.pix.width = r.w;
+        try_fmt.fmt.pix.height = r.h;
+        try_fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+        try_fmt.fmt.pix.field = V4L2_FIELD_NONE;
+        
+        if (ioctl(fd_, VIDIOC_S_FMT, &try_fmt) >= 0) {
+            // Read back actual format (driver may adjust)
+            cap_w_ = try_fmt.fmt.pix.width;
+            cap_h_ = try_fmt.fmt.pix.height;
+            format_set = true;
+            std::printf("[USB] Format set: %ux%u YUYV\n", cap_w_, cap_h_);
+            break;
+        }
+    }
+    
+    if (!format_set) {
+        std::printf("[USB] Failed to set any format\n");
         close();
         return false;
     }
@@ -216,7 +248,7 @@ bool USBCamera::open() {
     open_ = true;
     frame_counter_ = 0;
     last_capture_us_ = now_us();
-    std::printf("[USB] Camera opened: %s %ux%u\n", device_, FRAME_WIDTH, FRAME_HEIGHT);
+    std::printf("[USB] Camera opened: %s %ux%u\n", device_, cap_w_, cap_h_);
     return true;
 #else
     return false;
@@ -225,15 +257,19 @@ bool USBCamera::open() {
 
 bool USBCamera::capture(FrameBuffer& frame) {
 #ifdef __linux__
-    if (!open_ || fd_ < 0) return false;
+    if (!open_ || fd_ < 0 || cap_w_ == 0 || cap_h_ == 0) return false;
     
-    // Simple read-based capture (non-mmap for simplicity)
-    uint8_t yuyv_buf[FRAME_WIDTH * FRAME_HEIGHT * 2];
-    ssize_t n = ::read(fd_, yuyv_buf, sizeof(yuyv_buf));
+    // Read YUYV frame at camera's actual resolution
+    const size_t yuyv_size = static_cast<size_t>(cap_w_) * cap_h_ * 2;
+    uint8_t yuyv_buf[MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT * 2]; // max buffer
+    if (yuyv_size > sizeof(yuyv_buf)) return false;
+    
+    ssize_t n = ::read(fd_, yuyv_buf, yuyv_size);
     if (n <= 0) return false;
     
-    // Convert YUYV to grayscale (take Y channel only)
-    for (size_t i = 0; i < FRAME_SIZE && i * 2 < static_cast<size_t>(n); ++i) {
+    // Convert YUYV to grayscale (take Y channel) at native resolution
+    const size_t pixels = static_cast<size_t>(cap_w_) * cap_h_;
+    for (size_t i = 0; i < pixels && i * 2 < static_cast<size_t>(n); ++i) {
         frame.data[i] = yuyv_buf[i * 2];
     }
     
@@ -242,8 +278,8 @@ bool USBCamera::capture(FrameBuffer& frame) {
     
     frame.info.timestamp_us = current_us;
     frame.info.frame_id = frame_counter_++;
-    frame.info.width = FRAME_WIDTH;
-    frame.info.height = FRAME_HEIGHT;
+    frame.info.width = cap_w_;
+    frame.info.height = cap_h_;
     frame.info.channels = 1;
     frame.info.fps_actual = (dt > 0) ? (1.0f / dt) : 0;
     frame.info.valid = true;
