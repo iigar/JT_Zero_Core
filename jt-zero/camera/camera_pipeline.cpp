@@ -485,6 +485,16 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
         
+        // Adaptive: if few features found, retry with lower threshold
+        if (active_count_ < 10 && fast_thresh > 8) {
+            uint8_t lower = fast_thresh / 2;
+            if (lower < 5) lower = 5;
+            size_t retry = static_cast<size_t>(
+                detector_.detect(frame.data, frame.info.width, frame.info.height,
+                               features_.data(), max_feat, lower));
+            if (retry > active_count_) active_count_ = retry;
+        }
+        
         size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
         if (frame_bytes > FRAME_SIZE) frame_bytes = FRAME_SIZE;
         std::memcpy(prev_frame_, frame.data, frame_bytes);
@@ -687,6 +697,15 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
+        // Adaptive: retry with lower threshold for thermal/low-contrast images
+        if (active_count_ < 10 && fast_thresh > 8) {
+            uint8_t lower = fast_thresh / 2;
+            if (lower < 5) lower = 5;
+            size_t retry = static_cast<size_t>(
+                detector_.detect(frame.data, frame.info.width, frame.info.height,
+                               features_.data(), max_feat, lower));
+            if (retry > active_count_) active_count_ = retry;
+        }
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
     
@@ -831,11 +850,40 @@ void CameraPipeline::set_yaw_hint(float yaw_rad) {
     vo_.set_yaw_hint(yaw_rad);
 }
 
+// Contrast normalization — critical for thermal cameras with narrow dynamic range
+static void normalize_contrast(FrameBuffer& frame) {
+    if (!frame.info.valid) return;
+    const size_t size = static_cast<size_t>(frame.info.width) * frame.info.height;
+    if (size == 0 || size > FRAME_SIZE) return;
+    
+    uint8_t lo = 255, hi = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (frame.data[i] < lo) lo = frame.data[i];
+        if (frame.data[i] > hi) hi = frame.data[i];
+    }
+    
+    int range = static_cast<int>(hi) - lo;
+    if (range < 5) return;         // near-uniform image, nothing to stretch
+    if (range > 220) return;       // already good contrast, skip
+    
+    // Linear stretch to full 0-255 range
+    float scale = 255.0f / static_cast<float>(range);
+    for (size_t i = 0; i < size; ++i) {
+        int v = static_cast<int>(static_cast<float>(frame.data[i] - lo) * scale);
+        frame.data[i] = static_cast<uint8_t>(v > 255 ? 255 : v);
+    }
+}
+
 bool CameraPipeline::tick(float ground_distance) {
     if (!running_ || !active_camera_) return false;
     
     if (!active_camera_->capture(current_frame_)) {
         return false;
+    }
+    
+    // Contrast normalization for thermal/low-contrast cameras
+    if (active_camera_->type() == CameraType::USB) {
+        normalize_contrast(current_frame_);
     }
     
     vo_result_ = vo_.process(current_frame_, ground_distance);
