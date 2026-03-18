@@ -480,10 +480,41 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     int lk_iter = adaptive_.lk_iterations;
     size_t max_feat = vo_mode_.max_features;
     
+    // ── Helper: grid-based feature detection for low-contrast / thermal images ──
+    // When FAST fails to find enough corners, place features on a regular grid
+    // at locations with sufficient gradient for LK tracking.
+    auto grid_detect = [](const uint8_t* img, uint16_t w, uint16_t h,
+                          FeaturePoint* features, size_t max_features) -> size_t {
+        const int spacing = 12;
+        const int border = spacing;
+        const int min_grad = 4;  // gradient sum threshold
+        size_t count = 0;
+        for (int y = border; y < h - border && count < max_features; y += spacing) {
+            for (int x = border; x < w - border && count < max_features; x += spacing) {
+                int gx = std::abs(static_cast<int>(img[y*w+x+1]) - img[y*w+x-1]);
+                int gy = std::abs(static_cast<int>(img[(y+1)*w+x]) - img[(y-1)*w+x]);
+                int mag = gx + gy;
+                if (mag >= min_grad) {
+                    features[count].x = static_cast<float>(x);
+                    features[count].y = static_cast<float>(y);
+                    features[count].tracked = false;
+                    features[count].response = static_cast<float>(mag);
+                    ++count;
+                }
+            }
+        }
+        return count;
+    };
+    
     if (!has_prev_frame_) {
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
+        // Fallback: grid detector for thermal / low-contrast images
+        if (active_count_ < 15) {
+            active_count_ = grid_detect(frame.data, frame.info.width, frame.info.height,
+                                        features_.data(), max_feat);
+        }
         
         size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
         if (frame_bytes > FRAME_SIZE) frame_bytes = FRAME_SIZE;
@@ -687,6 +718,11 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
+        // Fallback: grid detector for thermal / low-contrast images
+        if (active_count_ < 15) {
+            active_count_ = grid_detect(frame.data, frame.info.width, frame.info.height,
+                                        features_.data(), max_feat);
+        }
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
     
