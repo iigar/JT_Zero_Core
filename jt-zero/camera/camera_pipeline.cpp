@@ -885,10 +885,9 @@ bool CameraPipeline::tick(float ground_distance) {
         return false;
     }
     
-    // Contrast normalization for thermal/low-contrast cameras
-    if (active_camera_->type() == CameraType::USB) {
-        normalize_contrast(current_frame_);
-    }
+    // NOTE: No frame normalization here — raw pixel values must stay consistent
+    // between frames for LK tracker to work. The adaptive FAST threshold (down
+    // to 3) handles low-contrast thermal images directly.
     
     vo_result_ = vo_.process(current_frame_, ground_distance);
     
