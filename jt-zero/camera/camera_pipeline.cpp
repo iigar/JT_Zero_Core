@@ -207,11 +207,12 @@ int FASTDetector::detect(const uint8_t* frame, uint16_t width, uint16_t height,
 
 void LKTracker::compute_gradient(const uint8_t* frame, uint16_t width,
                                   int x, int y, float& gx, float& gy) const {
-    // Sobel-like gradient
-    gx = static_cast<float>(frame[y * width + x + 1]) -
-         static_cast<float>(frame[y * width + x - 1]);
-    gy = static_cast<float>(frame[(y + 1) * width + x]) -
-         static_cast<float>(frame[(y - 1) * width + x]);
+    // Sobel 3x3 gradient — smooths noise while amplifying edges (~4x stronger than central diff)
+    const uint8_t* r0 = frame + (y - 1) * width + x;  // row above
+    const uint8_t* r1 = frame + y * width + x;          // center row
+    const uint8_t* r2 = frame + (y + 1) * width + x;   // row below
+    gx = static_cast<float>(-r0[-1] + r0[1] - 2*r1[-1] + 2*r1[1] - r2[-1] + r2[1]);
+    gy = static_cast<float>(-r0[-1] - 2*r0[0] - r0[1] + r2[-1] + 2*r2[0] + r2[1]);
 }
 
 int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
@@ -291,7 +292,7 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
             flow_x += dvx;
             flow_y += dvy;
             
-            if (std::abs(dvx) < 0.01f && std::abs(dvy) < 0.01f) {
+            if (std::abs(dvx) < 0.05f && std::abs(dvy) < 0.05f) {
                 converged = true;
                 break;
             }
@@ -507,7 +508,7 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         const int spacing = 8;
         const int border = 6;
         const int hw = 2;  // half window for structure tensor (5x5)
-        const float min_eigen = 1.5f;
+        const float min_eigen = 100.0f;  // above noise floor (~50 for raw thermal)
         size_t count = 0;
         for (int y = border; y < h - border && count < max_features; y += spacing) {
             for (int x = border; x < w - border && count < max_features; x += spacing) {
@@ -515,8 +516,12 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
                 for (int dy = -hw; dy <= hw; ++dy) {
                     for (int dx = -hw; dx <= hw; ++dx) {
                         int px = x + dx, py = y + dy;
-                        float gx = static_cast<float>(img[py*w+px+1]) - img[py*w+px-1];
-                        float gy = static_cast<float>(img[(py+1)*w+px]) - img[(py-1)*w+px];
+                        // Sobel 3x3 gradients (same as LK tracker)
+                        const uint8_t* r0 = img + (py-1)*w + px;
+                        const uint8_t* r1 = img + py*w + px;
+                        const uint8_t* r2 = img + (py+1)*w + px;
+                        float gx = static_cast<float>(-r0[-1]+r0[1] -2*r1[-1]+2*r1[1] -r2[-1]+r2[1]);
+                        float gy = static_cast<float>(-r0[-1]-2*r0[0]-r0[1] +r2[-1]+2*r2[0]+r2[1]);
                         sxx += gx * gx;
                         syy += gy * gy;
                         sxy += gx * gy;
