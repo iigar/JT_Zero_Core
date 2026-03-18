@@ -854,8 +854,13 @@ void CameraPipeline::set_yaw_hint(float yaw_rad) {
     vo_.set_yaw_hint(yaw_rad);
 }
 
-// Contrast normalization — critical for thermal cameras with narrow dynamic range
-static void normalize_contrast(FrameBuffer& frame) {
+// ── EMA-smoothed contrast normalization for thermal cameras ──
+// Uses slowly-adapting min/max so consecutive frames are normalized
+// almost identically — preserves LK tracker consistency while boosting gradients.
+static float s_norm_lo = -1.0f;
+static float s_norm_hi = -1.0f;
+
+static void normalize_ema(FrameBuffer& frame) {
     if (!frame.info.valid) return;
     const size_t size = static_cast<size_t>(frame.info.width) * frame.info.height;
     if (size == 0 || size > FRAME_SIZE) return;
@@ -866,15 +871,27 @@ static void normalize_contrast(FrameBuffer& frame) {
         if (frame.data[i] > hi) hi = frame.data[i];
     }
     
-    int range = static_cast<int>(hi) - lo;
-    if (range < 5) return;         // near-uniform image, nothing to stretch
-    if (range > 220) return;       // already good contrast, skip
+    int raw_range = static_cast<int>(hi) - lo;
+    if (raw_range > 220) return;  // already good contrast, skip
+    if (raw_range < 3) return;    // near-uniform, nothing to stretch
     
-    // Linear stretch to full 0-255 range
-    float scale = 255.0f / static_cast<float>(range);
+    // Initialize or slowly adapt
+    if (s_norm_lo < 0.0f) {
+        s_norm_lo = static_cast<float>(lo);
+        s_norm_hi = static_cast<float>(hi);
+    } else {
+        constexpr float a = 0.03f;  // ~33-frame averaging
+        s_norm_lo = a * static_cast<float>(lo) + (1.0f - a) * s_norm_lo;
+        s_norm_hi = a * static_cast<float>(hi) + (1.0f - a) * s_norm_hi;
+    }
+    
+    float range = s_norm_hi - s_norm_lo;
+    if (range < 3.0f) return;
+    
+    float scale = 255.0f / range;
     for (size_t i = 0; i < size; ++i) {
-        int v = static_cast<int>(static_cast<float>(frame.data[i] - lo) * scale);
-        frame.data[i] = static_cast<uint8_t>(v > 255 ? 255 : v);
+        int v = static_cast<int>((static_cast<float>(frame.data[i]) - s_norm_lo) * scale);
+        frame.data[i] = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
     }
 }
 
@@ -885,9 +902,11 @@ bool CameraPipeline::tick(float ground_distance) {
         return false;
     }
     
-    // NOTE: No frame normalization here — raw pixel values must stay consistent
-    // between frames for LK tracker to work. The adaptive FAST threshold (down
-    // to 3) handles low-contrast thermal images directly.
+    // EMA-smoothed normalization: boosts gradients for LK tracker while
+    // keeping frame-to-frame mapping stable (critical for thermal cameras)
+    if (active_camera_->type() == CameraType::USB) {
+        normalize_ema(current_frame_);
+    }
     
     vo_result_ = vo_.process(current_frame_, ground_distance);
     
