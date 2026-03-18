@@ -221,6 +221,21 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
     const int half_win = window_size / 2;
     int tracked = 0;
     
+    // Bilinear interpolation helper (sub-pixel accuracy — critical for convergence)
+    auto bilerp = [width, height](const uint8_t* img, float fx, float fy) -> float {
+        int ix = static_cast<int>(fx);
+        int iy = static_cast<int>(fy);
+        if (ix < 0 || ix >= width - 1 || iy < 0 || iy >= height - 1) return -1.0f;
+        float dx = fx - ix;
+        float dy = fy - iy;
+        float tl = img[iy * width + ix];
+        float tr = img[iy * width + ix + 1];
+        float bl = img[(iy + 1) * width + ix];
+        float br = img[(iy + 1) * width + ix + 1];
+        return (1 - dx) * (1 - dy) * tl + dx * (1 - dy) * tr
+             + (1 - dx) * dy * bl + dx * dy * br;
+    };
+    
     for (size_t f = 0; f < feature_count; ++f) {
         float px = features[f].x;
         float py = features[f].y;
@@ -243,18 +258,20 @@ int LKTracker::track(const uint8_t* prev_frame, const uint8_t* curr_frame,
                 for (int wx = -half_win; wx <= half_win; ++wx) {
                     int ox = static_cast<int>(px) + wx;
                     int oy = static_cast<int>(py) + wy;
-                    int nx = static_cast<int>(px + flow_x) + wx;
-                    int ny = static_cast<int>(py + flow_y) + wy;
                     
-                    // Bounds check
+                    // Bounds check for prev_frame (integer access)
                     if (ox < 1 || ox >= width - 1 || oy < 1 || oy >= height - 1) continue;
-                    if (nx < 1 || nx >= width - 1 || ny < 1 || ny >= height - 1) continue;
                     
                     float gx, gy;
                     compute_gradient(prev_frame, width, ox, oy, gx, gy);
                     
-                    float it = static_cast<float>(curr_frame[ny * width + nx]) -
-                               static_cast<float>(prev_frame[oy * width + ox]);
+                    // Bilinear interpolation for curr_frame (sub-pixel accuracy)
+                    float cx = px + flow_x + wx;
+                    float cy = py + flow_y + wy;
+                    float curr_val = bilerp(curr_frame, cx, cy);
+                    if (curr_val < 0) continue;  // out of bounds
+                    
+                    float it = curr_val - static_cast<float>(prev_frame[oy * width + ox]);
                     
                     sum_ixx += gx * gx;
                     sum_iyy += gy * gy;
