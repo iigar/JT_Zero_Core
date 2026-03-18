@@ -480,25 +480,41 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
     int lk_iter = adaptive_.lk_iterations;
     size_t max_feat = vo_mode_.max_features;
     
-    // ── Helper: grid-based feature detection for low-contrast / thermal images ──
-    // When FAST fails to find enough corners, place features on a regular grid
-    // at locations with sufficient gradient for LK tracking.
-    auto grid_detect = [](const uint8_t* img, uint16_t w, uint16_t h,
-                          FeaturePoint* features, size_t max_features) -> size_t {
-        const int spacing = 12;
-        const int border = spacing;
-        const int min_grad = 4;  // gradient sum threshold
+    // ── Shi-Tomasi grid corner detector for thermal / low-contrast images ──
+    // Unlike simple gradient threshold, this computes the structure tensor in a
+    // 5x5 window at each grid point and keeps only features where the minimum
+    // eigenvalue is large enough (= actual corners, not edges). LK can only
+    // track corners, so this is critical for thermal cameras.
+    auto shi_tomasi_detect = [](const uint8_t* img, uint16_t w, uint16_t h,
+                                FeaturePoint* features, size_t max_features) -> size_t {
+        const int spacing = 8;
+        const int border = 6;
+        const int hw = 2;  // half window for structure tensor (5x5)
+        const float min_eigen = 1.5f;
         size_t count = 0;
         for (int y = border; y < h - border && count < max_features; y += spacing) {
             for (int x = border; x < w - border && count < max_features; x += spacing) {
-                int gx = std::abs(static_cast<int>(img[y*w+x+1]) - img[y*w+x-1]);
-                int gy = std::abs(static_cast<int>(img[(y+1)*w+x]) - img[(y-1)*w+x]);
-                int mag = gx + gy;
-                if (mag >= min_grad) {
+                float sxx = 0, syy = 0, sxy = 0;
+                for (int dy = -hw; dy <= hw; ++dy) {
+                    for (int dx = -hw; dx <= hw; ++dx) {
+                        int px = x + dx, py = y + dy;
+                        float gx = static_cast<float>(img[py*w+px+1]) - img[py*w+px-1];
+                        float gy = static_cast<float>(img[(py+1)*w+px]) - img[(py-1)*w+px];
+                        sxx += gx * gx;
+                        syy += gy * gy;
+                        sxy += gx * gy;
+                    }
+                }
+                float trace = sxx + syy;
+                float det = sxx * syy - sxy * sxy;
+                float disc = trace * trace - 4.0f * det;
+                if (disc < 0) continue;
+                float min_eig = (trace - std::sqrt(disc)) * 0.5f;
+                if (min_eig >= min_eigen) {
                     features[count].x = static_cast<float>(x);
                     features[count].y = static_cast<float>(y);
                     features[count].tracked = false;
-                    features[count].response = static_cast<float>(mag);
+                    features[count].response = min_eig;
                     ++count;
                 }
             }
@@ -510,10 +526,10 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
-        // Fallback: grid detector for thermal / low-contrast images
+        // Fallback: Shi-Tomasi grid corner detector for thermal images
         if (active_count_ < 15) {
-            active_count_ = grid_detect(frame.data, frame.info.width, frame.info.height,
-                                        features_.data(), max_feat);
+            active_count_ = shi_tomasi_detect(frame.data, frame.info.width, frame.info.height,
+                                              features_.data(), max_feat);
         }
         
         size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
@@ -718,10 +734,10 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
-        // Fallback: grid detector for thermal / low-contrast images
+        // Fallback: Shi-Tomasi grid corner detector for thermal images
         if (active_count_ < 15) {
-            active_count_ = grid_detect(frame.data, frame.info.width, frame.info.height,
-                                        features_.data(), max_feat);
+            active_count_ = shi_tomasi_detect(frame.data, frame.info.width, frame.info.height,
+                                              features_.data(), max_feat);
         }
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
@@ -915,11 +931,9 @@ bool CameraPipeline::tick(float ground_distance) {
         return false;
     }
     
-    // EMA-smoothed normalization: boosts gradients for LK tracker while
-    // keeping frame-to-frame mapping stable (critical for thermal cameras)
-    if (active_camera_->type() == CameraType::USB) {
-        normalize_ema(current_frame_);
-    }
+    // No normalization — raw pixel values are noise-consistent between frames.
+    // LK tracker needs consistent frame-to-frame values more than large gradients.
+    // The Shi-Tomasi fallback detector handles low-contrast thermal images.
     
     vo_result_ = vo_.process(current_frame_, ground_distance);
     
