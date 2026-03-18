@@ -485,18 +485,6 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
         
-        // Thermal/low-contrast fallback: retry at threshold 5 then 3
-        if (active_count_ < 15 && fast_thresh > 5) {
-            active_count_ = static_cast<size_t>(
-                detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, 5));
-        }
-        if (active_count_ < 15) {
-            active_count_ = static_cast<size_t>(
-                detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, 3));
-        }
-        
         size_t frame_bytes = static_cast<size_t>(frame.info.width) * frame.info.height;
         if (frame_bytes > FRAME_SIZE) frame_bytes = FRAME_SIZE;
         std::memcpy(prev_frame_, frame.data, frame_bytes);
@@ -699,17 +687,6 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
         active_count_ = static_cast<size_t>(
             detector_.detect(frame.data, frame.info.width, frame.info.height,
                            features_.data(), max_feat, fast_thresh));
-        // Thermal/low-contrast fallback: retry at threshold 5 then 3
-        if (active_count_ < 15 && fast_thresh > 5) {
-            active_count_ = static_cast<size_t>(
-                detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, 5));
-        }
-        if (active_count_ < 15) {
-            active_count_ = static_cast<size_t>(
-                detector_.detect(frame.data, frame.info.width, frame.info.height,
-                               features_.data(), max_feat, 3));
-        }
         result.features_detected = static_cast<uint16_t>(active_count_);
     }
     
