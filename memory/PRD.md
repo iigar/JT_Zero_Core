@@ -14,23 +14,13 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - Extended: Raspberry Pi 4 (4GB), Raspberry Pi 5
 - Cameras: Pi CSI Camera Module v2/v3, USB thermal cameras (Caddx 256)
 
-## Core Requirements
-1. Stable C++ core for event processing and real-time control
-2. FastAPI backend + React frontend monitoring dashboard
-3. CSI camera + USB camera + MAVLink flight controller integration
-4. Robust Visual Odometry: 5km flight with <300m RTL error (no GPS, no compass)
-5. VO resilient to drift during long hover periods (up to 20 minutes)
-6. Adaptive configurations for different hardware (Pi Zero/4/5) and flight envelopes
-7. Comprehensive deployment guide with offline installation
-8. Detailed system documentation and intuitive UI
-
 ## Architecture
 ```
 /app
 ├── backend/           # FastAPI server, simulator, native bridge
 ├── frontend/          # React dashboard (Tailwind CSS)
-├── jt-zero/           # C++ core (camera, VO, MAVLink, runtime)
-│   ├── core/          # runtime.cpp, visual_odometry logic
+├── jt-zero/           # C++ core
+│   ├── core/          # runtime.cpp
 │   ├── camera/        # camera_pipeline.cpp, camera_drivers.cpp
 │   ├── mavlink/       # mavlink_interface.cpp
 │   ├── api/           # python_bindings.cpp
@@ -40,41 +30,30 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 
 ## Implementation Status
 
-### Completed (100%)
+### Completed
 - C++ Runtime core (event loop, thread management, sensor fusion)
-- Visual Odometry: FAST detection, LK tracking, median filter, MAD outlier rejection
+- Visual Odometry: FAST + Shi-Tomasi detection, LK tracking with bilinear interpolation, Sobel gradients
 - Kalman filter velocity smoothing + IMU cross-validation
 - Confidence-based covariance reporting to ArduPilot EKF
-- MAVLink interface (SET_MESSAGE_INTERVAL, ODOMETRY messages)
+- MAVLink interface (ODOMETRY messages)
 - FastAPI backend with REST + WebSocket telemetry
-- React dashboard (6 tabs: Dashboard, Telemetry, Camera/VO, MAVLink, Events, Settings)
-- Python simulator for development without hardware
-- Quick Start checklist for system health verification
-- Comprehensive documentation (DEPLOY, SYSTEM, COMMANDS, LONG_RANGE_FLIGHT)
-- Offline installation archive (create_archive.sh)
-- Frontend performance optimization (useReducer, throttle, React.memo)
+- React dashboard (6 tabs)
+- Python simulator, documentation, offline installation
 
-### Completed - March 2026
-- **Hardware Profiles**: 3 profiles (Pi Zero 2W/Pi 4/Pi 5) with different resolutions and VO parameters
-- **Altitude-Adaptive Parameters**: FAST threshold, LK window, Kalman Q/R auto-adjust based on barometric altitude (4 zones: LOW/MEDIUM/HIGH/CRUISE)
-- **Hover Yaw Correction**: Detects hovering, estimates gyroscopic yaw drift, applies EMA-smoothed correction
-- **Profile Management UI**: Settings tab with clickable profile cards and Adaptive VO Status panel
-- **Camera Panel Enhanced**: Profile badge, zone badge, HOVER badge, 2-row stats (FAST/LK/ZONE/DRIFT/YAW)
-- **New API Endpoints**: GET /api/vo/profiles, POST /api/vo/profile/{id}
-- **Platform/VO Mode Refactor**: Separated "Platform" (auto-detected, sets resolution) from "VO Mode" (user-selectable, adjusts algorithm parameters)
-
-### Completed - Feb 2026
-- **USB Camera V4L2 MMAP Fix (P0)**: Rewrote USB camera driver to use proper V4L2 MMAP streaming instead of simple read(). Fixed Caddx thermal camera on Pi 4 (480x320 YUYV @ 25fps). Verified working with 395+ frames captured at 15fps.
+### Completed - Feb/Mar 2026
+- **USB Camera V4L2 MMAP Fix (P0)**: Rewrote USB camera driver for proper V4L2 MMAP streaming
+- **Platform/VO Mode Refactor**: Separated Platform (hardware) from VO Mode (algorithmic)
+- **LK Tracker Bilinear Interpolation (CRITICAL)**: Fixed fundamental bug — LK was using integer pixel access, preventing sub-pixel convergence
+- **Sobel 3x3 Gradients**: Replaced simple central differences with Sobel operator in LK tracker and Shi-Tomasi detector — 4x signal amplification, 16x better conditioning
+- **Shi-Tomasi Grid Corner Detector**: Fallback when FAST fails on low-contrast images — computes structure tensor eigenvalues to find actual corners (not edges)
+- **Convergence Tolerance**: Relaxed from 0.01 to 0.05 px for thermal images
+- **Verified on Pi 4 + Caddx thermal**: Det:180, Track:16-59, Inliers:100%, Valid:True, Conf:0.18-0.29
 
 ## Backlog
 
 ### P2 - Future
-- IP camera (RTSP) and further thermal camera support
+- IP camera (RTSP) support
 - ARM NEON optimization for C++ core
-- Autonomous Mission Planning UI/features
-- Focal length calibration for USB thermal cameras (current Pi 4 focal assumes CSI camera)
-
-## Testing
-- Backend: /app/backend/tests/test_jtzero_api.py, /app/backend/tests/test_vo_features.py
-- Test reports: /app/test_reports/iteration_15.json (24/24 tests pass)
-- USB camera fix verified on Pi 4 hardware with Caddx thermal 256
+- Autonomous Mission Planning UI
+- Focal length calibration for USB thermal cameras
+- CSI camera testing with new Sobel/bilinear improvements

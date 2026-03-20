@@ -905,47 +905,6 @@ void CameraPipeline::set_yaw_hint(float yaw_rad) {
     vo_.set_yaw_hint(yaw_rad);
 }
 
-// ── EMA-smoothed contrast normalization for thermal cameras ──
-// Uses slowly-adapting min/max so consecutive frames are normalized
-// almost identically — preserves LK tracker consistency while boosting gradients.
-static float s_norm_lo = -1.0f;
-static float s_norm_hi = -1.0f;
-
-static void normalize_ema(FrameBuffer& frame) {
-    if (!frame.info.valid) return;
-    const size_t size = static_cast<size_t>(frame.info.width) * frame.info.height;
-    if (size == 0 || size > FRAME_SIZE) return;
-    
-    uint8_t lo = 255, hi = 0;
-    for (size_t i = 0; i < size; ++i) {
-        if (frame.data[i] < lo) lo = frame.data[i];
-        if (frame.data[i] > hi) hi = frame.data[i];
-    }
-    
-    int raw_range = static_cast<int>(hi) - lo;
-    if (raw_range > 220) return;  // already good contrast, skip
-    if (raw_range < 3) return;    // near-uniform, nothing to stretch
-    
-    // Initialize or slowly adapt
-    if (s_norm_lo < 0.0f) {
-        s_norm_lo = static_cast<float>(lo);
-        s_norm_hi = static_cast<float>(hi);
-    } else {
-        constexpr float a = 0.03f;  // ~33-frame averaging
-        s_norm_lo = a * static_cast<float>(lo) + (1.0f - a) * s_norm_lo;
-        s_norm_hi = a * static_cast<float>(hi) + (1.0f - a) * s_norm_hi;
-    }
-    
-    float range = s_norm_hi - s_norm_lo;
-    if (range < 3.0f) return;
-    
-    float scale = 255.0f / range;
-    for (size_t i = 0; i < size; ++i) {
-        int v = static_cast<int>((static_cast<float>(frame.data[i]) - s_norm_lo) * scale);
-        frame.data[i] = static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
-    }
-}
-
 bool CameraPipeline::tick(float ground_distance) {
     if (!running_ || !active_camera_) return false;
     
