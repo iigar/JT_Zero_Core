@@ -111,7 +111,7 @@ sudo systemctl restart jtzero
 ```bash
 cd ~/jt-zero/backend
 source venv/bin/activate
-pip install fastapi uvicorn websockets psutil
+pip install -r requirements-pi.txt
 sudo systemctl restart jtzero
 ```
 
@@ -268,6 +268,46 @@ print(f'VO valid: {d.get(\"vo_valid\",False)}')
 # Зберегти кадр з камери
 curl -s http://localhost:8001/api/camera/frame -o frame.png
 ```
+
+### USB термальна камера (діагностика)
+
+```bash
+# Перевірити які камери підключені
+v4l2-ctl --list-devices
+
+# Перевірити підтримувані формати (YUYV/MJPG, роздільності)
+v4l2-ctl --list-formats-ext -d /dev/video0
+
+# Перевірити поточний формат
+v4l2-ctl --get-fmt-video -d /dev/video0
+
+# Детальна перевірка через API
+curl -s http://localhost:8001/api/camera | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Type:      {d.get(\"camera_type\",\"?\")}')
+print(f'Open:      {d.get(\"camera_open\")}')
+print(f'Size:      {d.get(\"width\",0)}x{d.get(\"height\",0)}')
+print(f'FPS:       {d.get(\"fps_actual\",0):.1f}')
+print(f'Frames:    {d.get(\"frame_count\",0)}')
+print(f'Detected:  {d.get(\"vo_features_detected\",0)}')
+print(f'Tracked:   {d.get(\"vo_features_tracked\",0)}')
+print(f'Inliers:   {d.get(\"vo_inlier_count\",0)}')
+print(f'VO valid:  {d.get(\"vo_valid\")}')
+print(f'Confidence:{d.get(\"vo_confidence\",0):.3f}')
+"
+
+# Перевірити features позиції
+curl -s http://localhost:8001/api/camera/features | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Feature count: {len(d)}')
+if len(d)>0: print(f'First: x={d[0][\"x\"]:.0f} y={d[0][\"y\"]:.0f} tracked={d[0][\"tracked\"]}')
+"
+```
+
+**Типові значення для Caddx Thermal 256:**
+- Type: USB, Size: 480x320, FPS: ~15-25
+- Detected: 100-180, Tracked: 16-59, Valid: True
+- Confidence: 0.18-0.29 (статична сцена)
 
 ### Команди дрону
 
@@ -437,6 +477,7 @@ groups pi
 ### Камера не працює
 
 ```bash
+# CSI камера:
 # 1. Перевірити підключення
 rpicam-hello --list-cameras
 
@@ -446,6 +487,24 @@ grep camera /boot/firmware/config.txt
 
 # 3. Перевірити dmesg
 dmesg | grep -i "camera\|csi\|imx\|ov5647"
+
+# USB камера:
+# 1. Перевірити підключення
+v4l2-ctl --list-devices
+ls -la /dev/video*
+
+# 2. Перевірити підтримувані формати (YUYV потрібен для JT-Zero)
+v4l2-ctl --list-formats-ext -d /dev/video0
+
+# 3. Перевірити MMAP потік
+sudo journalctl -u jtzero -n 30 --no-pager | grep -i "USB\|camera\|MMAP"
+# Має бути: [USB] Camera opened: /dev/video0 480x320 YUYV (MMAP streaming)
+
+# 4. Перевірити API
+curl -s http://localhost:8001/api/camera | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Type: {d.get(\"camera_type\",\"?\")} Open: {d.get(\"camera_open\")} Size: {d.get(\"width\",0)}x{d.get(\"height\",0)}')
+"
 ```
 
 ### VO не працює (VisOdom: not healthy)
@@ -467,11 +526,19 @@ print(f'Odometry sent: {d[\"odometry_sent\"]}')
 # 3. Перевірити якість tracking
 curl -s http://localhost:8001/api/camera | python3 -c "
 import sys,json; d=json.load(sys.stdin)
-print(f'Features tracked: {d.get(\"vo_features_tracked\",0)}')
-print(f'Features detected: {d.get(\"vo_features_detected\",0)}')
-print(f'VO valid: {d.get(\"vo_valid\",False)}')
+print(f'Det:   {d.get(\"vo_features_detected\",0):3d}')
+print(f'Track: {d.get(\"vo_features_tracked\",0):3d}')
+print(f'Inl:   {d.get(\"vo_inlier_count\",0):3d}')
+print(f'Valid: {d.get(\"vo_valid\",False)}')
+print(f'Conf:  {d.get(\"vo_confidence\",0):.3f}')
 "
-# Треба мінімум 30 tracked features
+# Для CSI: Track >= 30 features
+# Для USB thermal: Track >= 10 features, Conf > 0.1
+
+# 4. Якщо Track = 0 на USB термальній камері:
+# - Переконайтеся що FAST threshold не завеликий (25 = нормально)
+# - Shi-Tomasi fallback автоматично активується при < 15 FAST features
+# - Перевірте що камера НЕ дивиться на однорідну поверхню
 ```
 
 ### ArduPilot Pre-Arm помилки

@@ -264,3 +264,17 @@ EK3_SRC1_VELXY = 6      (ExternalNav)
 | Cube Orange+ | TELEM2 | SERIAL2 |
 
 Детальна інструкція: /jt-zero/FC_CONNECTION.md
+
+
+## Documentation Map (all in Ukrainian)
+
+| File | Content |
+|------|---------|
+| `jt-zero/SYSTEM.md` | VO algorithm (FAST+Shi-Tomasi, Sobel LK, bilinear), Platform/VO Mode |
+| `jt-zero/DEPLOYMENT.md` | Pi deployment (CSI + USB cameras, requirements-pi.txt) |
+| `jt-zero/COMMANDS.md` | API curl commands, USB camera diagnostics, troubleshooting |
+| `jt-zero/README.md` | Project overview, capabilities, architecture |
+| `jt-zero/FC_CONNECTION.md` | Flight controller wiring (Matek, SpeedyBee, Pixhawk, Cube) |
+| `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
+| `CLAUDE.md` | Technical reference for agents (this file) |
+| `memory/PRD.md` | Product requirements and backlog |

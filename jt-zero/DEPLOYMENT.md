@@ -283,7 +283,15 @@ cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/
 cd ~/jt-zero/backend
 python3 -m venv venv
 source venv/bin/activate
-pip install fastapi uvicorn websockets psutil
+pip install -r requirements-pi.txt
+```
+
+Файл `requirements-pi.txt` містить мінімальний набір залежностей для Pi:
+```
+fastapi
+uvicorn
+websockets
+psutil
 ```
 
 ### 7.3. Перевірте C++ модуль
@@ -379,7 +387,9 @@ sudo systemctl status jtzero
 
 ## Етап 10: Підключення камери
 
-### 10.1. Фізичне підключення
+### Варіант А: Pi Camera (CSI)
+
+#### Фізичне підключення
 
 1. **Вимкніть Pi** (відключіть живлення)
 2. На Pi Zero 2W знайдіть маленький білий роз'єм — **міні-CSI** (22-pin)
@@ -390,7 +400,7 @@ sudo systemctl status jtzero
 
 **ВАЖЛИВО:** Pi Zero 2W має **22-pin** роз'єм. Стандартний шлейф Pi 3/4 (15-pin) НЕ підходить! Потрібен перехідник або "Pi Zero Camera Cable".
 
-### 10.2. Перевірка
+#### Перевірка CSI
 
 ```bash
 rpicam-hello --list-cameras
@@ -408,6 +418,42 @@ grep camera /boot/firmware/config.txt
 echo "camera_auto_detect=1" | sudo tee -a /boot/firmware/config.txt
 sudo reboot
 ```
+
+### Варіант Б: USB Thermal Camera (Caddx 256 та інші UVC)
+
+#### Фізичне підключення
+
+Просто підключіть USB камеру до Pi. Для Pi Zero 2W потрібен micro-USB OTG адаптер.
+
+#### Перевірка USB камери
+
+```bash
+# Чи бачить Linux камеру
+v4l2-ctl --list-devices
+
+# Які формати підтримує
+v4l2-ctl --list-formats-ext -d /dev/video0
+
+# Для термальних камер типово:
+# MJPG: 480x320@25, 640x480@25
+# YUYV: 480x320@25 (використовується JT-Zero)
+```
+
+#### Перевірка через API
+
+```bash
+curl -s http://localhost:8001/api/camera | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f'Type:   {d.get(\"camera_type\",\"?\")}')
+print(f'Open:   {d.get(\"camera_open\")}')
+print(f'Size:   {d.get(\"width\",0)}x{d.get(\"height\",0)}')
+print(f'FPS:    {d.get(\"fps_actual\",0):.1f}')
+print(f'Track:  {d.get(\"vo_features_tracked\",0)}')
+print(f'Valid:  {d.get(\"vo_valid\")}')
+"
+```
+
+**Важливо:** JT-Zero автоматично визначає камеру: CSI → USB → Simulator. Якщо CSI не знайдена, автоматично спробує USB.
 
 ---
 

@@ -59,10 +59,11 @@ chmod +x install.sh
 
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌────────────────┐
-│   CSI Camera    │─────>│  C++ Core        │─────>│  Flight        │
-│   (OV5647)      │ MIPI │  - FAST Detect   │ UART │  Controller    │
-│                 │      │  - LK Tracking   │      │  (ArduPilot)   │
-└─────────────────┘      │  - MAVLink TX/RX │      └────────────────┘
+│   CSI / USB     │─────>│  C++ Core        │─────>│  Flight        │
+│   Camera        │ V4L2 │  - FAST Detect   │ UART │  Controller    │
+│                 │ MMAP │  - Shi-Tomasi    │      │  (ArduPilot)   │
+└─────────────────┘      │  - LK + Sobel    │      └────────────────┘
+                         │  - MAVLink TX/RX │
                          └────────┬─────────┘
                                   │ pybind11
                          ┌────────┴─────────┐
@@ -85,7 +86,8 @@ chmod +x install.sh
 | Backend | FastAPI, WebSocket, uvicorn |
 | Frontend | React 19, Recharts, Tailwind CSS, Three.js |
 | Протокол | MAVLink v2 (повна серіалізація з CRC) |
-| Платформа | Raspberry Pi Zero 2 W (ARM Cortex-A53) |
+| Платформи | Raspberry Pi Zero 2W, Pi 4, Pi 5 |
+| Камери | Pi Camera v2/v3 (CSI), USB термальні (Caddx 256) |
 
 ## Можливості
 
@@ -94,8 +96,10 @@ chmod +x install.sh
 - Ефективна швидкість: до 2-3 м/с
 - Робоча висота: 0.3-10 м (оптимально 1-3 м)
 - Частота VO: ~12 Hz (ArduPilot EKF приймає)
+- **FAST + Shi-Tomasi детектори** (каскад для термальних камер)
+- **LK трекер з Sobel градієнтами і білінійною інтерполяцією**
 - Kalman-фільтрована швидкість + outlier rejection
 - Confidence-based covariance для EKF
+- **Platform/VO Mode:** автовизначення платформи + VO режими без перезапуску
 - 7-вкладковий Dashboard з реальним часом
-- Автовизначення обладнання
-- Підтримка Pi Camera v2/v3 та USB камер
+- Підтримка Pi Camera v2/v3, **USB термальних камер** (Caddx 256)
