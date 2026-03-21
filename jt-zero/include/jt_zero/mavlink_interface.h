@@ -260,6 +260,7 @@ private:
     // Serial transport
     int serial_fd_{-1};
     int serial_baud_{115200};
+    char detected_serial_[32]{}; // auto-detected device path
     
     // UDP transport
     int udp_fd_{-1};

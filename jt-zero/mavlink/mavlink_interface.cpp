@@ -43,6 +43,7 @@ MAVTransport MAVLinkInterface::auto_detect_transport() {
             int fd = ::open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
             if (fd >= 0) {
                 ::close(fd);
+                std::snprintf(detected_serial_, sizeof(detected_serial_), "%s", dev);
                 std::printf("[MAVLink] Serial port detected: %s\n", dev);
                 return MAVTransport::SERIAL;
             }
@@ -79,7 +80,9 @@ bool MAVLinkInterface::initialize(bool simulated) {
         transport_ = auto_detect_transport();
         
         if (transport_ == MAVTransport::SERIAL) {
-            return initialize_serial();
+            // Use auto-detected device (not default /dev/ttyAMA0)
+            const char* dev = detected_serial_[0] ? detected_serial_ : "/dev/ttyAMA0";
+            return initialize_serial(dev);
         } else if (transport_ == MAVTransport::UDP) {
             return initialize_udp();
         } else {
