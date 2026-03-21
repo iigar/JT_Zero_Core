@@ -47,14 +47,20 @@ On startup, the runtime probes hardware interfaces:
 
 **Priority cascade:** PI_CSI → USB → Simulation
 
-| Source    | Interface        | Implementation              |
-|-----------|------------------|-----------------------------|
-| PI_CSI    | /dev/video0      | V4L2 + libcamera, MMAP      |
-| USB       | /dev/videoN      | V4L2 YUYV → grayscale       |
-| Simulated | In-memory        | Test pattern with features   |
+| Source    | Interface        | Implementation                              |
+|-----------|------------------|---------------------------------------------|
+| PI_CSI    | /dev/video0      | V4L2 + libcamera, MMAP                      |
+| USB       | /dev/videoN      | V4L2 MMAP streaming, YUYV → grayscale       |
+| Simulated | In-memory        | Test pattern with features                   |
 
-**Visual Odometry:** FAST corner detector + Lucas-Kanade optical flow tracker  
-**Resolution:** 320×240 grayscale, 15 FPS target
+**Visual Odometry:**
+- **Detection:** FAST corner detector (primary) + Shi-Tomasi grid corner detector (fallback for thermal/low-contrast)
+- **Tracking:** Lucas-Kanade optical flow with **bilinear interpolation** and **Sobel 3x3 gradients**
+- **Resolution:** Camera-native (480×320 for Caddx thermal, 640×480 for CSI)
+
+**Platform/VO Mode architecture:**
+- **Platform:** Auto-detected at startup (Pi Zero 2W / Pi 4 / Pi 5) — sets camera resolution
+- **VO Mode:** User-selectable (Light / Balanced / Performance) — adjusts algorithmic parameters on-the-fly
 
 ---
 
@@ -125,6 +131,9 @@ On startup, the runtime probes hardware interfaces:
 5. **MAVLink ODOMETRY** — Uses accumulated pose, not per-frame delta
 6. **rand() thread safety** — Replaced with per-thread xorshift32 PRNG
 7. **Roll calculation** — Fixed `atan2(acc_y, acc_z)` → `atan2(acc_y, -acc_z)` (acc_z is -9.81 when level)
+8. **LK bilinear interpolation (CRITICAL)** — LK tracker used integer pixel access for current frame, preventing sub-pixel convergence. Added bilinear interpolation — fixes tracking on ALL cameras, especially low-contrast thermal
+9. **Sobel 3x3 gradients** — Replaced simple central differences with Sobel operator in LK tracker. 4x signal amplification, 16x better matrix conditioning for thermal images
+10. **USB camera V4L2 MMAP** — Rewrote USB camera driver from simple `read()` (fails on UVC) to proper V4L2 MMAP streaming with `select()` timeout
 
 ---
 
@@ -221,7 +230,10 @@ uvicorn server:app --host 0.0.0.0 --port 8001
 - P2: Camera drivers (PiCSI V4L2, USB V4L2), MAVLink Serial/UDP transport
 - Deployment: Successfully deployed on real Pi Zero 2W with native C++ runtime
 - FC Connection guide: Matek H743-SLIM V3, SpeedyBee F405 V4, Pixhawk 2.4.8, Cube Orange+
-- Test reports: /app/test_reports/iteration_1-8.json
+- Platform/VO Mode refactor: Separated hardware config from algorithmic config
+- USB thermal camera (Caddx 256): V4L2 MMAP driver, Shi-Tomasi detector, Sobel gradients, bilinear LK
+- Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Valid:True, Conf:0.18-0.29
+- Test reports: /app/test_reports/iteration_1-15.json
 
 ---
 
