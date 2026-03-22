@@ -70,11 +70,11 @@ On startup, the runtime probes hardware interfaces:
 
 | Transport  | Config                    | Use Case                    |
 |-----------|----------------------------|-----------------------------|
-| Serial    | auto-detect @ 921600      | Direct FC UART connection   |
+| Serial    | auto-detect baud          | Direct FC UART connection   |
 | UDP       | 127.0.0.1:14550           | SITL / QGC / MissionPlanner |
 | Simulated | In-memory                 | Development & testing       |
 
-**Default baud: 921600** (matches ArduPilot `SERIALx_BAUD=921`). If your FC uses different baud, change in `initialize()`.
+**Auto-baud detection:** Probes 115200 → 921600 → 57600 → 230400 → 460800, selects first with valid MAVLink STX markers. Takes ~500ms per rate.
 
 **Messages sent:**
 - `VISION_POSITION_ESTIMATE` (#102) — accumulated VO pose, NED frame
@@ -88,6 +88,8 @@ On startup, the runtime probes hardware interfaces:
 - MAVLink v2 signing detection (incompat_flags bit 0)
 - Diagnostic: raw byte hex dump on first data, per-heartbeat logging
 - Byte, message, heartbeat, and CRC error counters in API
+
+**Verified:** Pi Zero 2W + Matek H743 @ 115200 baud — CONNECTED, Heartbeats OK, Attitude+IMU telemetry flowing
 
 ---
 
