@@ -250,7 +250,15 @@ jt-zero/
 
 ## Build & Deploy
 
-### On Pi Zero (native build):
+### Автоматичне встановлення (рекомендовано):
+```bash
+cd ~/jt-zero
+chmod +x setup.sh
+./setup.sh
+```
+Скрипт автоматично: встановить пакети, увімкне UART/I2C/SPI/Camera, збілдить C++, створить venv, налаштує systemd, перезавантажить Pi. ~10-15 хвилин.
+
+### На Pi (ручна збірка):
 ```bash
 cd ~/jt-zero/jt-zero && mkdir -p build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
