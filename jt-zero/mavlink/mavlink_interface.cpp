@@ -27,6 +27,9 @@
 
 namespace jtzero {
 
+// Forward declaration — used by auto-baud detection and frame parser
+static uint8_t get_crc_extra(uint32_t msg_id);
+
 MAVLinkInterface::MAVLinkInterface() = default;
 
 // ═══════════════════════════════════════════════════════════
@@ -173,7 +176,7 @@ bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
                 // MAVLink v2 candidate
                 uint8_t plen = buf[pos + 1];
                 size_t flen = 12 + plen;
-                if (pos + flen <= total && plen <= 255) {
+                if (pos + flen <= total && plen <= 253) {
                     uint32_t mid = buf[pos + 7]
                                  | (static_cast<uint32_t>(buf[pos + 8]) << 8)
                                  | (static_cast<uint32_t>(buf[pos + 9]) << 16);
@@ -181,7 +184,7 @@ bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
                     if (crc_extra != 0) {  // Only validate known messages
                         // Compute CRC over header(9 bytes) + payload
                         uint16_t crc = 0xFFFF;
-                        for (size_t i = 0; i < 9 + plen; i++) {
+                        for (size_t i = 0; i < 9u + plen; i++) {
                             uint8_t tmp = buf[pos + 1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
                             tmp ^= (tmp << 4);
                             crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
@@ -205,13 +208,13 @@ bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
                 // MAVLink v1 candidate
                 uint8_t plen = buf[pos + 1];
                 size_t flen = 8 + plen;
-                if (pos + flen <= total && plen <= 255) {
+                if (pos + flen <= total && plen <= 253) {
                     uint32_t mid = buf[pos + 5];
                     uint8_t crc_extra = get_crc_extra(mid);
                     if (crc_extra != 0) {  // Only validate known messages
                         // Compute CRC over header(5 bytes) + payload
                         uint16_t crc = 0xFFFF;
-                        for (size_t i = 0; i < 5 + plen; i++) {
+                        for (size_t i = 0; i < 5u + plen; i++) {
                             uint8_t tmp = buf[pos + 1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
                             tmp ^= (tmp << 4);
                             crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
