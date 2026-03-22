@@ -1,183 +1,128 @@
 <analysis>**original_problem_statement:**
-The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi. The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard.
-
-The primary goal is to get the full system running on the physical Pi, displaying real-time data from a camera and a flight controller. The core requirement is a robust Visual Odometry (VO) system capable of long-range navigation (5km flight with <300m RTL error) without GPS, resilient to drift during long hovers.
+The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi (supporting Zero 2 W and Pi 4). The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard. The primary goal is a robust Visual Odometry (VO) system capable of long-range navigation without GPS, resilient to drift.
 
 PRODUCT REQUIREMENTS:
-1.  A stable C++ core for event processing and real-time control.
-2.  A FastAPI backend and React frontend for monitoring.
-3.  Integration with a CSI camera and a MAVLink-based flight controller.
-4.  A robust Visual Odometry (VO) system for long-range, high-speed flight and long hovers.
-5.  Support for adaptive configurations for different hardware (Pi Zero vs. Pi 4/5).
-6.  A beginner-friendly deployment guide, including an offline installation method.
-7.  Detailed system documentation and an intuitive UI.
+1. A stable C++ core for event processing and real-time control.
+2. Integration with a CSI camera and a MAVLink-based flight controller.
+3. USB Thermal Camera support (Caddx).
+4. Adaptive configurations for different hardware (Pi Zero vs. Pi 4).
+5. Robust VO algorithms handling low-contrast (thermal) environments.
 
-**User's preferred language**: The user communicates in both **Ukrainian** and **English**. The agent MUST continue to respond in **Ukrainian**.
+**User's preferred language**: **Ukrainian**. (INSTRUCTION: The next agent MUST respond to the user in Ukrainian).
 
-**what currently exists?**
-A full-stack application with a C++ core, FastAPI backend, and React frontend. A major VO enhancement was implemented and then refactored into a two-tier system:
-1.  **Platform:** Auto-detected at startup (e.g., Pi Zero, Pi 4), which sets the hardware-specific camera resolution.
-2.  **VO Mode:** User-selectable in the UI (Light, Balanced, Performance), which adjusts algorithmic parameters (FAST threshold, LK window, etc.) on the fly without restarting the camera stream.
-
-The user has now set up a new Raspberry Pi 4 with a Caddx thermal USB (UVC) camera, which is not working. The system correctly identifies the Pi 4 platform, but the camera stream is not starting.
+**what currently exists?** 
+A full-stack application with a C++ core, FastAPI backend, and React frontend. The VO system has been heavily upgraded to support thermal cameras (using Shi-Tomasi corner detection fallback, bilinear interpolation, and Sobel gradients). USB V4L2 MMAP streaming is fully operational. The system is currently connected to a physical flight controller (Matek H743) via UART, but there is a MAVLink parsing issue.
 
 **Last working item**:
-The agent was debugging why the new Caddx thermal USB camera is not producing a video stream on the user's Raspberry Pi 4.
-
--   **Last item agent was working:** The agent identified that the C++ USB camera driver () was attempting to force a hardcoded resolution (e.g., 320x240), which the Caddx camera does not support. The camera supports YUYV at 480x320. The agent began modifying the C++ driver to query the camera for its supported format and use that resolution instead of forcing one.
--   **Status:** IN PROGRESS
--   **Agent Testing Done:** N
--   **Which testing method agent to use?** Manual testing by the user on the Raspberry Pi. The agent needs to provide clear compilation and verification commands (, , , , ).
--   **User Testing Done:** N
+- **Last item agent was working:** Debugging MAVLink communication on the user's Raspberry Pi Zero 2W. The agent fixed a bug where the code auto-detected the correct UART port but still tried to open a hardcoded one. Now, the Pi successfully exchanges bytes with the Flight Controller (API shows TX: 64, RX: 42), but the system registers . The agent was just looking into  to figure out why incoming bytes aren't being parsed into heartbeat messages, and preparing to update  as requested by the user.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** Manual testing by the user on the Raspberry Pi. The agent MUST provide clear shell commands (compilation, ,  API checks) for the user to run on their hardware.
+- **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
--   **Issue 1: (P0) USB Thermal Camera (Caddx) shows no video on Raspberry Pi 4.**
-
-  **Issues Detail:**
-  - **Issue 1:** USB Thermal Camera (Caddx) shows no video on Raspberry Pi 4.
-     - **Attempted fixes:** The agent correctly diagnosed that the C++ USB camera driver hardcodes a resolution, causing a failure when the connected UVC camera doesn't support it. The agent started editing the C++ source files to fix this.
-     - **Next debug checklist:**
-        1.  Resume editing . Ensure member variables like  and  are added to the  class to store the actual camera resolution.
-        2.  Resume editing . In the  method, remove the hardcoded resolution values. Instead, after opening the device, query the device for its current format () and store the width and height in  and . Use these variables for subsequent operations.
-        3.  Guide the user to recompile the C++ native module on the Pi ().
-        4.  Guide the user to copy the new  file and restart the service.
-        5.  Ask the user to verify the fix by checking the API endpoint ({"camera_type":"SIM","camera_open":true,"frame_count":102,"fps_actual":15.086041450500488,"width":320,"height":240,"vo_features_detected":14,"vo_features_tracked":1,"vo_tracking_quality":0.0714285746216774,"vo_dx":7.366576028289273e-05,"vo_dy":-0.00012918670836370438,"vo_dz":0.0,"vo_vx":0.0011050471803173423,"vo_vy":-0.001937907305546105,"vo_valid":false,"vo_inlier_count":1,"vo_confidence":0.0714285746216774,"vo_position_uncertainty":0,"vo_total_distance":0,"platform":0,"platform_name":"Pi Zero 2W","vo_mode":1,"vo_mode_name":"Balanced","altitude_zone":0,"altitude_zone_name":"LOW","adaptive_fast_thresh":25.0,"adaptive_lk_window":7.0,"hover_detected":false,"hover_duration":0.0,"yaw_drift_rate":0.0,"corrected_yaw":0.0}) and confirming the resolution is now  and the video stream appears on the dashboard.
-     - **Why fix this issue and what will be achieved with the fix?** This is a critical blocker. The application is unusable without a working video feed for the Visual Odometry system.
-     - **Status:** IN PROGRESS
-     - **Is recurring issue?** N
-     - **Should Test frontend/backend/both after fix?** Backend (specifically the C++ core running on the user's Pi).
-     - **Blocked on other issue:** No.
+Issue 1: (P0) MAVLink Heartbeats not being parsed from received bytes.
+Issue Detail:
+- **Issue 1:** 
+  - **Attempted fixes:** Fixed the UART initialization to use the dynamically detected port ( instead of hardcoded ). This successfully restored two-way byte traffic (RX > 0).
+  - **Next debug checklist:** Inspect . Look at the parsing logic (likely ). Why is  > 0 but  == 0? Check if the MAVLink channel ID, system ID, or component ID filtering is dropping valid heartbeats from ArduPilot.
+  - **Why fix this issue and what will be achieved with the fix?** Critical blocker. Without MAVLink heartbeats, JT-Zero cannot establish a  state and cannot send Vision Odometry data () to the EKF3 on the flight controller.
+  - **Status:** IN PROGRESS
+  - **Is recurring issue?** N
+  - **Should Test frontend/backend/both after fix?** Backend (C++ core, tested by user via API).
+  - **Blocked on other issue:** None.
 
 **In progress Task List**:
-The only in-progress task is resolving the P0 camera issue.
+Task 1: (P1) Update  with MAVLink debugging status.
+Task Detail:
+- **Task 1:** 
+  - **Where to resume:** The user asked to онови claude.md in the final message. The agent viewed the file but didn't execute the edit. Update  to reflect the latest MAVLink fixes and current state.
+  - **What will be achieved with this?** Documentation consistency.
+  - **Status:** IN PROGRESS
+  - **Should Test frontend/backend/both after fix?** N/A
+  - **Blocked on something:** None.
 
 **Upcoming and Future Tasks**
--   **(P2)** IP camera (RTSP) and further thermal camera support.
--   **(P2)** ARM NEON optimization for the C++ core.
--   **(P2)** Autonomous Mission Planning UI/features.
+- (P2) IP camera (RTSP) and further thermal camera support.
+- (P2) ARM NEON optimization for the C++ core.
+- (P2) Autonomous Mission Planning UI/features.
+- (P2) Calibration of focal length for USB thermal cameras (currently hardcoded for CSI lenses).
 
 **Completed work in this session**
--   **Refactored VO Configuration (P0):** Re-architected the entire VO settings system into a two-level concept:
-    -   **Platform:** Auto-detected on startup (Pi Zero/4/5), sets the camera resolution.
-    -   **VO Mode:** User-selectable (Light/Balanced/Performance), adjusts algorithm parameters on-the-fly without interrupting the video stream. This was a major change across the entire stack (, , python bindings, backend, simulator, and React UI).
--   **Fixed VO Profile Switching Bug (P1):** Corrected an issue where switching VO profiles would incorrectly try to reset the camera resolution, causing the stream to fail. The fix ensures only algorithmic parameters are changed.
--   **Resolved Deployment/Build Issues (P0):**
-    -   Fixed the React production build, which had a hardcoded preview URL, making it fail on the user's local network. The  is now correctly handled for local deployments.
-    -   Guided the user through resolving usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
-           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
-           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
-           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
-           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
-           <command> [<args>]
-
-These are common Git commands used in various situations:
-
-start a working area (see also: git help tutorial)
-   clone     Clone a repository into a new directory
-   init      Create an empty Git repository or reinitialize an existing one
-
-work on the current change (see also: git help everyday)
-   add       Add file contents to the index
-   mv        Move or rename a file, a directory, or a symlink
-   restore   Restore working tree files
-   rm        Remove files from the working tree and from the index
-
-examine the history and state (see also: git help revisions)
-   bisect    Use binary search to find the commit that introduced a bug
-   diff      Show changes between commits, commit and working tree, etc
-   grep      Print lines matching a pattern
-   log       Show commit logs
-   show      Show various types of objects
-   status    Show the working tree status
-
-grow, mark and tweak your common history
-   branch    List, create, or delete branches
-   commit    Record changes to the repository
-   merge     Join two or more development histories together
-   rebase    Reapply commits on top of another base tip
-   reset     Reset current HEAD to the specified state
-   switch    Switch branches
-   tag       Create, list, delete or verify a tag object signed with GPG
-
-collaborate (see also: git help workflows)
-   fetch     Download objects and refs from another repository
-   pull      Fetch from and integrate with another repository or a local branch
-   push      Update remote refs along with associated objects
-
-'git help -a' and 'git help -g' list available subcommands and some
-concept guides. See 'git help <command>' or 'git help <concept>'
-to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. conflicts caused by local build artifacts.
-    -   Created a  file to solve dependency issues () during installation on the Pi.
-    -   Helped set up the  for systemd on a fresh Pi installation.
-    -   Diagnosed and fixed a missing  Python dependency.
+- Complete rewrite of USB Camera driver to use V4L2 MMAP streaming () (DONE).
+- Major VO Algorithm Upgrade: Added Shi-Tomasi grid fallback for low-contrast thermal images () (DONE).
+- Critical LK Tracker Bugfixes: Implemented bilinear interpolation for sub-pixel accuracy and Sobel gradients to prevent matrix failures on smooth textures (DONE).
+- MAVLink UART Device Selection Bugfix: Now correctly passes auto-detected port to initialization (DONE).
+- Comprehensive Documentation Update: , , ,  (DONE).
 
 **Earlier issues found/mentioned but not fixed**
--   None.
+- None.
 
 **Known issue recurrence from previous fork**
--   None.
+- None.
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
--   **VO Architecture:** Refactored into Platform (hardware-specific, sets resolution) and VO Mode (algorithmic, user-selectable).
--   **UVC (USB Video Class):** The current debugging effort is focused on the C++ driver for UVC cameras, using  to interact with devices like .
--   **Remote Deployment & Debugging:** The entire session involved guiding a user through compiling, deploying, and debugging on a physical Raspberry Pi over SSH.
+- **Visual Odometry (VO):** Uses custom FAST/Shi-Tomasi corner detection and Lucas-Kanade (LK) optical flow with Bilinear Interpolation and Sobel gradients.
+- **Hardware Integration:** V4L2 MMAP for USB cameras;  for CSI; raw UART for MAVLink telemetry.
+- **Remote Testing:** All actual execution happens on the user's physical Raspberry Pi via SSH. The agent writes code, pushes to GitHub (handled by Emergent), and gives the user  instructions.
 
 **key DB schema**
--   No database is used.
+- No database is used.
+
+**changes in tech stack**
+- None.
 
 **All files of reference**
--   **Files being actively modified for the current issue:**
-    -   
-    -   
--   **Other key files modified in this session:**
-    -   
-    -   
-    -   
-    -   
-    -   
-    -   
-    -   
-    -   
-    -    (created)
+-  (Actively debugging MAVLink parser).
+-  (Contains all the newly working VO math - DO NOT BREAK).
+-  (Needs updating).
+
+**Areas that need refactoring**
+- None immediately. C++ code was just cleaned of unused warnings.
+
+**key api endpoints**
+-  (Crucial for debugging the current issue. Returns TX/RX and heartbeat stats).
+-  (Returns VO confidence and tracked features).
 
 **Critical Info for New Agent**
--   **Your immediate task is to fix the USB camera stream.** The user is on a Raspberry Pi 4 with a Caddx thermal camera. The root cause is a hardcoded resolution in the C++ USB driver.
--   **Resume the fix:** The previous agent was editing  and . You must complete these edits to allow the driver to use the resolution reported by the camera, not a hardcoded one.
--   **Guide the user:** All testing for this issue must happen on the user's physical Pi. You need to provide clear, step-by-step shell commands for compilation and verification. Be prepared for a multi-turn debugging conversation.
--   **Architecture:** Understand the Platform vs. VO Mode concept. The goal is for the platform (and its resolution) to be fixed at startup, while the VO mode can be changed dynamically.
+- **You are debugging a physical hardware connection.** The user is running the code on a Raspberry Pi Zero 2W connected via UART to a Matek H743 flight controller. 
+- The UART connection is physically working (RX bytes are incrementing), but the MAVLink C++ parser is failing to register heartbeats. Look deeply at  to see how incoming bytes are fed into .
+- **Always provide shell scripts** for the user to pull code, compile, and curl the API. Example:
+  
 
 **documents and test reports created in this job**
--   
--    (and others)
--   Updated documentation for deployment and new features in  and  (the location was inconsistent, but changes were made).
+-  (Updated)
+- , , ,  (Updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Reports a blank screen on the Pi 4.
-2.  **Agent:** Identifies the build was using a preview URL. Rebuilds the frontend.
-3.  **User:** Confirms the UI now loads on the Pi.
-4.  **User:** Reports that switching profiles to Pi 4 on a Pi Zero board breaks the video stream.
-5.  **Agent:** Explains the problem and proposes a major refactor: separate Platform (hardware-defined resolution) from VO Mode (user-selectable algorithm settings).
-6.  **User:** Agrees to the refactor plan.
-7.  **Agent:** Implements the full-stack refactor.
-8.  **User:** Sets up a new Pi 4 with a Caddx thermal camera and follows the deployment guide.
-9.  **Agent:** Guides the user through fixing deployment issues ( not found, missing  dependency).
-10. **User:** Reports the dashboard now appears, but there is no video. Mentions the camera is a caddx termal 256. This is the current issue.
+1. User reports ArduPilot error: .
+2. Agent provides curl script to check MAVLink API.
+3. User runs script: .
+4. Agent asks for hardware setup details. User provides UART info ().
+5. Agent finds a bug in C++ MAVLink auto-detect where it defaults to  ignoring detection. Fixes it.
+6. User tests on Pi 4: . No response from FC.
+7. Agent gives scripts to read raw UART bytes. Results in 0 bytes.
+8. User switches SD card to the Pi Zero 2W (previous hardware).
+9. User tests on Pi Zero 2W: . (This proves two-way UART works, but parsing fails).
+10. **Pending:** User asks: онови claude.md (Update claude.md).
 
 **Project Health Check:**
--   **Broken:** The core video feed functionality is broken on the user's target hardware (Pi 4 with Caddx thermal camera).
+- Broken (MAVLink incoming telemetry parsing is failing).
 
 **3rd Party Integrations**
--   None.
+- None.
 
 **Testing status**
--   **Testing agent used after significant changes:** YES, after the VO refactor.
--   **Troubleshoot agent used after agent stuck in loop:** NO
--   **Test files created:**  was created.
--   **Known regressions:** None from the implemented code, but the switch to new hardware has revealed a new bug.
+- Testing agent used after significant changes: NO (Testing must be done manually by the user on physical Pi hardware).
+- Troubleshoot agent used after agent stuck in loop: NO
+- Test files created: None.
+- Known regressions: None.
+
+**Credentials to test flow:**
+- N/A
 
 **What agent forgot to execute**
-The agent did not finish the C++ code modifications to fix the USB camera driver. The  method in  and the  class definition in  are incomplete.</analysis>
+- The user requested an update to  in the final message. The agent viewed the file but did not apply the updates before the context ended.</analysis>
