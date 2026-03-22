@@ -7,6 +7,8 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active.
+
 ---
 
 ## Thread Model (8 threads)
@@ -56,7 +58,7 @@ On startup, the runtime probes hardware interfaces:
 **Visual Odometry:**
 - **Detection:** FAST corner detector (primary) + Shi-Tomasi grid corner detector (fallback for thermal/low-contrast)
 - **Tracking:** Lucas-Kanade optical flow with **bilinear interpolation** and **Sobel 3x3 gradients**
-- **Resolution:** Camera-native (480×320 for Caddx thermal, 640×480 for CSI)
+- **Resolution:** Camera-native (480x320 for Caddx thermal, 640x480 for CSI)
 
 **Platform/VO Mode architecture:**
 - **Platform:** Auto-detected at startup (Pi Zero 2W / Pi 4 / Pi 5) — sets camera resolution
@@ -70,26 +72,32 @@ On startup, the runtime probes hardware interfaces:
 
 | Transport  | Config                    | Use Case                    |
 |-----------|----------------------------|-----------------------------|
-| Serial    | auto-detect baud          | Direct FC UART connection   |
+| Serial    | auto-detect port + baud   | Direct FC UART connection   |
 | UDP       | 127.0.0.1:14550           | SITL / QGC / MissionPlanner |
 | Simulated | In-memory                 | Development & testing       |
 
-**Auto-baud detection:** Probes 115200 → 921600 → 57600 → 230400 → 460800, selects first with valid MAVLink STX markers. Takes ~500ms per rate.
+**Auto-baud detection (CRC-validated):**
+Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~1.5s of data and searches for complete MAVLink frames with valid CRC-16/MCRF4XX. Only frames with **known CRC extra** are counted — eliminates false positives from garbage bytes at wrong baud rates. Falls back to 115200 (ArduPilot default) if no valid frames found.
 
-**Messages sent:**
-- `VISION_POSITION_ESTIMATE` (#102) — accumulated VO pose, NED frame
-- `ODOMETRY` (#331) — full 6DOF with quaternion
+**Messages sent to FC:**
+- `VISION_POSITION_ESTIMATE` (#102) @ 25Hz — accumulated VO pose, NED frame
+- `ODOMETRY` (#331) @ 25Hz — full 6DOF with quaternion
 - `OPTICAL_FLOW_RAD` (#106) — integrated flow + gyro
-- `HEARTBEAT` (#0) — 1Hz companion computer heartbeat
+- `HEARTBEAT` (#0) @ 1Hz — companion computer heartbeat (MAV_TYPE_ONBOARD_CONTROLLER)
 
 **MAVLink parser features:**
-- CRC validation (rejects corrupt frames)
+- CRC-16/MCRF4XX validation on all received frames (rejects corrupt/garbled data)
 - MAVLink v1 (0xFE) and v2 (0xFD) support
-- MAVLink v2 signing detection (incompat_flags bit 0)
-- Diagnostic: raw byte hex dump on first data, per-heartbeat logging
-- Byte, message, heartbeat, and CRC error counters in API
+- MAVLink v2 signing detection (incompat_flags bit 0 → +13 bytes signature)
+- MAVLink v2 zero truncation handling (heartbeat min payload 5 bytes, not 9)
+- Diagnostic: raw byte hex dump on first data, per-heartbeat logging (first 10)
+- API counters: bytes_sent, bytes_received, heartbeats_received, crc_errors, detected_msg_ids
 
-**Verified:** Pi Zero 2W + Matek H743 @ 115200 baud — CONNECTED, Heartbeats OK, Attitude+IMU telemetry flowing
+**Verified hardware configurations:**
+- Pi Zero 2W + Matek H743 @ 115200 baud — CONNECTED, HB:12, ArduPilot QUADROTOR
+- VISION_POSITION_ESTIMATE arriving at FC at 25Hz (confirmed in MAVLink Inspector)
+- ODOMETRY arriving at FC at 25Hz
+- FC telemetry flowing back: ATTITUDE, RAW_IMU, GPS_RAW_INT, VFR_HUD, SYS_STATUS
 
 ---
 
@@ -112,6 +120,33 @@ On startup, the runtime probes hardware interfaces:
 | POST   | /api/command             | Send command (arm, takeoff, land)    |
 | WS     | /api/ws/telemetry        | Real-time telemetry @ 10Hz           |
 
+### /api/mavlink Response Fields
+```json
+{
+  "state": "CONNECTED",
+  "messages_sent": 202,
+  "messages_received": 2021,
+  "heartbeats_received": 12,
+  "bytes_sent": 27366,
+  "bytes_received": 43170,
+  "crc_errors": 0,
+  "errors": 0,
+  "fc_type": "QUADROTOR",
+  "fc_firmware": "ArduPilot QUADROTOR",
+  "fc_armed": false,
+  "transport_info": "/dev/ttyAMA0@115200",
+  "detected_msg_ids": [30, 178, 253, 0, 77, 33, 1, 125, 152, 62, 42, 74, 27, 116, 29, 24],
+  "fc_telemetry": {
+    "attitude_valid": true,
+    "imu_valid": true,
+    "gps_valid": false,
+    "battery_voltage": 0.0,
+    "gps_fix": 0,
+    "gps_sats": 0
+  }
+}
+```
+
 ---
 
 ## WebSocket Telemetry Payload
@@ -121,35 +156,35 @@ On startup, the runtime probes hardware interfaces:
   "type": "telemetry",
   "timestamp": 1710192000.0,
   "runtime_mode": "native",
-  "state": { "roll": 0.5, "pitch": -0.3, "yaw": 45.2, "altitude_agl": 7.0, ... },
-  "threads": [ { "name": "T0_Supervisor", "actual_hz": 10.0, "running": true, ... } ],
-  "engines": { "events": {...}, "reflexes": {...}, "rules": {...}, "memory": {...}, "output": {...} },
+  "state": { "roll": 0.5, "pitch": -0.3, "yaw": 45.2, "altitude_agl": 7.0 },
+  "threads": [ { "name": "T0_Supervisor", "actual_hz": 10.0, "running": true } ],
+  "engines": { "events": {}, "reflexes": {}, "rules": {}, "memory": {}, "output": {} },
   "recent_events": [ { "timestamp": 100.5, "type": "OBSTACLE", "priority": 200, "message": "..." } ],
-  "camera": { "fps_actual": 15.0, "vo_features_tracked": 21, "vo_valid": true, ... },
-  "mavlink": { "state": "CONNECTED", "messages_sent": 779, ... },
-  "sensor_modes": { "imu": "simulation", "baro": "simulation", "gps": "simulation", ... }
+  "camera": { "fps_actual": 15.0, "vo_features_tracked": 21, "vo_valid": true },
+  "mavlink": { "state": "CONNECTED", "messages_sent": 779, "heartbeats_received": 12 },
+  "sensor_modes": { "imu": "simulation", "baro": "simulation", "gps": "simulation" }
 }
 ```
 
 ---
 
-## Key Bug Fixes (from code review)
+## Key Bug Fixes (chronological)
 
-1. **VO displacement = 0** — Fixed: was using median pixel shift as displacement. Now: `displacement = pixel_shift * (ground_distance / focal_length)`
+1. **VO displacement = 0** — Was using median pixel shift as displacement. Now: `displacement = pixel_shift * (ground_distance / focal_length)`
 2. **MemoryPool race** — Replaced mutex-based pool with lock-free CAS free-list (O(1))
 3. **FAST threshold overflow** — `int t = threshold_` prevents uint8_t subtraction underflow
 4. **MAVLink VISION_POS** — Now uses accumulated VO local pose, not GPS coordinates
 5. **MAVLink ODOMETRY** — Uses accumulated pose, not per-frame delta
 6. **rand() thread safety** — Replaced with per-thread xorshift32 PRNG
 7. **Roll calculation** — Fixed `atan2(acc_y, acc_z)` → `atan2(acc_y, -acc_z)` (acc_z is -9.81 when level)
-8. **LK bilinear interpolation (CRITICAL)** — LK tracker used integer pixel access for current frame, preventing sub-pixel convergence. Added bilinear interpolation — fixes tracking on ALL cameras, especially low-contrast thermal
+8. **LK bilinear interpolation (CRITICAL)** — LK tracker used integer pixel access, preventing sub-pixel convergence. Added bilinear interpolation — fixes tracking on ALL cameras, especially low-contrast thermal
 9. **Sobel 3x3 gradients** — Replaced simple central differences with Sobel operator in LK tracker. 4x signal amplification, 16x better matrix conditioning for thermal images
 10. **USB camera V4L2 MMAP** — Rewrote USB camera driver from simple `read()` (fails on UVC) to proper V4L2 MMAP streaming with `select()` timeout
-11. **MAVLink heartbeat filter (CRITICAL)** — Old code rejected type=0 (GENERIC) heartbeats. Also rejected type=18 unconditionally. Now: only filters our own echoed heartbeats (sysid+type match), GCS, and ADSB. Accepts GENERIC and all vehicle types.
-12. **MAVLink default baud** — Changed from 115200 to 921600 to match documented ArduPilot config
-13. **MAVLink CRC validation** — Parser now validates CRC-16/MCRF4XX on received frames. Without CRC, garbage bytes from baud mismatch were counted as valid messages.
-14. **MAVLink v2 zero truncation** — Heartbeat handler lowered min length from 7 to 5 bytes. MAVLink v2 trims trailing zeros, so heartbeats with base_mode=0 had len<7.
-15. **MAVLink v2 signing** — Parser now detects incompat_flags bit 0 and adds 13-byte signature to frame length. Without this, signed frames corrupted subsequent parsing.
+11. **MAVLink heartbeat filter (CRITICAL)** — Old code rejected type=0 (GENERIC) heartbeats and type=18 unconditionally. Now: only filters own echoed heartbeats (sysid+type match), GCS, and ADSB. Accepts GENERIC and all vehicle types.
+12. **MAVLink CRC validation** — Parser now validates CRC-16/MCRF4XX on all received frames. Without CRC, garbage bytes from baud mismatch were counted as valid messages (RX:42 with 0 heartbeats).
+13. **MAVLink auto-baud (CRITICAL)** — Old STX-counting method gave false positives (random bytes contain 0xFD/0xFE by chance). Replaced with full CRC-validated frame detection during probing. Only known messages (with CRC extra) count.
+14. **MAVLink v2 zero truncation** — Heartbeat handler min length 7→5. MAVLink v2 trims trailing zeros, so heartbeats with base_mode=0 had payload len<7 and were silently dropped.
+15. **MAVLink v2 signing** — Parser now detects incompat_flags bit 0, adds 13-byte signature to frame length. Without this, signed frames shifted buffer alignment and corrupted all subsequent parsing.
 
 ---
 
@@ -173,7 +208,7 @@ jt-zero/
 │   ├── bus.h/cpp          # I2C, SPI, UART HAL
 │   └── sensor_drivers.h/cpp # MPU6050, BMP280, NMEA drivers
 ├── mavlink/
-│   └── mavlink_interface.cpp # Serial/UDP/Sim transport
+│   └── mavlink_interface.cpp # Serial/UDP/Sim transport + CRC parser
 ├── api/
 │   └── python_bindings.cpp # pybind11 module
 ├── simulator/             # Test pattern generators
@@ -217,9 +252,10 @@ jt-zero/
 
 ### On Pi Zero (native build):
 ```bash
-cd ~/jt-zero/jt-zero && mkdir build && cd build
+cd ~/jt-zero/jt-zero && mkdir -p build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
 cp jtzero_native*.so ~/jt-zero/backend/
+sudo systemctl restart jtzero
 ```
 
 ### Cross-compilation (from x86 host):
@@ -230,10 +266,15 @@ make -j$(nproc)
 scp jtzero_native*.so pi@jtzero.local:~/jt-zero/backend/
 ```
 
-### Run:
+### Quick test after deploy:
 ```bash
-cd ~/jt-zero/backend && source venv/bin/activate
-uvicorn server:app --host 0.0.0.0 --port 8001
+sudo systemctl restart jtzero && sleep 15
+curl -s http://localhost:8001/api/mavlink | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f\"State: {d['state']}, HB: {d.get('heartbeats_received',0)}\")
+print(f\"Baud: {d.get('transport_info','?')}\")
+print(f\"FC: {d['fc_type']} {d['fc_firmware']}\")
+"
 ```
 
 ---
@@ -249,7 +290,8 @@ uvicorn server:app --host 0.0.0.0 --port 8001
 - Platform/VO Mode refactor: Separated hardware config from algorithmic config
 - USB thermal camera (Caddx 256): V4L2 MMAP driver, Shi-Tomasi detector, Sobel gradients, bilinear LK
 - Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Valid:True, Conf:0.18-0.29
-- **MAVLink parser overhaul:** CRC validation, relaxed heartbeat filter, default 921600 baud, v2 signing support, diagnostic byte/heartbeat counters, raw hex dump
+- **MAVLink parser overhaul:** CRC validation, CRC-validated auto-baud, relaxed heartbeat filter, v2 signing support, diagnostic counters
+- **MAVLink FC integration verified:** Pi Zero 2W + Matek H743 @ 115200 — CONNECTED, HB OK, VISION_POSITION_ESTIMATE @ 25Hz confirmed in MAVLink Inspector
 - Test reports: /app/test_reports/iteration_1-15.json
 
 ---
@@ -266,10 +308,11 @@ Pi Pin 6  (GND) ─── FC GND
 ### ArduPilot параметри:
 ```
 SERIALx_PROTOCOL = 2    (MAVLink2)
-SERIALx_BAUD = 921      (921600)
+SERIALx_BAUD = 115      (115200 — auto-detected by JT-Zero)
 VISO_TYPE = 1            (MAVLink vision)
 EK3_SRC1_POSXY = 6      (ExternalNav)
 EK3_SRC1_VELXY = 6      (ExternalNav)
+EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 ```
 
 ### UART порти по контролерах:
@@ -280,8 +323,11 @@ EK3_SRC1_VELXY = 6      (ExternalNav)
 | Pixhawk 2.4.8 | TELEM2 | SERIAL2 |
 | Cube Orange+ | TELEM2 | SERIAL2 |
 
+**Baud rate:** JT-Zero автоматично визначає baud rate FC (CRC-validated probe). Будь-який стандартний baud (57600-921600) підтримується. Ніякого ручного налаштування baud на стороні Pi не потрібно.
+
 Детальна інструкція: /jt-zero/FC_CONNECTION.md
 
+---
 
 ## Documentation Map (all in Ukrainian)
 
@@ -295,3 +341,4 @@ EK3_SRC1_VELXY = 6      (ExternalNav)
 | `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
 | `CLAUDE.md` | Technical reference for agents (this file) |
 | `memory/PRD.md` | Product requirements and backlog |
+| `memory/CHANGELOG.md` | Implementation changelog with dates |
