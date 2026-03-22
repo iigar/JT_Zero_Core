@@ -221,6 +221,7 @@ public:
     
     // Real transport initialization
     bool initialize_serial(const char* device = "/dev/ttyAMA0", int baudrate = 115200);
+    bool initialize_serial_auto_baud(const char* device);
     bool initialize_udp(const char* host = "127.0.0.1", int port = 14550);
     
     // Auto-detect: try serial first, then UDP, fallback to simulation

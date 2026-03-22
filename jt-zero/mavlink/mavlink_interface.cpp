@@ -82,8 +82,8 @@ bool MAVLinkInterface::initialize(bool simulated) {
         if (transport_ == MAVTransport::SERIAL) {
             // Use auto-detected device (not default /dev/ttyAMA0)
             const char* dev = detected_serial_[0] ? detected_serial_ : "/dev/ttyAMA0";
-            // Default 921600 baud — matches recommended ArduPilot SERIALx_BAUD=921
-            return initialize_serial(dev, 921600);
+            // Auto-detect baud rate: try common rates, pick one with valid MAVLink bytes
+            return initialize_serial_auto_baud(dev);
         } else if (transport_ == MAVTransport::UDP) {
             return initialize_udp();
         } else {
@@ -97,6 +97,99 @@ bool MAVLinkInterface::initialize(bool simulated) {
     }
     
     return true;
+}
+
+bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
+#ifdef __linux__
+    // Try baud rates in order: most common ArduPilot configs first
+    const int baud_rates[] = {115200, 921600, 57600, 230400, 460800};
+    const int num_rates = 5;
+    
+    std::printf("[MAVLink] Auto-detecting baud rate on %s...\n", device);
+    std::fflush(stdout);
+    
+    for (int bi = 0; bi < num_rates; bi++) {
+        int baud = baud_rates[bi];
+        
+        int fd = ::open(device, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (fd < 0) {
+            std::printf("[MAVLink] Cannot open %s: %s\n", device, strerror(errno));
+            return false;
+        }
+        
+        // Configure UART
+        struct termios tty;
+        if (tcgetattr(fd, &tty) != 0) {
+            ::close(fd);
+            continue;
+        }
+        
+        speed_t spd;
+        switch (baud) {
+            case 57600:   spd = B57600;   break;
+            case 115200:  spd = B115200;  break;
+            case 230400:  spd = B230400;  break;
+            case 460800:  spd = B460800;  break;
+            case 921600:  spd = B921600;  break;
+            default:      spd = B115200;  break;
+        }
+        cfsetospeed(&tty, spd);
+        cfsetispeed(&tty, spd);
+        
+        // 8N1, no flow control, raw mode
+        tty.c_cflag &= ~PARENB;
+        tty.c_cflag &= ~CSTOPB;
+        tty.c_cflag &= ~CSIZE;
+        tty.c_cflag |= CS8;
+        tty.c_cflag &= ~CRTSCTS;
+        tty.c_cflag |= CREAD | CLOCAL;
+        tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+        tty.c_iflag &= ~(IXON | IXOFF | IXANY | IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
+        tty.c_oflag &= ~OPOST;
+        tty.c_cc[VMIN] = 0;
+        tty.c_cc[VTIME] = 1;
+        
+        tcsetattr(fd, TCSANOW, &tty);
+        tcflush(fd, TCIOFLUSH);
+        
+        // Probe: read for 500ms, count MAVLink STX bytes (0xFD=v2, 0xFE=v1)
+        uint8_t buf[512];
+        int stx_count = 0;
+        int total_bytes = 0;
+        
+        for (int attempt = 0; attempt < 10; attempt++) {
+            usleep(50000); // 50ms per attempt = 500ms total
+            int n = ::read(fd, buf, sizeof(buf));
+            if (n > 0) {
+                total_bytes += n;
+                for (int i = 0; i < n; i++) {
+                    if (buf[i] == 0xFD || buf[i] == 0xFE) {
+                        stx_count++;
+                    }
+                }
+            }
+        }
+        
+        ::close(fd);
+        
+        std::printf("[MAVLink] Baud %d: %d bytes, %d STX markers\n", baud, total_bytes, stx_count);
+        std::fflush(stdout);
+        
+        // If we found at least 2 STX bytes in 500ms of data, this baud rate is correct
+        if (stx_count >= 2) {
+            std::printf("[MAVLink] Auto-detected baud: %d\n", baud);
+            std::fflush(stdout);
+            return initialize_serial(device, baud);
+        }
+    }
+    
+    // No baud rate matched — fallback to 115200 (ArduPilot default)
+    std::printf("[MAVLink] No baud matched — defaulting to 115200\n");
+    std::fflush(stdout);
+    return initialize_serial(device, 115200);
+#else
+    return false;
+#endif
 }
 
 bool MAVLinkInterface::initialize_serial(const char* device, int baudrate) {
