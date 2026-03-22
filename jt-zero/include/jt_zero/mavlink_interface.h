@@ -131,6 +131,10 @@ struct MAVLinkStats {
     MAVTransport transport{MAVTransport::SIMULATED};
     uint32_t messages_sent{0};
     uint32_t messages_received{0};
+    uint32_t heartbeats_received{0};
+    size_t   bytes_received{0};
+    size_t   bytes_sent{0};
+    size_t   crc_errors{0};
     uint32_t errors{0};
     float    link_quality{0};            // 0-1
     uint64_t last_heartbeat_us{0};
@@ -277,10 +281,16 @@ private:
     // Stats
     std::atomic<uint32_t> msgs_sent_{0};
     std::atomic<uint32_t> msgs_received_{0};
+    std::atomic<uint32_t> heartbeats_received_{0};
     std::atomic<uint32_t> errors_{0};
     uint64_t last_heartbeat_us_{0};
     uint64_t last_vision_us_{0};
     uint32_t heartbeat_count_{0};
+    size_t   bytes_received_{0};
+    size_t   bytes_sent_{0};
+    size_t   crc_errors_{0};
+    uint32_t heartbeats_seen_{0};  // All heartbeats including filtered
+    bool     diag_raw_logged_{false};
     
     // Accumulated VO local pose (NED frame, relative to home)
     float vo_pose_x_{0};

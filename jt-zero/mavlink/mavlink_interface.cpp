@@ -82,7 +82,8 @@ bool MAVLinkInterface::initialize(bool simulated) {
         if (transport_ == MAVTransport::SERIAL) {
             // Use auto-detected device (not default /dev/ttyAMA0)
             const char* dev = detected_serial_[0] ? detected_serial_ : "/dev/ttyAMA0";
-            return initialize_serial(dev);
+            // Default 921600 baud — matches recommended ArduPilot SERIALx_BAUD=921
+            return initialize_serial(dev, 921600);
         } else if (transport_ == MAVTransport::UDP) {
             return initialize_udp();
         } else {
@@ -210,10 +211,12 @@ bool MAVLinkInterface::send_raw(const uint8_t* data, size_t len) {
 #ifdef __linux__
     if (transport_ == MAVTransport::SERIAL && serial_fd_ >= 0) {
         ssize_t n = ::write(serial_fd_, data, len);
+        if (n > 0) bytes_sent_ += static_cast<size_t>(n);
         return n == static_cast<ssize_t>(len);
     }
     if (transport_ == MAVTransport::UDP && udp_fd_ >= 0) {
         ssize_t n = ::send(udp_fd_, data, len, MSG_DONTWAIT);
+        if (n > 0) bytes_sent_ += static_cast<size_t>(n);
         return n == static_cast<ssize_t>(len);
     }
 #endif
@@ -537,6 +540,84 @@ void MAVLinkInterface::log_msg_id(uint32_t msg_id) {
 // MAVLink Frame Parser
 // ═══════════════════════════════════════════════════════════
 
+// CRC Extra bytes for known MAVLink messages (for CRC validation)
+static uint8_t get_crc_extra(uint32_t msg_id) {
+    switch (msg_id) {
+        case 0:   return 50;   // HEARTBEAT
+        case 1:   return 124;  // SYS_STATUS
+        case 2:   return 137;  // SYSTEM_TIME
+        case 24:  return 24;   // GPS_RAW_INT
+        case 26:  return 170;  // SCALED_IMU
+        case 27:  return 144;  // RAW_IMU
+        case 29:  return 115;  // SCALED_PRESSURE
+        case 30:  return 39;   // ATTITUDE
+        case 33:  return 104;  // GLOBAL_POSITION_INT
+        case 65:  return 118;  // RC_CHANNELS
+        case 74:  return 20;   // VFR_HUD
+        case 76:  return 152;  // COMMAND_LONG
+        case 77:  return 143;  // COMMAND_ACK
+        case 102: return 158;  // VISION_POSITION_ESTIMATE
+        case 106: return 175;  // OPTICAL_FLOW_RAD
+        case 253: return 83;   // STATUSTEXT
+        case 331: return 91;   // ODOMETRY
+        default:  return 0;    // Unknown — skip CRC validation
+    }
+}
+
+// Validate MAVLink v2 frame CRC
+static bool validate_v2_crc(const uint8_t* frame, uint8_t payload_len, uint32_t msg_id) {
+    uint8_t crc_extra = get_crc_extra(msg_id);
+    if (crc_extra == 0) return true; // Unknown msg — accept without CRC check
+    
+    // CRC over bytes 1 .. 9+payload_len (header without STX + payload)
+    uint16_t crc = 0xFFFF;
+    size_t crc_len = 9 + payload_len;
+    for (size_t i = 0; i < crc_len; i++) {
+        uint8_t tmp = frame[1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+              ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+    }
+    // Accumulate CRC extra
+    {
+        uint8_t tmp = crc_extra ^ static_cast<uint8_t>(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+              ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+    }
+    
+    uint16_t frame_crc = frame[10 + payload_len]
+                       | (static_cast<uint16_t>(frame[11 + payload_len]) << 8);
+    return crc == frame_crc;
+}
+
+// Validate MAVLink v1 frame CRC
+static bool validate_v1_crc(const uint8_t* frame, uint8_t payload_len, uint32_t msg_id) {
+    uint8_t crc_extra = get_crc_extra(msg_id);
+    if (crc_extra == 0) return true; // Unknown msg — accept without CRC check
+    
+    // CRC over bytes 1 .. 5+payload_len (header without STX + payload)
+    uint16_t crc = 0xFFFF;
+    size_t crc_len = 5 + payload_len;
+    for (size_t i = 0; i < crc_len; i++) {
+        uint8_t tmp = frame[1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+              ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+    }
+    // Accumulate CRC extra
+    {
+        uint8_t tmp = crc_extra ^ static_cast<uint8_t>(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+              ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+    }
+    
+    uint16_t frame_crc = frame[6 + payload_len]
+                       | (static_cast<uint16_t>(frame[7 + payload_len]) << 8);
+    return crc == frame_crc;
+}
+
 void MAVLinkInterface::process_incoming() {
     // Read all available bytes into ring buffer
     while (true) {
@@ -551,18 +632,36 @@ void MAVLinkInterface::process_incoming() {
         }
         int n = recv_raw(rx_buf_ + rx_head_, space);
         if (n <= 0) break;
+        bytes_received_ += static_cast<size_t>(n);
         rx_head_ += static_cast<size_t>(n);
+        
+        // Diagnostic: log first 32 raw bytes once
+        if (!diag_raw_logged_ && bytes_received_ >= 16) {
+            std::printf("[MAVLink] First %zu raw RX bytes: ", rx_head_);
+            for (size_t i = 0; i < rx_head_ && i < 32; i++) {
+                std::printf("%02X ", rx_buf_[i]);
+            }
+            std::printf("\n");
+            std::fflush(stdout);
+            diag_raw_logged_ = true;
+        }
     }
     
     // Parse frames from buffer
-    while (rx_tail_ + 12 <= rx_head_) {  // Minimum frame: STX(1) + len(1) + header(8) + crc(2)
+    while (rx_tail_ + 8 <= rx_head_) {  // Minimum v1 frame: STX(1)+len(1)+seq+sys+comp+msg+crc(2) = 8
         // Find start-of-frame
         uint8_t stx = rx_buf_[rx_tail_];
         
         if (stx == 0xFD) {
             // MAVLink v2 frame
             uint8_t payload_len = rx_buf_[rx_tail_ + 1];
-            size_t frame_len = 12 + payload_len;  // STX + len + incompat + compat + seq + sysid + compid + msgid(3) + payload + crc(2)
+            size_t frame_len = 12 + payload_len;  // STX+len+incompat+compat+seq+sysid+compid+msgid(3)+payload+crc(2)
+            
+            // Check for signing flag — adds 13 bytes signature
+            uint8_t incompat_flags = rx_buf_[rx_tail_ + 2];
+            if (incompat_flags & 0x01) {
+                frame_len += 13;
+            }
             
             if (rx_tail_ + frame_len > rx_head_) break;  // Incomplete frame
             
@@ -572,12 +671,25 @@ void MAVLinkInterface::process_incoming() {
                            | (static_cast<uint32_t>(rx_buf_[rx_tail_ + 9]) << 16);
             const uint8_t* payload = rx_buf_ + rx_tail_ + 10;
             
+            // CRC validation — reject corrupt frames
+            if (!validate_v2_crc(rx_buf_ + rx_tail_, payload_len, msg_id)) {
+                crc_errors_++;
+                if (crc_errors_ <= 5) {
+                    std::printf("[MAVLink] v2 CRC FAIL: msg_id=%u len=%u sysid=%u (err #%zu)\n",
+                                msg_id, payload_len, sysid, crc_errors_);
+                    std::fflush(stdout);
+                }
+                rx_tail_++;  // Skip this byte and resync
+                continue;
+            }
+            
             handle_message(msg_id, payload, payload_len, sysid);
             msgs_received_.fetch_add(1, std::memory_order_relaxed);
             
             if (state_ == MAVLinkState::CONNECTING) {
                 state_ = MAVLinkState::CONNECTED;
-                std::printf("[MAVLink] Connected to FC (sysid=%d, first msg=%u)\n", sysid, msg_id);
+                std::printf("[MAVLink] Connected to FC via v2 (sysid=%d, first msg=%u)\n", sysid, msg_id);
+                std::fflush(stdout);
             }
             last_heartbeat_us_ = now_us();
             
@@ -586,7 +698,7 @@ void MAVLinkInterface::process_incoming() {
         } else if (stx == 0xFE) {
             // MAVLink v1 frame
             uint8_t payload_len = rx_buf_[rx_tail_ + 1];
-            size_t frame_len = 8 + payload_len;  // STX + len + seq + sysid + compid + msgid + payload + crc(2)
+            size_t frame_len = 8 + payload_len;  // STX+len+seq+sysid+compid+msgid+payload+crc(2)
             
             if (rx_tail_ + frame_len > rx_head_) break;
             
@@ -594,12 +706,25 @@ void MAVLinkInterface::process_incoming() {
             uint32_t msg_id = rx_buf_[rx_tail_ + 5];
             const uint8_t* payload = rx_buf_ + rx_tail_ + 6;
             
+            // CRC validation — reject corrupt frames
+            if (!validate_v1_crc(rx_buf_ + rx_tail_, payload_len, msg_id)) {
+                crc_errors_++;
+                if (crc_errors_ <= 5) {
+                    std::printf("[MAVLink] v1 CRC FAIL: msg_id=%u len=%u sysid=%u (err #%zu)\n",
+                                msg_id, payload_len, sysid, crc_errors_);
+                    std::fflush(stdout);
+                }
+                rx_tail_++;  // Skip this byte and resync
+                continue;
+            }
+            
             handle_message(msg_id, payload, payload_len, sysid);
             msgs_received_.fetch_add(1, std::memory_order_relaxed);
             
             if (state_ == MAVLinkState::CONNECTING) {
                 state_ = MAVLinkState::CONNECTED;
                 std::printf("[MAVLink] Connected via v1 (sysid=%d, msg=%u)\n", sysid, msg_id);
+                std::fflush(stdout);
             }
             last_heartbeat_us_ = now_us();
             
@@ -664,21 +789,51 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
     
     switch (msg_id) {
         
-    case 0: {  // HEARTBEAT — min 7 bytes (custom_mode + type + autopilot + base_mode)
-        if (len < 7) break;
+    case 0: {  // HEARTBEAT
+        // MAVLink v2 zero truncation: payload may be < 9 bytes if trailing fields are 0
+        // We need at least 5 bytes to read type (offset 4)
+        if (len < 5) {
+            std::printf("[MAVLink] HEARTBEAT too short: len=%u (need >=5), sysid=%u\n", len, sysid);
+            std::fflush(stdout);
+            break;
+        }
         uint8_t hb_type      = safe_u8(4);
         uint8_t hb_autopilot = safe_u8(5);
-        // Skip GCS heartbeats (MAV_TYPE_GCS=6) and generic/unknown (type=0)
-        // Only accept heartbeats from actual vehicles
-        if (hb_type == 6 || hb_type == 0 || hb_type == 27 || hb_type == 18) break;
+        uint8_t hb_base_mode = safe_u8(6);
+        
+        // Log every heartbeat for debugging (first 10 only)
+        if (heartbeats_seen_ < 10) {
+            std::printf("[MAVLink] HEARTBEAT rx: sysid=%u type=%u autopilot=%u base_mode=0x%02X len=%u\n",
+                        sysid, hb_type, hb_autopilot, hb_base_mode, len);
+            std::fflush(stdout);
+        }
+        heartbeats_seen_++;
+        
+        // Skip our own echoed heartbeats (sysid=1, compid=191, type=18 ONBOARD_CONTROLLER)
+        if (sysid == 1 && hb_type == 18) break;
+        // Skip GCS heartbeats (MAV_TYPE_GCS=6)
+        if (hb_type == 6) break;
+        // Skip ADSB (type=27)
+        if (hb_type == 27) break;
+        
+        // Accept ALL other heartbeats including GENERIC (type=0) and vehicle types
         fc_telem_.custom_mode  = safe_u32(0);
         fc_telem_.fc_type      = hb_type;
         fc_telem_.fc_autopilot = hb_autopilot;
-        fc_telem_.base_mode    = safe_u8(6);
+        fc_telem_.base_mode    = hb_base_mode;
         fc_telem_.system_status = safe_u8(7);
-        fc_telem_.armed        = (safe_u8(6) & 0x80) != 0;
+        fc_telem_.armed        = (hb_base_mode & 0x80) != 0;
         fc_telem_.heartbeat_valid = true;
         fc_armed_ = fc_telem_.armed;
+        heartbeats_received_.fetch_add(1, std::memory_order_relaxed);
+        
+        if (heartbeats_received_.load() == 1) {
+            std::printf("[MAVLink] First FC heartbeat! type=%u(%s) autopilot=%u armed=%d\n",
+                        hb_type,
+                        hb_type == 2 ? "QUADROTOR" : hb_type == 1 ? "FIXED_WING" : "OTHER",
+                        hb_autopilot, fc_telem_.armed ? 1 : 0);
+            std::fflush(stdout);
+        }
         break;
     }
     
@@ -931,6 +1086,10 @@ MAVLinkStats MAVLinkInterface::get_stats() const {
     stats.transport = transport_;
     stats.messages_sent = msgs_sent_.load(std::memory_order_relaxed);
     stats.messages_received = msgs_received_.load(std::memory_order_relaxed);
+    stats.heartbeats_received = heartbeats_received_.load(std::memory_order_relaxed);
+    stats.bytes_received = bytes_received_;
+    stats.bytes_sent = bytes_sent_;
+    stats.crc_errors = crc_errors_;
     stats.errors = errors_.load(std::memory_order_relaxed);
     stats.last_heartbeat_us = last_heartbeat_us_;
     stats.system_id = 1;

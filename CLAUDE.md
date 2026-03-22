@@ -70,15 +70,24 @@ On startup, the runtime probes hardware interfaces:
 
 | Transport  | Config                    | Use Case                    |
 |-----------|----------------------------|-----------------------------|
-| Serial    | /dev/ttyAMA0 @ 921600     | Direct FC UART connection   |
+| Serial    | auto-detect @ 921600      | Direct FC UART connection   |
 | UDP       | 127.0.0.1:14550           | SITL / QGC / MissionPlanner |
 | Simulated | In-memory                 | Development & testing       |
+
+**Default baud: 921600** (matches ArduPilot `SERIALx_BAUD=921`). If your FC uses different baud, change in `initialize()`.
 
 **Messages sent:**
 - `VISION_POSITION_ESTIMATE` (#102) — accumulated VO pose, NED frame
 - `ODOMETRY` (#331) — full 6DOF with quaternion
 - `OPTICAL_FLOW_RAD` (#106) — integrated flow + gyro
 - `HEARTBEAT` (#0) — 1Hz companion computer heartbeat
+
+**MAVLink parser features:**
+- CRC validation (rejects corrupt frames)
+- MAVLink v1 (0xFE) and v2 (0xFD) support
+- MAVLink v2 signing detection (incompat_flags bit 0)
+- Diagnostic: raw byte hex dump on first data, per-heartbeat logging
+- Byte, message, heartbeat, and CRC error counters in API
 
 ---
 
@@ -134,6 +143,11 @@ On startup, the runtime probes hardware interfaces:
 8. **LK bilinear interpolation (CRITICAL)** — LK tracker used integer pixel access for current frame, preventing sub-pixel convergence. Added bilinear interpolation — fixes tracking on ALL cameras, especially low-contrast thermal
 9. **Sobel 3x3 gradients** — Replaced simple central differences with Sobel operator in LK tracker. 4x signal amplification, 16x better matrix conditioning for thermal images
 10. **USB camera V4L2 MMAP** — Rewrote USB camera driver from simple `read()` (fails on UVC) to proper V4L2 MMAP streaming with `select()` timeout
+11. **MAVLink heartbeat filter (CRITICAL)** — Old code rejected type=0 (GENERIC) heartbeats. Also rejected type=18 unconditionally. Now: only filters our own echoed heartbeats (sysid+type match), GCS, and ADSB. Accepts GENERIC and all vehicle types.
+12. **MAVLink default baud** — Changed from 115200 to 921600 to match documented ArduPilot config
+13. **MAVLink CRC validation** — Parser now validates CRC-16/MCRF4XX on received frames. Without CRC, garbage bytes from baud mismatch were counted as valid messages.
+14. **MAVLink v2 zero truncation** — Heartbeat handler lowered min length from 7 to 5 bytes. MAVLink v2 trims trailing zeros, so heartbeats with base_mode=0 had len<7.
+15. **MAVLink v2 signing** — Parser now detects incompat_flags bit 0 and adds 13-byte signature to frame length. Without this, signed frames corrupted subsequent parsing.
 
 ---
 
@@ -233,6 +247,7 @@ uvicorn server:app --host 0.0.0.0 --port 8001
 - Platform/VO Mode refactor: Separated hardware config from algorithmic config
 - USB thermal camera (Caddx 256): V4L2 MMAP driver, Shi-Tomasi detector, Sobel gradients, bilinear LK
 - Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Valid:True, Conf:0.18-0.29
+- **MAVLink parser overhaul:** CRC validation, relaxed heartbeat filter, default 921600 baud, v2 signing support, diagnostic byte/heartbeat counters, raw hex dump
 - Test reports: /app/test_reports/iteration_1-15.json
 
 ---

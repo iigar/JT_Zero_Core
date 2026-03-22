@@ -48,6 +48,16 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - **Shi-Tomasi Grid Corner Detector**: Fallback when FAST fails on low-contrast images — computes structure tensor eigenvalues to find actual corners (not edges)
 - **Convergence Tolerance**: Relaxed from 0.01 to 0.05 px for thermal images
 - **Verified on Pi 4 + Caddx thermal**: Det:180, Track:16-59, Inliers:100%, Valid:True, Conf:0.18-0.29
+- **MAVLink Parser Overhaul (P0)**: CRC validation, relaxed heartbeat filter, default 921600 baud, v2 signing support, diagnostic counters (bytes/heartbeats/CRC errors), raw hex dump
+
+### In Progress
+- **MAVLink Heartbeat Parsing (P0)**: Multiple root causes identified and fixed:
+  1. Heartbeat filter rejected type=0 (GENERIC) — now accepts all vehicle types
+  2. Default baud was 115200, docs recommend 921600 — now defaults to 921600
+  3. No CRC validation — garbage frames counted as messages. Now validates CRC
+  4. MAVLink v2 zero truncation — min payload len reduced from 7 to 5 for heartbeat
+  5. v2 signing flag not handled — frame length off by 13 bytes, corrupting parse
+  - **Status**: Code ready. Awaiting user test on Raspberry Pi.
 
 ## Backlog
 

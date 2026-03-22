@@ -197,6 +197,7 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
     std::string type_str = "UNKNOWN";
     if (fc.heartbeat_valid) {
         switch (fc.fc_type) {
+            case 0: type_str = "GENERIC"; break;
             case 1: type_str = "FIXED_WING"; break;
             case 2: type_str = "QUADROTOR"; break;
             case 3: type_str = "COAXIAL"; break;
@@ -216,10 +217,20 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         }
     }
     
+    // Diagnostic msg IDs — always available for debugging
+    py::list msg_ids;
+    for (size_t i = 0; i < rt.mavlink().diag_unique_count_; i++) {
+        msg_ids.append(static_cast<int>(rt.mavlink().diag_msg_ids_[i]));
+    }
+    
     py::dict result(
         "state"_a = jtzero::mavstate_str(ms.state),
         "messages_sent"_a = ms.messages_sent,
         "messages_received"_a = ms.messages_received,
+        "heartbeats_received"_a = ms.heartbeats_received,
+        "bytes_received"_a = static_cast<uint64_t>(ms.bytes_received),
+        "bytes_sent"_a = static_cast<uint64_t>(ms.bytes_sent),
+        "crc_errors"_a = static_cast<uint64_t>(ms.crc_errors),
         "errors"_a = ms.errors,
         "link_quality"_a = ms.link_quality,
         "system_id"_a = static_cast<int>(ms.system_id),
@@ -229,6 +240,8 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         "fc_firmware"_a = std::string(ms.fc_firmware),
         "fc_type"_a = type_str,
         "fc_armed"_a = ms.fc_armed,
+        "transport_info"_a = std::string(ms.transport_info),
+        "detected_msg_ids"_a = msg_ids,
         "vision_pos_sent"_a = ms.messages_sent / 3,
         "odometry_sent"_a = ms.messages_sent / 3,
         "optical_flow_sent"_a = ms.messages_sent / 6
@@ -236,12 +249,6 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
     
     // Add FC telemetry if available
     if (fc.heartbeat_valid) {
-        // Get diagnostic msg IDs
-        py::list msg_ids;
-        for (size_t i = 0; i < rt.mavlink().diag_unique_count_; i++) {
-            msg_ids.append(static_cast<int>(rt.mavlink().diag_msg_ids_[i]));
-        }
-        
         result["fc_telemetry"] = py::dict(
             "attitude_valid"_a = fc.attitude_valid,
             "imu_valid"_a = fc.imu_valid,
@@ -253,8 +260,7 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
             "battery_voltage"_a = fc.battery_voltage,
             "battery_remaining"_a = static_cast<int>(fc.battery_remaining),
             "gps_fix"_a = static_cast<int>(fc.gps_fix),
-            "gps_sats"_a = static_cast<int>(fc.gps_sats),
-            "detected_msg_ids"_a = msg_ids
+            "gps_sats"_a = static_cast<int>(fc.gps_sats)
         );
     }
     
