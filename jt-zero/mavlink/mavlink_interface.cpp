@@ -105,7 +105,7 @@ bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
     const int baud_rates[] = {115200, 921600, 57600, 230400, 460800};
     const int num_rates = 5;
     
-    std::printf("[MAVLink] Auto-detecting baud rate on %s...\n", device);
+    std::printf("[MAVLink] Auto-detecting baud rate on %s (CRC-validated)...\n", device);
     std::fflush(stdout);
     
     for (int bi = 0; bi < num_rates; bi++) {
@@ -152,39 +152,100 @@ bool MAVLinkInterface::initialize_serial_auto_baud(const char* device) {
         tcsetattr(fd, TCSANOW, &tty);
         tcflush(fd, TCIOFLUSH);
         
-        // Probe: read for 500ms, count MAVLink STX bytes (0xFD=v2, 0xFE=v1)
-        uint8_t buf[512];
-        int stx_count = 0;
-        int total_bytes = 0;
-        
-        for (int attempt = 0; attempt < 10; attempt++) {
-            usleep(50000); // 50ms per attempt = 500ms total
-            int n = ::read(fd, buf, sizeof(buf));
-            if (n > 0) {
-                total_bytes += n;
-                for (int i = 0; i < n; i++) {
-                    if (buf[i] == 0xFD || buf[i] == 0xFE) {
-                        stx_count++;
-                    }
-                }
+        // Read data for ~1.5 seconds into buffer
+        uint8_t buf[4096];
+        size_t total = 0;
+        for (int attempt = 0; attempt < 30; attempt++) {  // 30 * 50ms = 1.5s
+            usleep(50000);
+            if (total < sizeof(buf)) {
+                int n = ::read(fd, buf + total, sizeof(buf) - total);
+                if (n > 0) total += static_cast<size_t>(n);
             }
         }
         
         ::close(fd);
         
-        std::printf("[MAVLink] Baud %d: %d bytes, %d STX markers\n", baud, total_bytes, stx_count);
+        // Try to find valid MAVLink frames with CRC validation
+        // Only count frames where we KNOW the CRC extra (prevents false positives)
+        int valid_frames = 0;
+        for (size_t pos = 0; pos + 8 <= total; pos++) {
+            if (buf[pos] == 0xFD && pos + 12 <= total) {
+                // MAVLink v2 candidate
+                uint8_t plen = buf[pos + 1];
+                size_t flen = 12 + plen;
+                if (pos + flen <= total && plen <= 255) {
+                    uint32_t mid = buf[pos + 7]
+                                 | (static_cast<uint32_t>(buf[pos + 8]) << 8)
+                                 | (static_cast<uint32_t>(buf[pos + 9]) << 16);
+                    uint8_t crc_extra = get_crc_extra(mid);
+                    if (crc_extra != 0) {  // Only validate known messages
+                        // Compute CRC over header(9 bytes) + payload
+                        uint16_t crc = 0xFFFF;
+                        for (size_t i = 0; i < 9 + plen; i++) {
+                            uint8_t tmp = buf[pos + 1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
+                            tmp ^= (tmp << 4);
+                            crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+                                  ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+                        }
+                        // Accumulate CRC extra
+                        {
+                            uint8_t tmp = crc_extra ^ static_cast<uint8_t>(crc & 0xFF);
+                            tmp ^= (tmp << 4);
+                            crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+                                  ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+                        }
+                        uint16_t frame_crc = buf[pos + 10 + plen]
+                                           | (static_cast<uint16_t>(buf[pos + 11 + plen]) << 8);
+                        if (crc == frame_crc) {
+                            valid_frames++;
+                        }
+                    }
+                }
+            } else if (buf[pos] == 0xFE && pos + 8 <= total) {
+                // MAVLink v1 candidate
+                uint8_t plen = buf[pos + 1];
+                size_t flen = 8 + plen;
+                if (pos + flen <= total && plen <= 255) {
+                    uint32_t mid = buf[pos + 5];
+                    uint8_t crc_extra = get_crc_extra(mid);
+                    if (crc_extra != 0) {  // Only validate known messages
+                        // Compute CRC over header(5 bytes) + payload
+                        uint16_t crc = 0xFFFF;
+                        for (size_t i = 0; i < 5 + plen; i++) {
+                            uint8_t tmp = buf[pos + 1 + i] ^ static_cast<uint8_t>(crc & 0xFF);
+                            tmp ^= (tmp << 4);
+                            crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+                                  ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+                        }
+                        // Accumulate CRC extra
+                        {
+                            uint8_t tmp = crc_extra ^ static_cast<uint8_t>(crc & 0xFF);
+                            tmp ^= (tmp << 4);
+                            crc = (crc >> 8) ^ (static_cast<uint16_t>(tmp) << 8)
+                                  ^ (static_cast<uint16_t>(tmp) << 3) ^ (tmp >> 4);
+                        }
+                        uint16_t frame_crc = buf[pos + 6 + plen]
+                                           | (static_cast<uint16_t>(buf[pos + 7 + plen]) << 8);
+                        if (crc == frame_crc) {
+                            valid_frames++;
+                        }
+                    }
+                }
+            }
+        }
+        
+        std::printf("[MAVLink] Baud %d: %zu bytes, %d CRC-valid frames\n", baud, total, valid_frames);
         std::fflush(stdout);
         
-        // If we found at least 2 STX bytes in 500ms of data, this baud rate is correct
-        if (stx_count >= 2) {
-            std::printf("[MAVLink] Auto-detected baud: %d\n", baud);
+        if (valid_frames >= 1) {
+            std::printf("[MAVLink] === Auto-detected baud: %d ===\n", baud);
             std::fflush(stdout);
             return initialize_serial(device, baud);
         }
     }
     
     // No baud rate matched — fallback to 115200 (ArduPilot default)
-    std::printf("[MAVLink] No baud matched — defaulting to 115200\n");
+    std::printf("[MAVLink] No CRC-valid frames found — defaulting to 115200\n");
     std::fflush(stdout);
     return initialize_serial(device, 115200);
 #else
