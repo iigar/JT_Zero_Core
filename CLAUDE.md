@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active.
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture implemented** — CSI forward (VO) + USB thermal (downward, on-demand).
 
 ---
 

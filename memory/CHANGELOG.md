@@ -1,5 +1,23 @@
 # JT-Zero Changelog
 
+## 2026-03-23 — Multi-Camera Architecture (P1)
+
+### Multi-Camera Support
+- **C++ Header (camera.h)**: Added `CameraSlot` enum (PRIMARY/SECONDARY), `CameraSlotInfo` struct, multi-camera methods to `CameraPipeline` (init_secondary, capture_secondary, get_slot_info, camera_count)
+- **C++ Pipeline (camera_pipeline.cpp)**: Implemented secondary camera lifecycle (init, capture on-demand, shutdown), slot info reporting
+- **Backend API (server.py)**: 4 new endpoints — `GET /api/cameras`, `GET /api/camera/secondary/stats`, `POST /api/camera/secondary/capture`, `GET /api/camera/secondary/frame`
+- **Backend Bridge (native_bridge.py)**: Multi-camera fallback methods for C++ runtime (lazy-init, simulated thermal frames)
+- **Backend Simulator (simulator.py)**: Full multi-camera simulation with thermal hotspot generation
+- **Frontend ThermalPanel.js**: New component — on-demand capture, auto-refresh (1fps), iron palette false-color rendering, temperature legend
+- **Frontend App.js**: CameraTab with SPLIT/VO ONLY/THERMAL view switcher, Dashboard sidebar CAMERAS section
+- **WebSocket**: `cameras` array added to telemetry payload
+- **Testing**: 24/24 tests pass (100%)
+
+### Resource Management Strategy
+- Primary CSI camera: Always active for VO navigation
+- Secondary USB thermal: On-demand capture only (not continuous streaming)
+- Suitable for both Pi Zero 2W (512MB) and Pi 4B (4GB)
+
 ## 2026-03-23 — EKF3 Integration, Automation, UI Refresh
 
 ### EKF3 ExternalNav
