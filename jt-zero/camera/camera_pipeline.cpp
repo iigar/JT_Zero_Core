@@ -996,15 +996,27 @@ CameraSlotInfo CameraPipeline::get_slot_info(CameraSlot slot) const {
                 info.fps_actual = static_cast<float>(frame_count_) * 1'000'000.0f / 
                                  static_cast<float>(elapsed_us);
             }
-            std::strncpy(info.label, "Forward (VO)", 31);
-            info.label[31] = '\0';
+            
             if (active_camera_->type() == CameraType::PI_CSI) {
+                // Include CSI sensor info
+                info.csi_sensor = static_cast<uint8_t>(csi_camera_.sensor_type());
+                const CSISensorInfo* si = csi_camera_.sensor_info();
+                if (si) {
+                    std::strncpy(info.sensor_name, si->name, 31);
+                    info.sensor_name[31] = '\0';
+                    std::snprintf(info.label, sizeof(info.label), "%s (VO)", si->name);
+                } else {
+                    std::strncpy(info.label, "CSI (VO)", sizeof(info.label) - 1);
+                }
                 std::strncpy(info.device, "rpicam-vid", 63);
             } else if (active_camera_->type() == CameraType::USB) {
+                std::strncpy(info.label, "USB (VO fallback)", sizeof(info.label) - 1);
                 std::strncpy(info.device, "/dev/video0", 63);
             } else {
+                std::strncpy(info.label, "Simulated (VO)", sizeof(info.label) - 1);
                 std::strncpy(info.device, "simulated", 63);
             }
+            info.label[sizeof(info.label) - 1] = '\0';
             info.device[63] = '\0';
         }
     } else if (slot == CameraSlot::SECONDARY) {
@@ -1021,9 +1033,9 @@ CameraSlotInfo CameraPipeline::get_slot_info(CameraSlot slot) const {
                 info.fps_actual = static_cast<float>(secondary_frame_count_) * 1'000'000.0f / 
                                  static_cast<float>(elapsed_us);
             }
-            std::strncpy(info.label, "Thermal (Down)", 31);
-            info.label[31] = '\0';
-            std::strncpy(info.device, "/dev/video2", 63);
+            std::strncpy(info.label, "USB Thermal (Down)", sizeof(info.label) - 1);
+            info.label[sizeof(info.label) - 1] = '\0';
+            std::strncpy(info.device, usb_device_buf_, 63);
             info.device[63] = '\0';
         }
     }

@@ -227,27 +227,41 @@ class NativeRuntime:
                 "fps_actual": 0.0,
                 "width": 256,
                 "height": 192,
-                "label": "Thermal (Down)",
+                "label": "USB Thermal (Down)",
                 "device": "/dev/video2",
                 "last_capture_time": 0,
             }
 
     def get_cameras(self) -> list:
-        """Return info about all camera slots."""
+        """Return info about all camera slots (Variant B: CSI priority)."""
         self.__init_multicam()
         cam = self.get_camera_stats()
+        cam_type = cam.get("camera_type", "SIM")
+        
+        # Determine primary label based on camera type
+        if cam_type == "PI_CSI":
+            label = f"{self._csi_sensor_name} (VO)" if hasattr(self, '_csi_sensor_name') else "CSI (VO)"
+            device = "rpicam-vid"
+        elif cam_type == "USB":
+            label = "USB (VO fallback)"
+            device = "/dev/video0"
+        else:
+            label = "Simulated (VO)"
+            device = "simulated"
+        
         primary = {
             "slot": "PRIMARY",
-            "camera_type": cam.get("camera_type", "SIM"),
+            "camera_type": cam_type,
             "camera_open": cam.get("camera_open", False),
             "active": True,
             "frame_count": cam.get("frame_count", 0),
             "fps_actual": cam.get("fps_actual", 0),
             "width": cam.get("width", 320),
             "height": cam.get("height", 240),
-            "label": "Forward (VO)",
-            "device": "rpicam-vid" if cam.get("camera_type") == "PI_CSI" else "/dev/video0",
+            "label": label,
+            "device": device,
             "has_vo": True,
+            "csi_sensor": getattr(self, '_csi_sensor_name', None),
         }
         secondary = dict(self._secondary_camera)
         secondary["has_vo"] = False

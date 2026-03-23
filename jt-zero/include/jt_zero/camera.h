@@ -218,6 +218,50 @@ struct FeaturePoint {
 
 static constexpr size_t MAX_FEATURES = 300;
 
+// ─── CSI Sensor Variants ─────────────────────────────────
+// Auto-detected via rpicam-hello --list-cameras
+
+enum class CSISensorType : uint8_t {
+    UNKNOWN    = 0,
+    OV5647     = 1,   // Pi Camera v1 — 5MP, fixed focus, FOV 62°
+    IMX219     = 2,   // Pi Camera v2 — 8MP, fixed focus, FOV 62°
+    IMX477     = 3,   // Pi HQ Camera — 12.3MP, C/CS-mount lens
+    IMX708     = 4,   // Pi Camera v3 — 12MP, autofocus, FOV 66°
+    OV9281     = 5,   // Global shutter — 1MP, ideal for VO
+    IMX296     = 6,   // Pi GS Camera — 1.6MP, global shutter
+    OV64A40    = 7,   // Arducam 64MP
+};
+
+struct CSISensorInfo {
+    CSISensorType sensor;
+    const char*   name;
+    const char*   chip_id;      // string to match in rpicam-hello output
+    uint16_t      max_width;
+    uint16_t      max_height;
+    float         default_focal_px;  // focal length at 640x480
+    float         fov_h_deg;         // horizontal FOV
+    bool          autofocus;
+    bool          global_shutter;
+};
+
+static constexpr CSISensorInfo CSI_SENSORS[] = {
+    {CSISensorType::OV5647,  "Pi Camera v1",      "ov5647",  2592, 1944, 554.0f,  62.2f, false, false},
+    {CSISensorType::IMX219,  "Pi Camera v2",      "imx219",  3280, 2464, 620.0f,  62.2f, false, false},
+    {CSISensorType::IMX477,  "Pi HQ Camera",      "imx477",  4056, 3040, 0.0f,    0.0f,  false, false},  // lens-dependent
+    {CSISensorType::IMX708,  "Pi Camera v3",      "imx708",  4608, 2592, 630.0f,  66.0f, true,  false},
+    {CSISensorType::OV9281,  "OV9281 GlobalShtr",  "ov9281",  1280, 800,  450.0f,  80.0f, false, true},
+    {CSISensorType::IMX296,  "Pi GS Camera",      "imx296",  1456, 1088, 490.0f,  48.8f, false, true},
+    {CSISensorType::OV64A40, "Arducam 64MP",      "ov64a40", 9248, 6944, 600.0f,  84.0f, true,  false},
+};
+static constexpr size_t NUM_CSI_SENSORS = sizeof(CSI_SENSORS) / sizeof(CSI_SENSORS[0]);
+
+inline const char* csi_sensor_str(CSISensorType s) {
+    for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
+        if (CSI_SENSORS[i].sensor == s) return CSI_SENSORS[i].name;
+    }
+    return "Unknown CSI";
+}
+
 // ─── Camera Source Interface ─────────────────────────────
 
 enum class CameraType : uint8_t {
@@ -281,10 +325,17 @@ public:
     void close() override;
     bool is_open() const override { return open_; }
     CameraType type() const override { return CameraType::PI_CSI; }
-    const char* name() const override { return "PiCSI_rpicam"; }
+    const char* name() const override { return sensor_name_; }
     
     // Auto-detect: check if rpicam-hello can see a camera
     static bool detect();
+    
+    // Detect and identify the CSI sensor model
+    static CSISensorType detect_sensor();
+    
+    // Get detected sensor info (valid after detect_sensor())
+    CSISensorType sensor_type() const { return sensor_type_; }
+    const CSISensorInfo* sensor_info() const { return sensor_info_; }
 
 private:
     bool open_{false};
@@ -293,6 +344,9 @@ private:
     uint16_t cap_h_{0};
     uint32_t frame_counter_{0};
     uint64_t last_capture_us_{0};
+    CSISensorType sensor_type_{CSISensorType::UNKNOWN};
+    const CSISensorInfo* sensor_info_{nullptr};
+    char sensor_name_[48]{"PiCSI_rpicam"};
 };
 
 // ─── USB Camera (via V4L2) ───────────────────────────────
@@ -488,8 +542,11 @@ struct CameraSlotInfo {
     float       fps_actual{0};
     uint16_t    width{0};
     uint16_t    height{0};
-    char        label[32]{};         // "Forward CSI", "Thermal Down"
+    char        label[48]{};         // "IMX219 (VO)", "Thermal USB"
     char        device[64]{};        // "/dev/video0", "rpicam-vid"
+    // CSI-specific
+    uint8_t     csi_sensor{0};       // CSISensorType
+    char        sensor_name[32]{};   // "Pi Camera v2"
 };
 
 // ─── Camera Pipeline Stats (extended for multi-camera) ───
@@ -536,8 +593,19 @@ public:
     // Initialize with camera source (auto-detects if SIMULATED)
     bool initialize(CameraType type = CameraType::SIMULATED);
     
+    // ── Variant B: CSI priority, USB fallback ──
+    // 1. CSI found → PRIMARY(VO), scan USB → SECONDARY(thermal)
+    // 2. Only USB  → USB=PRIMARY(VO), no SECONDARY
+    // 3. Only CSI  → CSI=PRIMARY(VO), no SECONDARY
+    // 4. Nothing   → SIMULATED=PRIMARY(VO)
+    bool initialize_multicam();
+    
     // Auto-detect: try PI_CSI, then USB, fallback to SIMULATED
     CameraType auto_detect_camera();
+    
+    // Find first available USB camera device (/dev/video0..9)
+    // Skips CSI-owned V4L2 devices
+    static const char* find_usb_device();
     
     // Process one frame (capture + VO)
     bool tick(float ground_distance = 1.0f);
@@ -587,6 +655,9 @@ public:
     
     // Check if secondary camera is available
     bool has_secondary() const { return secondary_camera_ != nullptr && secondary_open_; }
+    
+    // CSI sensor info (from primary camera)
+    CSISensorType csi_sensor_type() const { return csi_camera_.sensor_type(); }
 
 private:
     SimulatedCamera sim_camera_;
@@ -603,7 +674,7 @@ private:
     uint32_t frame_count_{0};
     uint64_t start_time_us_{0};
     
-    // ── Secondary camera (thermal) ──
+    // ── Secondary camera (thermal/USB) ──
     USBCamera       secondary_usb_{"/dev/video2"};
     SimulatedCamera secondary_sim_;         // fallback for testing
     CameraSource*   secondary_camera_{nullptr};
@@ -611,6 +682,9 @@ private:
     bool            secondary_open_{false};
     uint32_t        secondary_frame_count_{0};
     uint64_t        secondary_start_us_{0};
+    
+    // ── Device path for USB cameras ──
+    static char usb_device_buf_[16];  // e.g., "/dev/video2"
 };
 
 } // namespace jtzero

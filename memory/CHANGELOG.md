@@ -13,6 +13,13 @@
 - **WebSocket**: `cameras` array added to telemetry payload
 - **Testing**: 24/24 tests pass (100%)
 
+### Variant B — CSI Priority, USB Fallback
+- **C++ camera.h**: Added `CSISensorType` enum (OV5647, IMX219, IMX477, IMX708, OV9281, IMX296, OV64A40), `CSISensorInfo` struct with sensor specs
+- **C++ camera_drivers.cpp**: `detect_sensor()` — parses rpicam-hello output to identify CSI sensor model; `find_usb_device()` — scans /dev/video0..9 for USB cameras (skips CSI V4L2 devices); `initialize_multicam()` — Variant B logic
+- **C++ PiCSICamera**: Stores detected sensor type and info, dynamic camera name from sensor model
+- **Backend labels**: Dynamic PRIMARY label (CSI sensor name or "USB fallback"), "USB Thermal (Down)" for secondary
+- **Frontend**: CSI sensor badge in Camera tab header, "USB Fallback" warning badge when no CSI
+
 ### Resource Management Strategy
 - Primary CSI camera: Always active for VO navigation
 - Secondary USB thermal: On-demand capture only (not continuous streaming)

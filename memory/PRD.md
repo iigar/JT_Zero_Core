@@ -69,7 +69,27 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
   - Dashboard sidebar: CAMERAS section showing both camera slots
   - All 24 tests pass (backend + frontend)
 
-## Multi-Camera Configuration
+## Multi-Camera Configuration (Variant B)
+
+**Priority logic:**
+| CSI | USB | Result |
+|-----|-----|--------|
+| Found | Found | CSI=PRIMARY(VO), USB=SECONDARY(thermal) |
+| Found | None | CSI=PRIMARY(VO), no SECONDARY |
+| None | Found | USB=PRIMARY(VO fallback), no SECONDARY |
+| None | None | SIMULATED=PRIMARY(VO) |
+
+**Supported CSI Sensors:**
+| Sensor | Camera | Resolution | FOV | Autofocus | Global Shutter |
+|--------|--------|-----------|-----|-----------|----------------|
+| OV5647 | Pi Camera v1 | 5MP | 62° | No | No |
+| IMX219 | Pi Camera v2 | 8MP | 62° | No | No |
+| IMX477 | Pi HQ Camera | 12.3MP | lens | No | No |
+| IMX708 | Pi Camera v3 | 12MP | 66° | Yes | No |
+| OV9281 | OV9281 | 1MP | 80° | No | Yes |
+| IMX296 | Pi GS Camera | 1.6MP | 49° | No | Yes |
+| OV64A40 | Arducam 64MP | 64MP | 84° | Yes | No |
+
 | Camera | Interface | Role | Stream | Pi Load |
 |--------|-----------|------|--------|---------|
 | CSI (Forward) | CSI → GPU/ISP | Visual Odometry | Always (15fps) | Low (GPU ISP) |

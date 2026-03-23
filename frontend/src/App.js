@@ -275,9 +275,15 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
 /* ═══════════════════════════════════════════════════════════ */
 
 function CameraTab({ camera, features, cameras }) {
+  const primaryCam = cameras?.find(c => c.slot === 'PRIMARY');
   const secondaryCam = cameras?.find(c => c.slot === 'SECONDARY');
   const hasThermal = !!secondaryCam;
   const [activeView, setActiveView] = useState('split');
+
+  const primaryLabel = primaryCam?.label || 'Camera (VO)';
+  const csiSensor = primaryCam?.csi_sensor;
+  const isCsi = primaryCam?.camera_type === 'PI_CSI';
+  const isUsbFallback = primaryCam?.camera_type === 'USB' && !isCsi;
 
   return (
     <div className="h-full flex flex-col p-3 gap-2">
@@ -287,6 +293,16 @@ function CameraTab({ camera, features, cameras }) {
         <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
           {cameras?.filter(c => c.camera_open).length || 1} / {cameras?.length || 1} Active
         </span>
+        {isCsi && csiSensor && (
+          <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+            CSI: {csiSensor}
+          </span>
+        )}
+        {isUsbFallback && (
+          <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 font-bold">
+            USB Fallback
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1">
           {['split', 'primary', 'thermal'].map(view => (
             <button
@@ -315,8 +331,8 @@ function CameraTab({ camera, features, cameras }) {
             ) : (
               <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
                 <div className="text-center">
-                  <p className="text-[10px] text-slate-500">No thermal camera detected</p>
-                  <p className="text-[8px] text-slate-600 mt-1">Connect USB thermal to /dev/video2</p>
+                  <p className="text-[10px] text-slate-500">No USB camera for secondary slot</p>
+                  <p className="text-[8px] text-slate-600 mt-1">Connect USB thermal camera</p>
                 </div>
               </div>
             )}
@@ -328,7 +344,7 @@ function CameraTab({ camera, features, cameras }) {
             <ThermalPanel secondary={secondaryCam} />
           ) : (
             <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
-              <p className="text-[10px] text-slate-500">No thermal camera detected</p>
+              <p className="text-[10px] text-slate-500">No USB camera for secondary slot</p>
             </div>
           )
         )}

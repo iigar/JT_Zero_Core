@@ -238,7 +238,7 @@ class JTZeroSimulator:
             "fps_actual": 0.0,
             "width": 256,
             "height": 192,
-            "label": "Thermal (Down)",
+            "label": "USB Thermal (Down)",
             "device": "/dev/video2",
             "last_capture_time": 0,
         }
@@ -568,9 +568,10 @@ class JTZeroSimulator:
     # ── Multi-Camera Support ──
 
     def get_cameras(self) -> list:
-        """Return info about all camera slots."""
+        """Return info about all camera slots (Variant B)."""
         with self._lock:
             cam = self.camera_stats
+            # In simulator: primary is simulated CSI
             primary = {
                 "slot": "PRIMARY",
                 "camera_type": cam.camera_type,
@@ -580,9 +581,10 @@ class JTZeroSimulator:
                 "fps_actual": cam.fps_actual,
                 "width": cam.width,
                 "height": cam.height,
-                "label": "Forward (VO)",
-                "device": "rpicam-vid" if cam.camera_type == "PI_CSI" else "simulated",
+                "label": "Simulated (VO)",
+                "device": "simulated",
                 "has_vo": True,
+                "csi_sensor": None,
             }
             secondary = dict(self._secondary_camera)
             secondary["has_vo"] = False

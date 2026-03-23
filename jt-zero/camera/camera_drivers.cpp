@@ -38,39 +38,62 @@ namespace jtzero {
 
 bool PiCSICamera::detect() {
 #ifdef __linux__
-    // Run rpicam-hello --list-cameras to check for CSI cameras
-    FILE* pipe = popen("rpicam-hello --list-cameras 2>&1", "r");
-    if (!pipe) return false;
-    
-    char line[512];
-    bool found = false;
-    while (fgets(line, sizeof(line), pipe)) {
-        // Look for sensor names in the output
-        if (strstr(line, "ov5647") || strstr(line, "imx219") || 
-            strstr(line, "imx477") || strstr(line, "imx708") ||
-            strstr(line, "ov9281") || strstr(line, "ov7251")) {
-            found = true;
-            // Trim newline
-            size_t len = strlen(line);
-            if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
-            std::printf("[Camera] CSI detected: %s\n", line);
-        }
-    }
-    int status = pclose(pipe);
-    
-    if (!found && status == 0) {
-        // rpicam-hello ran but no camera found
-        std::printf("[Camera] rpicam-hello ran but no CSI camera detected\n");
-    }
-    
-    return found;
+    return detect_sensor() != CSISensorType::UNKNOWN;
 #else
     return false;
 #endif
 }
 
+CSISensorType PiCSICamera::detect_sensor() {
+#ifdef __linux__
+    // Run rpicam-hello --list-cameras to identify CSI sensor
+    FILE* pipe = popen("rpicam-hello --list-cameras 2>&1", "r");
+    if (!pipe) return CSISensorType::UNKNOWN;
+    
+    char line[512];
+    CSISensorType found = CSISensorType::UNKNOWN;
+    while (fgets(line, sizeof(line), pipe)) {
+        // Match against known sensor chip IDs
+        for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
+            if (strstr(line, CSI_SENSORS[i].chip_id)) {
+                found = CSI_SENSORS[i].sensor;
+                // Trim newline
+                size_t len = strlen(line);
+                if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+                std::printf("[Camera] CSI detected: %s (%s)\n", 
+                           CSI_SENSORS[i].name, line);
+                break;
+            }
+        }
+        if (found != CSISensorType::UNKNOWN) break;
+    }
+    pclose(pipe);
+    
+    if (found == CSISensorType::UNKNOWN) {
+        std::printf("[Camera] rpicam-hello ran but no known CSI sensor detected\n");
+    }
+    
+    return found;
+#else
+    return CSISensorType::UNKNOWN;
+#endif
+}
+
 bool PiCSICamera::open() {
 #ifdef __linux__
+    // Detect sensor model before opening
+    sensor_type_ = detect_sensor();
+    if (sensor_type_ != CSISensorType::UNKNOWN) {
+        for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
+            if (CSI_SENSORS[i].sensor == sensor_type_) {
+                sensor_info_ = &CSI_SENSORS[i];
+                std::snprintf(sensor_name_, sizeof(sensor_name_), 
+                             "CSI_%s", CSI_SENSORS[i].name);
+                break;
+            }
+        }
+    }
+    
     // Use rpicam-vid to output raw YUV420 frames to stdout
     // 640x480 at 15fps, no preview window, indefinite duration
     const char* cmd = "rpicam-vid --width 640 --height 480 "
@@ -419,6 +442,48 @@ void USBCamera::close() {
 // Camera Auto-Detection in Pipeline
 // ═══════════════════════════════════════════════════════════
 
+// Static storage for USB device path
+char CameraPipeline::usb_device_buf_[16] = "/dev/video0";
+
+const char* CameraPipeline::find_usb_device() {
+#ifdef __linux__
+    // Scan /dev/video0..9 for USB cameras (skip CSI-owned devices)
+    for (int i = 0; i < 10; ++i) {
+        char path[16];
+        std::snprintf(path, sizeof(path), "/dev/video%d", i);
+        
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISCHR(st.st_mode)) continue;
+        
+        int fd = ::open(path, O_RDWR);
+        if (fd < 0) continue;
+        
+        struct v4l2_capability cap;
+        bool is_usb = false;
+        if (ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
+            // USB cameras use uvcvideo driver or have "usb" in bus_info
+            if (strstr(reinterpret_cast<const char*>(cap.driver), "uvc") ||
+                strstr(reinterpret_cast<const char*>(cap.bus_info), "usb")) {
+                // Must support VIDEO_CAPTURE (not metadata-only subdevices)
+                if (cap.device_caps & V4L2_CAP_VIDEO_CAPTURE) {
+                    is_usb = true;
+                    std::printf("[MultiCam] Found USB camera: %s @ %s (%s)\n",
+                               cap.card, path, cap.driver);
+                }
+            }
+        }
+        ::close(fd);
+        
+        if (is_usb) {
+            std::strncpy(usb_device_buf_, path, sizeof(usb_device_buf_) - 1);
+            usb_device_buf_[sizeof(usb_device_buf_) - 1] = '\0';
+            return usb_device_buf_;
+        }
+    }
+#endif
+    return nullptr;  // no USB camera found
+}
+
 CameraType CameraPipeline::auto_detect_camera() {
     // Try CSI first (highest quality on Pi)
     if (PiCSICamera::detect()) {
@@ -427,13 +492,70 @@ CameraType CameraPipeline::auto_detect_camera() {
     }
     
     // Try USB camera
-    if (USBCamera::detect()) {
-        std::printf("[CameraPipeline] Auto-detected: USB camera\n");
+    const char* usb_dev = find_usb_device();
+    if (usb_dev) {
+        std::printf("[CameraPipeline] Auto-detected: USB camera @ %s\n", usb_dev);
         return CameraType::USB;
     }
     
     std::printf("[CameraPipeline] No camera hardware — using simulation\n");
     return CameraType::SIMULATED;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Variant B: CSI priority, USB fallback
+// ═══════════════════════════════════════════════════════════
+
+bool CameraPipeline::initialize_multicam() {
+    // Step 1: Detect CSI sensor
+    CSISensorType csi_sensor = PiCSICamera::detect_sensor();
+    bool has_csi = (csi_sensor != CSISensorType::UNKNOWN);
+    
+    // Step 2: Scan for USB cameras
+    const char* usb_dev = find_usb_device();
+    bool has_usb = (usb_dev != nullptr);
+    
+    std::printf("\n[MultiCam] ══════════════════════════════════════\n");
+    std::printf("[MultiCam]   CSI: %s\n", has_csi ? csi_sensor_str(csi_sensor) : "not found");
+    std::printf("[MultiCam]   USB: %s\n", has_usb ? usb_dev : "not found");
+    
+    // Step 3: Apply Variant B priority
+    if (has_csi) {
+        // CSI = PRIMARY (VO)
+        std::printf("[MultiCam]   PRIMARY:   CSI %s (VO)\n", csi_sensor_str(csi_sensor));
+        if (!initialize(CameraType::PI_CSI)) {
+            std::printf("[MultiCam]   CSI open failed, trying USB fallback\n");
+            has_csi = false;
+            // Fall through to USB-only case
+        }
+    }
+    
+    if (!has_csi && has_usb) {
+        // Only USB → PRIMARY (VO) for testing
+        std::printf("[MultiCam]   PRIMARY:   USB %s (VO fallback)\n", usb_dev);
+        usb_camera_ = USBCamera(usb_dev);
+        if (!initialize(CameraType::USB)) {
+            std::printf("[MultiCam]   USB open failed, using simulation\n");
+            initialize(CameraType::SIMULATED);
+        }
+    } else if (!has_csi && !has_usb) {
+        // Nothing → SIMULATED
+        std::printf("[MultiCam]   PRIMARY:   SIMULATED (no cameras)\n");
+        initialize(CameraType::SIMULATED);
+    }
+    
+    // Step 4: If CSI is PRIMARY, USB becomes SECONDARY
+    if (has_csi && has_usb) {
+        std::printf("[MultiCam]   SECONDARY: USB %s (thermal/aux)\n", usb_dev);
+        init_secondary(usb_dev);
+    } else if (has_csi && !has_usb) {
+        std::printf("[MultiCam]   SECONDARY: none\n");
+    }
+    
+    std::printf("[MultiCam]   Active cameras: %d\n", camera_count());
+    std::printf("[MultiCam] ══════════════════════════════════════\n\n");
+    
+    return running_;
 }
 
 } // namespace jtzero
