@@ -217,6 +217,41 @@ async def get_engines():
 async def get_camera():
     return runtime.get_camera_stats()
 
+@app.get("/api/cameras")
+async def get_cameras():
+    """List all camera slots (primary + secondary)."""
+    if hasattr(runtime, 'get_cameras'):
+        return runtime.get_cameras()
+    # Fallback: only primary camera
+    cam = runtime.get_camera_stats()
+    return [{
+        "slot": "PRIMARY",
+        "camera_type": cam.get("camera_type", "SIMULATED"),
+        "camera_open": cam.get("camera_open", False),
+        "active": True,
+        "frame_count": cam.get("frame_count", 0),
+        "fps_actual": cam.get("fps_actual", 0),
+        "width": cam.get("width", 320),
+        "height": cam.get("height", 240),
+        "label": "Forward (VO)",
+        "has_vo": True,
+    }]
+
+@app.get("/api/camera/secondary/stats")
+async def get_secondary_camera_stats():
+    """Get secondary (thermal) camera stats."""
+    if hasattr(runtime, 'get_secondary_camera_stats'):
+        return runtime.get_secondary_camera_stats()
+    return {"error": "Secondary camera not available"}
+
+@app.post("/api/camera/secondary/capture")
+async def capture_secondary():
+    """Trigger on-demand capture from secondary (thermal) camera."""
+    if hasattr(runtime, 'capture_secondary'):
+        ok = runtime.capture_secondary()
+        return {"success": ok}
+    return {"success": False, "error": "Secondary camera not available"}
+
 @app.get("/api/camera/features")
 async def get_camera_features():
     """Get current VO feature positions."""
@@ -266,7 +301,7 @@ _frame_cache = {"png": b'', "frame_id": -1}
 
 @app.get("/api/camera/frame")
 async def get_camera_frame():
-    """Return latest camera frame as PNG image."""
+    """Return latest primary camera frame as PNG image."""
     if not hasattr(runtime, 'get_frame_data'):
         return Response(content=b'', media_type="image/png", status_code=204)
     
@@ -287,6 +322,36 @@ async def get_camera_frame():
     
     return Response(
         content=_frame_cache["png"],
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache", "X-Frame-Id": str(fid)}
+    )
+
+# Secondary (thermal) camera frame cache
+_secondary_frame_cache = {"png": b'', "frame_id": -1}
+
+@app.get("/api/camera/secondary/frame")
+async def get_secondary_camera_frame():
+    """Return latest secondary (thermal) camera frame as PNG image."""
+    if not hasattr(runtime, 'get_secondary_frame_data'):
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    frame_data = runtime.get_secondary_frame_data()
+    if not frame_data or len(frame_data) == 0:
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    # Secondary camera: 256x192 thermal
+    sec = runtime.get_secondary_camera_stats() if hasattr(runtime, 'get_secondary_camera_stats') else {}
+    fid = sec.get("frame_count", 0)
+    if fid != _secondary_frame_cache["frame_id"]:
+        w = sec.get("width", 256) or 256
+        h = sec.get("height", 192) or 192
+        expected = w * h
+        if len(frame_data) >= expected:
+            _secondary_frame_cache["png"] = _grayscale_to_png(frame_data[:expected], w, h)
+            _secondary_frame_cache["frame_id"] = fid
+    
+    return Response(
+        content=_secondary_frame_cache["png"],
         media_type="image/png",
         headers={"Cache-Control": "no-cache", "X-Frame-Id": str(fid)}
     )
@@ -364,6 +429,7 @@ async def websocket_telemetry(ws: WebSocket):
             sensor_modes = runtime.get_sensor_modes()
             perf = runtime.get_performance() if hasattr(runtime, 'get_performance') else None
             sys_metrics = get_system_metrics()
+            cameras = runtime.get_cameras() if hasattr(runtime, 'get_cameras') else []
             
             payload = {
                 "type": "telemetry",
@@ -378,6 +444,7 @@ async def websocket_telemetry(ws: WebSocket):
                 "features": features,
                 "sensor_modes": sensor_modes,
                 "system_metrics": sys_metrics,
+                "cameras": cameras,
             }
             
             if perf:

@@ -228,6 +228,22 @@ class JTZeroSimulator:
         self.camera_stats = CameraStats()
         self.mavlink_stats = MAVLinkStats()
         
+        # Multi-camera: secondary thermal camera (simulated)
+        self._secondary_camera = {
+            "slot": "SECONDARY",
+            "camera_type": "USB_THERMAL",
+            "camera_open": True,
+            "active": False,
+            "frame_count": 0,
+            "fps_actual": 0.0,
+            "width": 256,
+            "height": 192,
+            "label": "Thermal (Down)",
+            "device": "/dev/video2",
+            "last_capture_time": 0,
+        }
+        self._secondary_capturing = False
+        
     def start(self):
         if self.running:
             return
@@ -548,6 +564,67 @@ class JTZeroSimulator:
 
     def get_platforms(self) -> list:
         return self._platforms
+
+    # ── Multi-Camera Support ──
+
+    def get_cameras(self) -> list:
+        """Return info about all camera slots."""
+        with self._lock:
+            cam = self.camera_stats
+            primary = {
+                "slot": "PRIMARY",
+                "camera_type": cam.camera_type,
+                "camera_open": cam.camera_open,
+                "active": True,
+                "frame_count": cam.frame_count,
+                "fps_actual": cam.fps_actual,
+                "width": cam.width,
+                "height": cam.height,
+                "label": "Forward (VO)",
+                "device": "rpicam-vid" if cam.camera_type == "PI_CSI" else "simulated",
+                "has_vo": True,
+            }
+            secondary = dict(self._secondary_camera)
+            secondary["has_vo"] = False
+            return [primary, secondary]
+
+    def get_secondary_camera_stats(self) -> dict:
+        """Return secondary camera stats."""
+        with self._lock:
+            return dict(self._secondary_camera)
+
+    def capture_secondary(self) -> bool:
+        """Trigger on-demand capture from secondary camera."""
+        with self._lock:
+            self._secondary_capturing = True
+            self._secondary_camera["active"] = True
+            self._secondary_camera["frame_count"] += 1
+            self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+            self._secondary_camera["fps_actual"] = 1.0  # on-demand = ~1fps
+            return True
+
+    def get_secondary_frame_data(self) -> bytes:
+        """Return simulated thermal frame (256x192 grayscale)."""
+        w, h = 256, 192
+        data = bytearray(w * h)
+        t = time.time() - self._start_time
+        cx1 = 128 + 30 * math.sin(t * 0.1)
+        cy1 = 96 + 20 * math.cos(t * 0.15)
+        cx2 = 80 + 20 * math.cos(t * 0.2)
+        cy2 = 60 + 15 * math.sin(t * 0.12)
+        for y in range(h):
+            dy1_sq = (y - cy1) ** 2
+            dy2_sq = (y - cy2) ** 2
+            for x in range(w):
+                val = 40
+                d1 = math.sqrt((x - cx1)**2 + dy1_sq)
+                if d1 < 40:
+                    val += int(160 * (1.0 - d1 / 40.0))
+                d2 = math.sqrt((x - cx2)**2 + dy2_sq)
+                if d2 < 25:
+                    val += int(100 * (1.0 - d2 / 25.0))
+                data[y * w + x] = max(0, min(255, val + random.randint(-3, 3)))
+        return bytes(data)
 
     def _update_camera(self, t: float):
         cam = self.camera_stats

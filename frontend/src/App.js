@@ -7,6 +7,7 @@ import EventLog from './components/EventLog';
 import CommandPanel from './components/CommandPanel';
 import TelemetryCharts from './components/TelemetryCharts';
 import CameraPanel from './components/CameraPanel';
+import ThermalPanel from './components/ThermalPanel';
 import MAVLinkPanel from './components/MAVLinkPanel';
 import PerformancePanel from './components/PerformancePanel';
 import SimulatorPanel from './components/SimulatorPanel';
@@ -38,6 +39,7 @@ function App() {
   const [runtimeMode, setRuntimeMode] = useState('simulator');
   const [sensorModes, setSensorModes] = useState({});
   const [systemMetrics, setSystemMetrics] = useState(null);
+  const [cameras, setCameras] = useState([]);
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
 
@@ -62,6 +64,7 @@ function App() {
     if (d.runtime_mode) setRuntimeMode(d.runtime_mode);
     if (d.sensor_modes) setSensorModes(d.sensor_modes);
     if (d.system_metrics) setSystemMetrics(d.system_metrics);
+    if (d.cameras) setCameras(d.cameras);
 
     // Flush accumulated events
     if (eventsAccRef.current.length > 0) {
@@ -152,15 +155,13 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} cameras={cameras} />
         )}
         {activeTab === 'telemetry' && (
           <TelemetryTab state={state} history={history} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} threads={threads} sensorModes={sensorModes} />
         )}
         {activeTab === 'camera' && (
-          <div className="h-full p-3">
-            <CameraPanel camera={camera} features={features} />
-          </div>
+          <CameraTab camera={camera} features={features} cameras={cameras} />
         )}
         {activeTab === 'mavlink' && (
           <MavlinkTab mavlink={mavlink} />
@@ -190,7 +191,8 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes, cameras }) {
+  const secondaryCam = cameras?.find(c => c.slot === 'SECONDARY');
   return (
     <div className="h-full flex overflow-hidden">
       {/* Compact sidebar */}
@@ -214,6 +216,19 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
               </div>
             );
           })}
+        </Section>
+        <Section title="Cameras">
+          {cameras?.map((cam, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${cam.camera_open ? 'bg-emerald-500' : 'bg-slate-700'}`} />
+              <span className="text-[8px] text-slate-400 truncate">{cam.label || cam.slot}</span>
+            </div>
+          )) || (
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-[8px] text-slate-400">Primary</span>
+            </div>
+          )}
         </Section>
         <Section title="Threads">
           {threads?.map((t, i) => (
@@ -250,6 +265,73 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
         <div className="shrink-0 overflow-hidden" style={{ height: '150px' }}>
           <EventLog events={events} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════ */
+/* Camera Tab (multi-camera: Primary VO + Secondary Thermal)  */
+/* ═══════════════════════════════════════════════════════════ */
+
+function CameraTab({ camera, features, cameras }) {
+  const secondaryCam = cameras?.find(c => c.slot === 'SECONDARY');
+  const hasThermal = !!secondaryCam;
+  const [activeView, setActiveView] = useState('split');
+
+  return (
+    <div className="h-full flex flex-col p-3 gap-2">
+      {/* Camera tab header with view selector */}
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Multi-Camera</span>
+        <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
+          {cameras?.filter(c => c.camera_open).length || 1} / {cameras?.length || 1} Active
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          {['split', 'primary', 'thermal'].map(view => (
+            <button
+              key={view}
+              onClick={() => setActiveView(view)}
+              className={`text-[8px] font-bold uppercase px-2 py-1 rounded-sm border transition-colors ${
+                activeView === view
+                  ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                  : 'text-slate-500 border-slate-700/30 hover:text-slate-400'
+              }`}
+              data-testid={`camera-view-${view}`}
+            >
+              {view === 'split' ? 'Split' : view === 'primary' ? 'VO Only' : 'Thermal'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Camera views */}
+      <div className="flex-1 min-h-0">
+        {activeView === 'split' ? (
+          <div className="grid grid-cols-2 gap-2 h-full">
+            <CameraPanel camera={camera} features={features} />
+            {hasThermal ? (
+              <ThermalPanel secondary={secondaryCam} />
+            ) : (
+              <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
+                <div className="text-center">
+                  <p className="text-[10px] text-slate-500">No thermal camera detected</p>
+                  <p className="text-[8px] text-slate-600 mt-1">Connect USB thermal to /dev/video2</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : activeView === 'primary' ? (
+          <CameraPanel camera={camera} features={features} />
+        ) : (
+          hasThermal ? (
+            <ThermalPanel secondary={secondaryCam} />
+          ) : (
+            <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
+              <p className="text-[10px] text-slate-500">No thermal camera detected</p>
+            </div>
+          )
+        )}
       </div>
     </div>
   );

@@ -928,6 +928,114 @@ void CameraPipeline::shutdown() {
         active_camera_->close();
         active_camera_ = nullptr;
     }
+    // Shutdown secondary camera if open
+    if (secondary_camera_) {
+        secondary_camera_->close();
+        secondary_camera_ = nullptr;
+        secondary_open_ = false;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Multi-Camera: Secondary (Thermal) Camera
+// ═══════════════════════════════════════════════════════════
+
+bool CameraPipeline::init_secondary(const char* device) {
+#ifdef __linux__
+    // Try USB camera on specified device (typically /dev/video2 for thermal)
+    secondary_usb_ = USBCamera(device);
+    if (USBCamera::detect(device)) {
+        if (secondary_usb_.open()) {
+            secondary_camera_ = &secondary_usb_;
+            secondary_open_ = true;
+            secondary_frame_count_ = 0;
+            secondary_start_us_ = now_us();
+            std::printf("[MultiCam] Secondary (thermal) opened: %s\n", device);
+            return true;
+        }
+        std::printf("[MultiCam] Secondary USB detected but failed to open: %s\n", device);
+    }
+#endif
+    // Fallback to simulated secondary for testing
+    if (secondary_sim_.open()) {
+        secondary_camera_ = &secondary_sim_;
+        secondary_open_ = true;
+        secondary_frame_count_ = 0;
+        secondary_start_us_ = now_us();
+        std::printf("[MultiCam] Secondary using simulation (no thermal camera found)\n");
+        return true;
+    }
+    return false;
+}
+
+bool CameraPipeline::capture_secondary() {
+    if (!secondary_camera_ || !secondary_open_) return false;
+    
+    if (secondary_camera_->capture(secondary_frame_)) {
+        secondary_frame_count_++;
+        return true;
+    }
+    return false;
+}
+
+CameraSlotInfo CameraPipeline::get_slot_info(CameraSlot slot) const {
+    CameraSlotInfo info;
+    info.slot = slot;
+    
+    if (slot == CameraSlot::PRIMARY) {
+        if (active_camera_) {
+            info.camera_type = active_camera_->type();
+            info.camera_open = active_camera_->is_open();
+            info.active = running_;
+            info.frame_count = frame_count_;
+            info.width = current_frame_.info.width;
+            info.height = current_frame_.info.height;
+            
+            uint64_t elapsed_us = now_us() - start_time_us_;
+            if (elapsed_us > 0 && frame_count_ > 1) {
+                info.fps_actual = static_cast<float>(frame_count_) * 1'000'000.0f / 
+                                 static_cast<float>(elapsed_us);
+            }
+            std::strncpy(info.label, "Forward (VO)", 31);
+            info.label[31] = '\0';
+            if (active_camera_->type() == CameraType::PI_CSI) {
+                std::strncpy(info.device, "rpicam-vid", 63);
+            } else if (active_camera_->type() == CameraType::USB) {
+                std::strncpy(info.device, "/dev/video0", 63);
+            } else {
+                std::strncpy(info.device, "simulated", 63);
+            }
+            info.device[63] = '\0';
+        }
+    } else if (slot == CameraSlot::SECONDARY) {
+        if (secondary_camera_) {
+            info.camera_type = secondary_camera_->type();
+            info.camera_open = secondary_open_;
+            info.active = secondary_open_;
+            info.frame_count = secondary_frame_count_;
+            info.width = secondary_frame_.info.width;
+            info.height = secondary_frame_.info.height;
+            
+            uint64_t elapsed_us = now_us() - secondary_start_us_;
+            if (elapsed_us > 0 && secondary_frame_count_ > 1) {
+                info.fps_actual = static_cast<float>(secondary_frame_count_) * 1'000'000.0f / 
+                                 static_cast<float>(elapsed_us);
+            }
+            std::strncpy(info.label, "Thermal (Down)", 31);
+            info.label[31] = '\0';
+            std::strncpy(info.device, "/dev/video2", 63);
+            info.device[63] = '\0';
+        }
+    }
+    
+    return info;
+}
+
+uint8_t CameraPipeline::camera_count() const {
+    uint8_t count = 0;
+    if (active_camera_ && active_camera_->is_open()) count++;
+    if (secondary_camera_ && secondary_open_) count++;
+    return count;
 }
 
 CameraPipelineStats CameraPipeline::get_stats() const {

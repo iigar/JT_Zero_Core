@@ -210,3 +210,86 @@ class NativeRuntime:
             self._active_vo_mode = mode_id
             return True
         return False
+
+    # ── Multi-Camera Support ──
+    # Until C++ bindings are recompiled on the Pi with multi-camera,
+    # provide managed state for secondary (thermal) camera.
+
+    def __init_multicam(self):
+        """Lazy-init multi-camera state."""
+        if not hasattr(self, '_secondary_camera'):
+            self._secondary_camera = {
+                "slot": "SECONDARY",
+                "camera_type": "USB_THERMAL",
+                "camera_open": True,
+                "active": False,
+                "frame_count": 0,
+                "fps_actual": 0.0,
+                "width": 256,
+                "height": 192,
+                "label": "Thermal (Down)",
+                "device": "/dev/video2",
+                "last_capture_time": 0,
+            }
+
+    def get_cameras(self) -> list:
+        """Return info about all camera slots."""
+        self.__init_multicam()
+        cam = self.get_camera_stats()
+        primary = {
+            "slot": "PRIMARY",
+            "camera_type": cam.get("camera_type", "SIM"),
+            "camera_open": cam.get("camera_open", False),
+            "active": True,
+            "frame_count": cam.get("frame_count", 0),
+            "fps_actual": cam.get("fps_actual", 0),
+            "width": cam.get("width", 320),
+            "height": cam.get("height", 240),
+            "label": "Forward (VO)",
+            "device": "rpicam-vid" if cam.get("camera_type") == "PI_CSI" else "/dev/video0",
+            "has_vo": True,
+        }
+        secondary = dict(self._secondary_camera)
+        secondary["has_vo"] = False
+        return [primary, secondary]
+
+    def get_secondary_camera_stats(self) -> dict:
+        self.__init_multicam()
+        return dict(self._secondary_camera)
+
+    def capture_secondary(self) -> bool:
+        self.__init_multicam()
+        self._secondary_camera["active"] = True
+        self._secondary_camera["frame_count"] += 1
+        self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+        self._secondary_camera["fps_actual"] = 1.0
+        return True
+
+    def get_secondary_frame_data(self) -> bytes:
+        """Generate simulated thermal frame (256x192 grayscale)."""
+        import math, random, struct
+        w, h = 256, 192
+        t = time.time() - self._start_time
+        # Vectorized-style: precompute hotspot centers
+        cx1 = 128 + 30 * math.sin(t * 0.1)
+        cy1 = 96 + 20 * math.cos(t * 0.15)
+        cx2 = 80 + 20 * math.cos(t * 0.2)
+        cy2 = 60 + 15 * math.sin(t * 0.12)
+        data = bytearray(w * h)
+        for y in range(h):
+            dy1 = y - cy1
+            dy2 = y - cy2
+            dy1_sq = dy1 * dy1
+            dy2_sq = dy2 * dy2
+            for x in range(w):
+                val = 40
+                dx1 = x - cx1
+                d1 = math.sqrt(dx1*dx1 + dy1_sq)
+                if d1 < 40:
+                    val += int(160 * (1.0 - d1 / 40.0))
+                dx2 = x - cx2
+                d2 = math.sqrt(dx2*dx2 + dy2_sq)
+                if d2 < 25:
+                    val += int(100 * (1.0 - d2 / 25.0))
+                data[y * w + x] = max(0, min(255, val + random.randint(-3, 3)))
+        return bytes(data)

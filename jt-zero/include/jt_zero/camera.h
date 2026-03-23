@@ -459,7 +459,40 @@ private:
     static float compute_mad(float* arr, int n, float median);
 };
 
-// ─── Camera Pipeline (combines Camera + VO) ──────────────
+// ─── Camera Slot (multi-camera support) ──────────────────
+// PRIMARY = main camera for VO (CSI forward)
+// SECONDARY = auxiliary camera (USB thermal downward), on-demand
+
+enum class CameraSlot : uint8_t {
+    PRIMARY   = 0,   // CSI forward — always active, feeds VO
+    SECONDARY = 1,   // USB thermal downward — on-demand capture
+    MAX_SLOTS = 2
+};
+
+inline const char* camera_slot_str(CameraSlot s) {
+    switch(s) {
+        case CameraSlot::PRIMARY:   return "PRIMARY";
+        case CameraSlot::SECONDARY: return "SECONDARY";
+        default: return "UNKNOWN";
+    }
+}
+
+// ─── Camera Slot Info ────────────────────────────────────
+
+struct CameraSlotInfo {
+    CameraSlot  slot{CameraSlot::PRIMARY};
+    CameraType  camera_type{CameraType::NONE};
+    bool        camera_open{false};
+    bool        active{false};       // currently capturing
+    uint32_t    frame_count{0};
+    float       fps_actual{0};
+    uint16_t    width{0};
+    uint16_t    height{0};
+    char        label[32]{};         // "Forward CSI", "Thermal Down"
+    char        device[64]{};        // "/dev/video0", "rpicam-vid"
+};
+
+// ─── Camera Pipeline Stats (extended for multi-camera) ───
 
 struct CameraPipelineStats {
     CameraType camera_type{CameraType::NONE};
@@ -536,6 +569,24 @@ public:
     
     // Set yaw hint for hover correction (call from runtime)
     void set_yaw_hint(float yaw_rad);
+    
+    // ── Multi-camera support ──
+    
+    // Initialize secondary camera (USB thermal) on specified device
+    bool init_secondary(const char* device = "/dev/video2");
+    
+    // Capture one frame from secondary camera (on-demand)
+    bool capture_secondary();
+    
+    // Get secondary camera frame buffer (last captured)
+    const FrameBuffer& secondary_frame() const { return secondary_frame_; }
+    
+    // Get info about all camera slots
+    CameraSlotInfo get_slot_info(CameraSlot slot) const;
+    uint8_t camera_count() const;
+    
+    // Check if secondary camera is available
+    bool has_secondary() const { return secondary_camera_ != nullptr && secondary_open_; }
 
 private:
     SimulatedCamera sim_camera_;
@@ -551,6 +602,15 @@ private:
     bool running_{false};
     uint32_t frame_count_{0};
     uint64_t start_time_us_{0};
+    
+    // ── Secondary camera (thermal) ──
+    USBCamera       secondary_usb_{"/dev/video2"};
+    SimulatedCamera secondary_sim_;         // fallback for testing
+    CameraSource*   secondary_camera_{nullptr};
+    FrameBuffer     secondary_frame_;
+    bool            secondary_open_{false};
+    uint32_t        secondary_frame_count_{0};
+    uint64_t        secondary_start_us_{0};
 };
 
 } // namespace jtzero
