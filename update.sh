@@ -126,7 +126,11 @@ if [ -d "$FRONTEND_DIR" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
             else
                 $PKG_BUILD 2>&1 | tail -3
             fi
-            echo -e "  ${GREEN}Frontend збілдено!${NC}"
+            # Копіювати білд в backend/static/ (звідки server.py обслуговує)
+            echo -e "  Копіювання в backend/static/..."
+            rm -rf "$BACKEND_DIR/static"
+            cp -r build "$BACKEND_DIR/static"
+            echo -e "  ${GREEN}Frontend збілдено та скопійовано!${NC}"
         else
             echo -e "  ${GREEN}Frontend актуальний, пропуск${NC}"
         fi
