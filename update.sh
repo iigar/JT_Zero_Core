@@ -86,33 +86,50 @@ echo -e "${CYAN}[4/5]${NC} Збірка фронтенду..."
 if [ -d "$FRONTEND_DIR" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
     cd "$FRONTEND_DIR"
     
-    # Встановити залежності якщо node_modules відсутній
-    if [ ! -d "node_modules" ]; then
-        echo -e "  Встановлення залежностей (yarn install)..."
-        yarn install --production=false 2>&1 | tail -3
-    fi
-    
-    # Перевірити чи потрібно перебілдити
-    BUILD_NEEDED=false
-    if [ ! -d "build" ]; then
-        BUILD_NEEDED=true
-    elif [ "$(find src/ -newer build/index.html -print -quit 2>/dev/null)" ]; then
-        BUILD_NEEDED=true
-    fi
-    
-    if [ "$BUILD_NEEDED" = true ]; then
-        echo -e "  yarn build..."
-        # На Pi фронтенд обслуговується з того ж сервера — використовуємо порожній URL
-        export REACT_APP_BACKEND_URL=""
-        # На Pi Zero обмежити RAM для Node
-        if [ "$RAM_MB" -lt 600 ]; then
-            NODE_OPTIONS="--max-old-space-size=256" yarn build 2>&1 | tail -3
-        else
-            yarn build 2>&1 | tail -3
-        fi
-        echo -e "  ${GREEN}Frontend збілдено!${NC}"
+    # Визначити пакетний менеджер (yarn або npm)
+    if command -v yarn &>/dev/null; then
+        PKG="yarn"
+        PKG_INSTALL="yarn install --production=false"
+        PKG_BUILD="yarn build"
+    elif command -v npm &>/dev/null; then
+        PKG="npm"
+        PKG_INSTALL="npm install"
+        PKG_BUILD="npm run build"
     else
-        echo -e "  ${GREEN}Frontend актуальний, пропуск${NC}"
+        echo -e "  ${RED}Ні yarn ні npm не знайдено!${NC}"
+        echo -e "  Встановіть: ${BOLD}sudo apt install nodejs npm${NC}"
+        PKG=""
+    fi
+    
+    if [ -n "$PKG" ]; then
+        # Встановити залежності якщо node_modules відсутній
+        if [ ! -d "node_modules" ]; then
+            echo -e "  Встановлення залежностей ($PKG)..."
+            $PKG_INSTALL 2>&1 | tail -3
+        fi
+        
+        # Перевірити чи потрібно перебілдити
+        BUILD_NEEDED=false
+        if [ ! -d "build" ]; then
+            BUILD_NEEDED=true
+        elif [ "$(find src/ -newer build/index.html -print -quit 2>/dev/null)" ]; then
+            BUILD_NEEDED=true
+        fi
+        
+        if [ "$BUILD_NEEDED" = true ]; then
+            echo -e "  $PKG build..."
+            # На Pi фронтенд обслуговується з того ж сервера — порожній URL
+            export REACT_APP_BACKEND_URL=""
+            # На Pi Zero обмежити RAM для Node
+            if [ "$RAM_MB" -lt 600 ]; then
+                NODE_OPTIONS="--max-old-space-size=256" $PKG_BUILD 2>&1 | tail -3
+            else
+                $PKG_BUILD 2>&1 | tail -3
+            fi
+            echo -e "  ${GREEN}Frontend збілдено!${NC}"
+        else
+            echo -e "  ${GREEN}Frontend актуальний, пропуск${NC}"
+        fi
     fi
 else
     echo -e "  ${YELLOW}Фронтенд не знайдено${NC}"
