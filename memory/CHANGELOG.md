@@ -1,5 +1,23 @@
 # JT-Zero Changelog
 
+## 2026-03-23 — EKF3 Integration, Automation, UI Refresh
+
+### EKF3 ExternalNav
+- ArduPilot EKF3 confirmed using JT-Zero VO data: "EKF3 IMU0/1 is using external nav data"
+- VISION_POSITION_ESTIMATE @ 25Hz + ODOMETRY @ 25Hz flowing to FC
+- Verified on both Pi Zero 2W and Pi 4B + Matek H743
+
+### Automation Scripts
+- `setup.sh` — full first-install automation (deps, UART/I2C/SPI, build, systemd, reboot)
+- `update.sh` — quick update with auto Pi model detection (make -j2 for Zero, -j4 for Pi 4/5)
+
+### UI Refresh
+- Rounded corners: 12px on all panels (was sharp/2px)
+- Font scaling: ~1.5x larger globally (8px→10, 9→11, 10→12, 11→13, xs→13px)
+- Colors lightened 20-30%: borders #1E293B→#2D3A4E, accent #00F0FF→#33CCFF, bg #050505→#080A0F
+- MAVLink panel expanded: bytes TX/RX, heartbeats_received, CRC errors, transport info, vision message counters, FC telemetry (att/imu/gps/batt), detected msg_ids
+- Events tab: scroll-lock — log stays at user's scroll position, "Scroll to bottom" button appears
+
 ## 2026-03-22 — MAVLink Parser Overhaul (P0 Fix)
 
 ### Bug Fixes

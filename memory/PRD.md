@@ -49,16 +49,10 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - **Convergence Tolerance**: Relaxed from 0.01 to 0.05 px for thermal images
 - **Verified on Pi 4 + Caddx thermal**: Det:180, Track:16-59, Inliers:100%, Valid:True, Conf:0.18-0.29
 - **MAVLink Parser Overhaul (P0)**: CRC validation, relaxed heartbeat filter, default 921600 baud, v2 signing support, diagnostic counters (bytes/heartbeats/CRC errors), raw hex dump
-
-### In Progress
-- **MAVLink Heartbeat Parsing (P0)**: ✅ RESOLVED
-  - Root causes found and fixed:
-    1. Baud rate mismatch: FC at 115200, code defaulted to 921600 → implemented auto-baud detection
-    2. Heartbeat filter rejected type=0 (GENERIC) → now accepts all vehicle types
-    3. No CRC validation → added CRC-16/MCRF4XX validation
-    4. MAVLink v2 zero truncation → min payload len reduced from 7 to 5
-    5. v2 signing flag not handled → frame length correction added
-  - **Verified on Pi Zero 2W + Matek H743**: CONNECTED, 4 heartbeats, ArduPilot QUADROTOR, att+imu telemetry flowing
+- **MAVLink Heartbeat Parsing (P0)**: RESOLVED — auto-baud detection (CRC-validated), relaxed heartbeat filter, verified on Pi Zero 2W + Matek H743
+- **EKF3 ExternalNav Integration**: ArduPilot EKF3 using JT-Zero VO data (confirmed: "EKF3 IMU0/1 is using external nav data")
+- **Automation Scripts**: setup.sh (first install), update.sh (quick update with Pi model auto-detection)
+- **UI Refresh**: Rounded corners (12px), ~1.5x larger fonts, lighter colors, expanded MAVLink panel, Events scroll-lock
 
 ## Backlog
 

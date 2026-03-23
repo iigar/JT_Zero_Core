@@ -300,6 +300,9 @@ print(f\"FC: {d['fc_type']} {d['fc_firmware']}\")
 - Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Valid:True, Conf:0.18-0.29
 - **MAVLink parser overhaul:** CRC validation, CRC-validated auto-baud, relaxed heartbeat filter, v2 signing support, diagnostic counters
 - **MAVLink FC integration verified:** Pi Zero 2W + Matek H743 @ 115200 — CONNECTED, HB OK, VISION_POSITION_ESTIMATE @ 25Hz confirmed in MAVLink Inspector
+- **EKF3 ExternalNav confirmed:** Both IMU0 and IMU1 using external nav data from JT-Zero
+- **Automation scripts:** setup.sh (first install), update.sh (quick update with auto Pi model detection)
+- **UI refresh:** Rounded corners (12px), ~1.5x larger fonts, 20-30% lighter colors (#2D3A4E borders, #33CCFF accents), expanded MAVLink panel (bytes/heartbeats/CRC/transport/msg_ids/telemetry/vision counters), Events tab scroll-lock (doesn't auto-scroll when user scrolls up)
 - Test reports: /app/test_reports/iteration_1-15.json
 
 ---
@@ -347,6 +350,8 @@ EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 | `jt-zero/README.md` | Project overview, capabilities, architecture |
 | `jt-zero/FC_CONNECTION.md` | Flight controller wiring (Matek, SpeedyBee, Pixhawk, Cube) |
 | `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
+| `setup.sh` | Auto-install script for fresh Pi OS (deps, UART, build, systemd) |
+| `update.sh` | Quick update script (auto-detect Pi model, git pull, build, restart) |
 | `CLAUDE.md` | Technical reference for agents (this file) |
 | `memory/PRD.md` | Product requirements and backlog |
 | `memory/CHANGELOG.md` | Implementation changelog with dates |
