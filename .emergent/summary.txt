@@ -1,122 +1,430 @@
 <analysis>**original_problem_statement**: 
-The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi (supporting Zero 2 W and Pi 4). The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard. The primary goal is a robust Visual Odometry (VO) system capable of long-range navigation without GPS, resilient to drift. Recent requests focused on fixing MAVLink heartbeat parsing, automating the deployment process via shell scripts, and refreshing the React UI.
+The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi (supporting Zero 2 W and Pi 4). The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard. The primary goal is a robust Visual Odometry (VO) system capable of long-range navigation without GPS. Recent requests focused on implementing a multi-camera architecture (CSI for VO, USB for Thermal) and fixing deployment scripts for the physical Pi hardware.
 
 **User's preferred language**: **Ukrainian**. (INSTRUCTION: The next agent MUST respond to the user in Ukrainian only).
 
 **what currently exists?** 
-A full-stack robotics application with a C++ core, FastAPI backend, and React frontend. The MAVLink communication with the flight controller (Matek H743) is fully operational; the C++ core now features auto-baud detection with CRC validation, and ArduPilot's EKF3 successfully consumes the Visual Odometry (VO) telemetry. Automation scripts ( and ) have been added for streamlined installation on Pi hardware. The React frontend has a refreshed UI featuring a lighter theme, rounded panels, 2x scaled fonts, scroll-locked event logs, and extended MAVLink diagnostics. 
+A full-stack robotics application with a C++ core, FastAPI backend, and React frontend. The system successfully fuses Visual Odometry (VO) telemetry into ArduPilot's EKF3. A multi-camera architecture has been implemented where the system auto-detects up to 7 types of CSI cameras (Primary/VO) and USB cameras (Secondary/Thermal fallback). The React dashboard features a split-view mode with a dedicated Thermal Panel (Iron palette false-color). The deployment script () has been heavily refactored to compile the C++ core, build the React frontend via npm/yarn, and correctly serve it through FastAPI's static folder on the physical Pi. Extensive documentation on VO logic has been added to .
 
 **Last working item**: 
-    - Last item agent was working: Running a final deployment health check using the Deployer Agent after finishing the UI redesign and updating the documentation (, , ).
-    - Status: COMPLETED
+    - Last item agent was working: Updating  with a detailed, beginner-friendly explanation of the Visual Odometry (VO) system and troubleshooting an Reading package lists...
+Building dependency tree...
+Reading state information...
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded. 404 error the user encountered on their Pi Zero 2W.
+    - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use? Deployer agent was used for health check. Frontend screenshot tool was used for the UI redesign. 
-    - User Testing Done: Y
+    - Which testing method agent to use? NA (Documentation update and providing bash commands for the user's physical machine).
+    - User Testing Done: N (Waiting for the user to run the provided Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
+Get:2 https://cloudfront.debian.net/debian bookworm-updates InRelease [55.4 kB]
+Get:3 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease [3005 B]
+Get:4 https://cloudfront.debian.net/debian-security bookworm-security InRelease [48.0 kB]
+Get:5 https://deb.nodesource.com/node_20.x nodistro InRelease [12.1 kB]
+Get:6 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0/multiverse amd64 Packages [109 kB]
+Get:7 https://cloudfront.debian.net/debian-security bookworm-security/main arm64 Packages [290 kB]
+Get:8 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0/multiverse arm64 Packages [107 kB]
+Get:9 https://deb.nodesource.com/node_20.x nodistro/main arm64 Packages [13.7 kB]
+Fetched 638 kB in 1s (797 kB/s)
+Reading package lists...
+Building dependency tree...
+Reading state information...
+11 packages can be upgraded. Run 'apt list --upgradable' to see them. command on their Pi Zero 2W).
 
 **All Pending/In progress Issue list**: 
-None. The critical MAVLink heartbeat parsing and EKF3 integration blockers were resolved.
+  Issue 1: Frontend build failing on Pi Zero 2W due to missing Node.js/npm (404 apt error)
+     - Attempted fixes: Agent provided Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
+Hit:2 https://cloudfront.debian.net/debian bookworm-updates InRelease
+Hit:3 https://cloudfront.debian.net/debian-security bookworm-security InRelease
+Hit:4 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease
+Hit:5 https://deb.nodesource.com/node_20.x nodistro InRelease
+Reading package lists...
+Building dependency tree...
+Reading state information...
+11 packages can be upgraded. Run 'apt list --upgradable' to see them. followed by Reading package lists...
+Building dependency tree...
+Reading state information...
+Some packages could not be installed. This may mean that you have
+requested an impossible situation or if you are using the unstable
+distribution that some required packages have not yet been created
+or been moved out of Incoming.
+The following information may help to resolve the situation:
+
+The following packages have unmet dependencies:
+ nodejs : Conflicts: npm
+ npm : Depends: node-agent-base but it is not going to be installed
+       Depends: node-archy but it is not going to be installed
+       Depends: node-cacache (>= 17) but it is not going to be installed
+       Depends: node-chalk (>= 5.1.2-2~) but it is not going to be installed
+       Depends: node-cli-table3
+       Depends: node-columnify but it is not going to be installed
+       Depends: node-cssesc
+       Depends: node-debug but it is not going to be installed
+       Depends: node-emoji-regex
+       Depends: node-gyp but it is not going to be installed
+       Depends: node-http-proxy-agent
+       Depends: node-https-proxy-agent but it is not going to be installed
+       Depends: node-mkdirp but it is not going to be installed
+       Depends: node-ms but it is not going to be installed
+       Depends: node-nopt but it is not going to be installed
+       Depends: node-normalize-package-data but it is not going to be installed
+       Depends: node-npm-bundled but it is not going to be installed
+       Depends: node-npm-normalize-package-bin
+       Depends: node-npm-package-arg (>= 10) but it is not going to be installed
+       Depends: node-npmlog but it is not going to be installed
+       Depends: node-postcss-selector-parser
+       Depends: node-read-package-json but it is not going to be installed
+       Depends: node-rimraf but it is not going to be installed
+       Depends: node-semver but it is not going to be installed
+       Depends: node-string-width but it is not going to be installed
+       Depends: node-strip-ansi but it is not going to be installed
+       Depends: node-tar but it is not going to be installed
+       Depends: node-validate-npm-package-name but it is not going to be installed
+       Depends: node-which but it is not going to be installed
+       Depends: nodejs:any
+       Recommends: node-tap but it is not going to be installed.
+     - Next debug checklist: Ask the user if the  command worked. If the Debian repo is still failing, provide instructions to install Node via NodeSource PPA or NVM.
+     - Why fix this issue and what will be achieved with the fix? Without npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm, the user cannot build the new React dashboard locally on their Pi Zero 2W via .
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? NA (Hardware-specific setup issue).
+     - Blocked on other issue: None.
 
 **In progress Task List**: 
-None. All immediate automation and UI tasks were completed.
+None.
 
 **Upcoming and Future Tasks**: 
     Upcoming Tasks:
-    - (P1) Multi-camera integration setup: The user wants to integrate 3 cameras simultaneously: CSI (Forward, for VO navigation), USB thermal (Downward, for thermal scanning), and Analog (FPV for the pilot).
+    - None immediately requested.
     Future Tasks:
     - (P2) IP camera (RTSP) support.
     - (P2) ARM NEON optimization for the C++ core.
     - (P2) Autonomous Mission Planning UI/features.
     - (P2) Calibration of focal length for USB thermal cameras.
     - (P3) MAVLink diagnostics page addition in the React Dashboard.
+    - (P3) Settings -> Camera Config panel (Discussed but deferred as auto-detect covers 99% of use cases).
 
 **Completed work in this session**:
-- Implemented MAVLink auto-baud detection with CRC validation and fixed parsing zero-truncation () (DONE)
-- Validated ArduPilot EKF3 fusion with JT-Zero Visual Odometry () (DONE)
-- Created deployment automation scripts:  and  which auto-detect Pi RAM and set compilation flags (DONE)
-- Frontend UI Redesign: Increased font sizes (2x), lightened colors (20-30%), added rounded corners globally via CSS () (DONE)
-- Added extra parameters to the MAVLink panel () (DONE)
-- Implemented auto-scroll lock when a user scrolls up in the Event Log () (DONE)
-- Updated documentation (, ) and created  (DONE)
+- Multi-camera software architecture (CSI + USB Thermal) across C++, Backend, and Frontend (, , ) (DONE)
+- Thermal capture feature with Iron palette false-color mapping () (DONE)
+- CSI Priority + USB Fallback logic (Variant B) with 7 CSI sensor auto-detection () (DONE)
+- Fixed deployment script  to correctly build React frontend and copy it to  for FastAPI serving (DONE)
+- Updated  with comprehensive Visual Odometry (VO) explanations and use-cases (DONE)
 
 **Earlier issues found/mentioned but not fixed**:
 None
 
 **Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: None
-  - Recurrence count: 0
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: Git object corruption ( empty files) occurred on the user's physical Pi due to power loss/SD card issues. Fixed by having the user clear empty objects () and doing a hard reset.
+  - Recurrence count: 1
+  - Status: RESOLVED (Keep in mind the user's Pi filesystem might be unstable).
 
 **Code Architecture**:
 
 
 **Key Technical Concepts**:
-- **Visual Odometry (VO):** Real-time VO processing feeding into ArduPilot EKF3 as ExternalNav.
-- **Hardware Integration:** Raw UART parsing for MAVLink with auto-baud rate detection and CRC validation.  for CSI cameras.
-- **Remote Hardware Testing:** Execution happens on physical Pi Zero 2W / Pi 4B hardware. User pulls via  which handles CMake and hot reloading.
-- **Frontend Architecture:** React dashboard consumes high-frequency telemetry without a database.
+- **Visual Odometry (VO):** Real-time VO processing feeding into ArduPilot EKF3. Prioritizes CSI cameras.
+- **Hardware Integration:**  for CSI cameras,  for USB Thermal. Auto-detection prioritizes CSI for slot 1, USB for slot 2.
+- **Deployment via update.sh:** Builds C++, builds React via npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm, and copies the React build to FastAPI's static folder on the Pi.
+- **Frontend Architecture:** React dashboard consumes high-frequency telemetry via WebSockets and HTTP image blobs.
 
 **key DB schema**:
-- None. (Zero-database architecture; entirely in-memory state and event streaming).
+- None. (Zero-database architecture).
 
 **changes in tech stack**:
-- None
+- Added /npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm as a strict requirement on the physical Raspberry Pi to facilitate local frontend builds via .
 
 **All files of reference**:
--  (Contains the working auto-baud and CRC validation logic).
-- ,  (Created to automate the user's compilation process on the Pi).
-- , ,  (Updated for the UI redesign).
-- , ,  (Documentation reflecting current state).
+-  (Contains the CSI sensor auto-detection and fallback logic).
+-  (Updated with multi-camera slots and structs).
+-  &  (Updated to stream secondary camera data).
+-  (New file for thermal rendering).
+-  (Refactored to handle React builds).
+-  (Updated with VO documentation).
 
 **Areas that need refactoring**:
-- None immediately. UI CSS scaling was applied globally to avoid individually refactoring every component.
+- None.
 
 **key api endpoints**:
--  (Telemetry and link stats, heavily used for debugging via curl).
--  (Video frame streaming).
+-  (Returns active camera slots, resolutions, and types).
+-  (Thermal capture endpoint).
 
 **Critical Info for New Agent**:
-- **Hardware-In-The-Loop:** The user is working on physical hardware (Pi Zero 2W, Matek H743). If making C++ backend changes, you must direct the user to use [0;36m[1mJT-Zero Update[0m
+- **Hardware-In-The-Loop:** The user works on physical hardware (Pi Zero 2W, Pi 4B). Code written here is simulated. Changes to C++ or Frontend require instructing the user to run [0;36m[1mJT-Zero Update[0m
   Pi:    Unknown
   RAM:   32046MB, Cores: 8, Jobs: 8
 
-[0;36m[1/4][0m git pull... to compile and test on their drone.
-- **Git branches:** The user's Pi was experiencing detached HEAD/branch mismatches. The correct current working branch that holds all fixes is .
-- **MAVLink Status:** The system is successfully injecting  at 25Hz into ArduPilot at 115200 baud. Do not alter the MAVLink parsing logic unless explicitly requested.
-- **Upcoming Goal:** The user plans to attach 3 cameras (CSI for VO, USB for Thermal, Analog for FPV). This will likely involve extending  or the frontend to handle multiple video streams.
+[0;36m[1/5][0m git pull...
+[1;33m  git pull не вдався, продовжуємо...[0m
+[0;36m[2/5][0m Збірка C++ (make -j8)...
+make: /usr/bin/cmake: No such file or directory
+make: *** [Makefile:580: cmake_check_build_system] Error 127
+[0;36m[3/5][0m Копіювання модуля...
+  [0;32mOK[0m
+[0;36m[4/5][0m Збірка фронтенду...
+  yarn build...
+  https://cra.link/deployment
+
+Done in 33.64s.
+  Копіювання в backend/static/...
+  [0;32mFrontend збілдено та скопійовано![0m
+[0;36m[5/5][0m Перезапуск сервісу... on their Pi.
+- **FastAPI Static Serving Fix:**  was heavily modified because FastAPI serves the React app from . The script now runs  inside  and copies the output to . Do not revert this behavior.
+- **Camera Priority:** CSI cameras are hard-coded to be the Primary VO source if detected. USB cameras act as secondary/thermal unless no CSI camera is present, in which case USB becomes Primary.
 
 **documents and test reports created in this job**:
 - 
 - 
 - 
+- 
 
 **Last 10 User Messages and any pending HUMAN messages**:
-1. User provides ArduPilot logs confirming EKF3 is successfully using the external nav (VO) data.
-2. User asks if three specific OV5647 CSI camera models will work, and if switching to a Pi 4B will function identically.
-3. User requests a UI overhaul: rounded windows, 2x font sizes, 20-30% lighter colors, more MAVLink panel parameters, and disabling auto-scroll in the Event log when manually scrolled up. Also reports a git branch error on their Pi 4B.
-4. Agent provides the git commands to fix the branch error, then implements the UI changes and takes a screenshot.
-5. User says продовжуй (continue).
-6. Agent takes another screenshot to verify UI fixes.
-7. User says онови CLAUDE.md (update CLAUDE.md).
-8. Agent updates , , and  and finishes.
-9. User pastes a minor git terminal error .
-10. Agent explains the user needs to  first. User then requests: Call Deployer Agent and Run Health Check to Check for Readiness for Deployment.
+1. User provides a screenshot showing the UI successfully updated on their Pi 4.
+2. User asks to implement Variant B where CSI is strictly the primary camera and USB is secondary, regardless of setup.
+3. Agent implements Variant B with auto-detection for 7 CSI sensors. Takes screenshot.
+4. User agrees that a dedicated Camera Config panel might be over-engineering. Asks if front-facing thermal makes sense.
+5. User asks for a beginner-friendly, step-by-step explanation of how the Visual Odometry system works and its use cases.
+6. Agent provides a massive, detailed explanation of VO, algorithms used, and drone flight phases.
+7. User asks to add this explanation to the project documentation ().
+8. User pastes a terminal log showing they tried to run [0;36m[1mJT-Zero Update[0m
+  Pi:    Unknown
+  RAM:   32046MB, Cores: 8, Jobs: 8
+
+[0;36m[1/5][0m git pull...
+[1;33m  git pull не вдався, продовжуємо...[0m
+[0;36m[2/5][0m Збірка C++ (make -j8)...
+make: /usr/bin/cmake: No such file or directory
+make: *** [Makefile:580: cmake_check_build_system] Error 127
+[0;36m[3/5][0m Копіювання модуля...
+  [0;32mOK[0m
+[0;36m[4/5][0m Збірка фронтенду...
+  [0;32mFrontend актуальний, пропуск[0m
+[0;36m[5/5][0m Перезапуск сервісу... on their Pi Zero 2W, but it failed at the npm <command>
+
+Usage:
+
+npm install        install all the dependencies in your project
+npm install <foo>  add the <foo> dependency to your project
+npm test           run this project's tests
+npm run <foo>      run the script named <foo>
+npm <command> -h   quick help on <command>
+npm -l             display usage info for all commands
+npm help <term>    search for help on <term>
+npm help npm       more involved overview
+
+All commands:
+
+    access, adduser, audit, bugs, cache, ci, completion,
+    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
+    edit, exec, explain, explore, find-dupes, fund, get, help,
+    help-search, hook, init, install, install-ci-test,
+    install-test, link, ll, login, logout, ls, org, outdated,
+    owner, pack, ping, pkg, prefix, profile, prune, publish,
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
+
+Specify configs in the ini-formatted file:
+    /root/.npmrc
+or on the command line via: npm <command> --key=value
+
+More configuration info: npm help config
+Configuration fields: npm help 7 config
+
+npm@10.8.2 /usr/lib/node_modules/npm install step with a  apt error for .
+9. Agent updates  as requested. Agent provides the user with bash commands (Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
+Hit:2 https://cloudfront.debian.net/debian bookworm-updates InRelease
+Hit:3 https://deb.nodesource.com/node_20.x nodistro InRelease
+Hit:4 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease
+Hit:5 https://cloudfront.debian.net/debian-security bookworm-security InRelease
+Reading package lists...
+Building dependency tree...
+Reading state information...
+11 packages can be upgraded. Run 'apt list --upgradable' to see them. and Reading package lists...
+Building dependency tree...
+Reading state information...
+Some packages could not be installed. This may mean that you have
+requested an impossible situation or if you are using the unstable
+distribution that some required packages have not yet been created
+or been moved out of Incoming.
+The following information may help to resolve the situation:
+
+The following packages have unmet dependencies:
+ nodejs : Conflicts: npm
+ npm : Depends: node-agent-base but it is not going to be installed
+       Depends: node-archy but it is not going to be installed
+       Depends: node-cacache (>= 17) but it is not going to be installed
+       Depends: node-chalk (>= 5.1.2-2~) but it is not going to be installed
+       Depends: node-cli-table3
+       Depends: node-columnify but it is not going to be installed
+       Depends: node-cssesc
+       Depends: node-debug but it is not going to be installed
+       Depends: node-emoji-regex
+       Depends: node-gyp but it is not going to be installed
+       Depends: node-http-proxy-agent
+       Depends: node-https-proxy-agent but it is not going to be installed
+       Depends: node-mkdirp but it is not going to be installed
+       Depends: node-ms but it is not going to be installed
+       Depends: node-nopt but it is not going to be installed
+       Depends: node-normalize-package-data but it is not going to be installed
+       Depends: node-npm-bundled but it is not going to be installed
+       Depends: node-npm-normalize-package-bin
+       Depends: node-npm-package-arg (>= 10) but it is not going to be installed
+       Depends: node-npmlog but it is not going to be installed
+       Depends: node-postcss-selector-parser
+       Depends: node-read-package-json but it is not going to be installed
+       Depends: node-rimraf but it is not going to be installed
+       Depends: node-semver but it is not going to be installed
+       Depends: node-string-width but it is not going to be installed
+       Depends: node-strip-ansi but it is not going to be installed
+       Depends: node-tar but it is not going to be installed
+       Depends: node-validate-npm-package-name but it is not going to be installed
+       Depends: node-which but it is not going to be installed
+       Depends: nodejs:any
+       Recommends: node-tap but it is not going to be installed) to fix their Pi Zero 2W environment.
+*Pending:* Waiting for the user to confirm if the apt 2.6.1 (arm64)
+Usage: apt [options] command
+
+apt is a commandline package manager and provides commands for
+searching and managing as well as querying information about packages.
+It provides the same functionality as the specialized APT tools,
+like apt-get and apt-cache, but enables options more suitable for
+interactive use by default.
+
+Most used commands:
+  list - list packages based on package names
+  search - search in package descriptions
+  show - show package details
+  install - install packages
+  reinstall - reinstall packages
+  remove - remove packages
+  autoremove - automatically remove all unused packages
+  update - update list of available packages
+  upgrade - upgrade the system by installing/upgrading packages
+  full-upgrade - upgrade the system by removing/installing/upgrading packages
+  edit-sources - edit the source information file
+  satisfy - satisfy dependency strings
+
+See apt(8) for more information about the available commands.
+Configuration options and syntax is detailed in apt.conf(5).
+Information about how to configure sources can be found in sources.list(5).
+Package and version choices can be expressed via apt_preferences(5).
+Security details are available in apt-secure(8).
+                                        This APT has Super Cow Powers. fix worked on their Pi Zero 2W.
 
 **Project Health Check:**
-- Broken: None
-- Mocked: None
-- Deployment Status: Ready (Deployer Agent verified codebase compiles and passes health checks).
+- Broken: None (Locally in Emergent). Pi Zero 2W environment is temporarily blocked by an OS package manager issue.
+- Mocked: Thermal camera data is mocked in the .
 
 **3rd Party Integrations**:
-- None (Local hardware and direct IP/UART integrations only).
+- None. Local hardware and UART/CSI/USB integrations only.
 
 **Testing status**:
-- Testing agent used after significant changes: NO (Deployer agent used for health check; manual hardware testing by user).
-- Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: None
-- Known regressions: None
+- Testing agent used after significant changes: YES (iteration 16 passed 100%).
+- Troubleshoot agent used after agent stuck in loop: NO.
+- Test files created: 
+- Known regressions: None.
 
 **Credentials to test flow:**
 - N/A
 
 **What agent forgot to execute**:
-- Nothing overlooked. All requested features, fixes, shell scripts, UI modifications, and deployer checks were executed successfully.</analysis>
+- Nothing. All requirements and document updates were fulfilled.</analysis>
