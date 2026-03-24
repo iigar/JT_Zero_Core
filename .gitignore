@@ -26,3 +26,7 @@ Thumbs.db
 
 # Pre-built frontend served by FastAPI — MUST be in git
 !backend/static/
+-e 
+# Environment files
+*.env
+*.env.*
