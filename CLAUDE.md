@@ -47,22 +47,162 @@ On startup, the runtime probes hardware interfaces:
 
 ## Camera Pipeline
 
-**Priority cascade:** PI_CSI → USB → Simulation
+### Multi-Camera Architecture (Variant B)
 
-| Source    | Interface        | Implementation                              |
-|-----------|------------------|---------------------------------------------|
-| PI_CSI    | /dev/video0      | V4L2 + libcamera, MMAP                      |
-| USB       | /dev/videoN      | V4L2 MMAP streaming, YUYV → grayscale       |
-| Simulated | In-memory        | Test pattern with features                   |
+**Priority logic:** CSI has priority, USB is fallback.
 
-**Visual Odometry:**
-- **Detection:** FAST corner detector (primary) + Shi-Tomasi grid corner detector (fallback for thermal/low-contrast)
-- **Tracking:** Lucas-Kanade optical flow with **bilinear interpolation** and **Sobel 3x3 gradients**
-- **Resolution:** Camera-native (480x320 for Caddx thermal, 640x480 for CSI)
+| CSI | USB | Result |
+|-----|-----|--------|
+| Found | Found | CSI=PRIMARY(VO), USB=SECONDARY(thermal/aux) |
+| Found | None | CSI=PRIMARY(VO), no SECONDARY |
+| None | Found | USB=PRIMARY(VO fallback for testing) |
+| None | None | SIMULATED=PRIMARY(VO) |
 
-**Platform/VO Mode architecture:**
-- **Platform:** Auto-detected at startup (Pi Zero 2W / Pi 4 / Pi 5) — sets camera resolution
-- **VO Mode:** User-selectable (Light / Balanced / Performance) — adjusts algorithmic parameters on-the-fly
+**Detection:** `initialize_multicam()` in `camera_pipeline.cpp`:
+1. `PiCSICamera::detect_sensor()` — parses `rpicam-hello --list-cameras`, identifies sensor chip ID
+2. `CameraPipeline::find_usb_device()` — scans `/dev/video0..9`, checks V4L2 capabilities for `uvcvideo` driver
+3. Assigns slots based on priority table above
+
+**Supported CSI Sensors (auto-detected):**
+
+| Sensor | Camera | Resolution | FOV | AF | Global Shutter |
+|--------|--------|-----------|------|-----|----------------|
+| OV5647 | Pi Camera v1 | 5MP | 62° | No | No |
+| IMX219 | Pi Camera v2 | 8MP | 62° | No | No |
+| IMX477 | Pi HQ Camera | 12.3MP | lens-dependent | No | No |
+| IMX708 | Pi Camera v3 | 12MP | 66° | Yes | No |
+| OV9281 | OV9281 | 1MP | 80° | No | Yes (ideal for VO) |
+| IMX296 | Pi GS Camera | 1.6MP | 49° | No | Yes |
+| OV64A40 | Arducam 64MP | 64MP | 84° | Yes | No |
+
+**Camera streams:**
+
+| Camera | Interface | Role | Stream Mode | Pi Load |
+|--------|-----------|------|-------------|---------|
+| CSI (Forward) | CSI → GPU/ISP via libcamera | Visual Odometry | Always (15fps) | Low (GPU ISP) |
+| USB Thermal (Down) | USB 2.0, V4L2 MMAP | Thermal scanning | On-demand | Low (256x192) |
+| Analog FPV | Analog VTX | Pilot view | Bypasses Pi | None |
+
+**API endpoints for multi-camera:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/cameras | List all camera slots (PRIMARY, SECONDARY) |
+| GET | /api/camera | Primary (VO) camera stats |
+| GET | /api/camera/frame | Primary camera frame (PNG) |
+| GET | /api/camera/secondary/stats | Thermal camera stats |
+| POST | /api/camera/secondary/capture | Trigger on-demand thermal capture |
+| GET | /api/camera/secondary/frame | Thermal camera frame (PNG) |
+
+---
+
+## How Visual Odometry Works — Full Flight Cycle
+
+### What is Visual Odometry (VO)?
+
+VO measures drone displacement by comparing consecutive camera frames. The camera looks down at the ground and tracks how features (rocks, bushes, paths) move between frames — if a rock shifts 10 pixels left in the frame, the drone moved right by X meters.
+
+### Full Flight Cycle
+
+```
+TAKEOFF → CLIMB → ROUTE → RETURN (RTL) → LANDING
+```
+
+#### Step 1: Takeoff
+
+The system initializes:
+1. C++ Runtime starts 8 threads
+2. Camera Thread (T6) opens CSI camera (rpicam-vid)
+3. MAVLink Thread (T5) connects to flight controller (Matek H743)
+4. VO initializes: first frame stored as "previous"
+5. Position = (0, 0, 0) — launch point = reference origin
+
+#### Step 2: VO Computation (every 66ms, 15fps)
+
+```
+Frame N-1 (previous)          Frame N (current)
+┌─────────────────────┐       ┌─────────────────────┐
+│    ·  rock           │       │         ·  rock      │
+│  ·  bush             │  →→→  │       ·  bush        │
+│        · trail       │       │             · trail   │
+└─────────────────────┘       └─────────────────────┘
+                                 
+  Rock moved by (dx, dy) pixels →
+  Drone moved by (-dx, -dy) × scale
+```
+
+**Algorithm steps:**
+
+**a) Feature Detection (FAST-9 + Shi-Tomasi)**
+- FAST-9: checks 16 pixels in a circle around each point, fast
+- Shi-Tomasi: fallback for low-contrast (thermal) — computes structure tensor eigenvalues
+
+**b) Feature Tracking (Lucas-Kanade Optical Flow)**
+- Takes points from frame N-1, finds them in frame N
+- Uses Sobel 3x3 gradients and iterative sub-pixel refinement with bilinear interpolation
+
+**c) Outlier Filtering (Median + MAD)**
+- Computes median displacement of all tracked points
+- MAD (Median Absolute Deviation) — rejects outliers (>2σ from median)
+- Remaining = "inliers" — reliable points
+
+**d) Real-World Displacement**
+```
+dx_meters = dx_pixels × altitude / focal_length
+dy_meters = dy_pixels × altitude / focal_length
+```
+
+**e) Kalman Filter**
+- Smooths velocity, removes noise
+- Cross-validates with IMU (accelerometer)
+- If VO and IMU diverge → reduce confidence
+
+**f) Sending to ArduPilot**
+```
+VISION_POSITION_ESTIMATE @ 25Hz → MAVLink → Matek H743 → EKF3
+```
+- ArduPilot EKF3 fuses: GPS + VO + IMU + Baro + Compass
+- VO provides position estimate with covariance (lower confidence → higher covariance)
+
+#### Step 3: Navigation
+
+ArduPilot knows current position (from EKF3) and target waypoint — the difference = movement vector → motor commands. **VO helps when GPS is degraded** (urban canyons, forests, interference).
+
+#### Step 4: Return To Launch (RTL)
+
+EKF3 knows full position from combined GPS + VO + IMU + Baro → computes vector home.
+
+**Drift:** VO accumulates error over time (~±5m in 10min flight). GPS corrects absolute position, VO provides precise inter-frame displacement, EKF3 optimally fuses both.
+
+#### Step 5: Landing
+
+- Rangefinder provides precise altitude <2m
+- VO becomes very accurate near ground (more features, smaller scale)
+- Precision landing: VO can track landing pad markers
+
+---
+
+## Why VO When GPS Exists?
+
+| Situation | GPS | VO |
+|-----------|-----|-----|
+| Open field | Works | Works |
+| Between buildings | Signal reflection (±10m) | Works perfectly |
+| Under bridge/canopy | Disappears | Works |
+| Dense forest | Poor (±5m) | Works |
+| Indoor (warehouse) | No signal | **Only navigation source** |
+| GPS jamming (warfare) | Disabled | **Only navigation source** |
+
+---
+
+## Use Cases
+
+1. **Precision Agriculture** — thermal camera down, VO for precise field positioning, thermal map shows moisture/disease/irrigation zones
+2. **Search & Rescue (SAR)** — night flight with thermal, VO navigation without GPS (forest, mountains, caves), autonomous grid search
+3. **Infrastructure Inspection** — bridges, power lines, towers: VO holds stable position for photos; thermal finds overheated contacts, heat leaks; solar panels: finds defective cells
+4. **Indoor Navigation** — warehouses, mines: GPS=0, VO is the only position source; autonomous building mapping; warehouse inventory
+5. **Cartography & 3D Modeling** — series of images with precise VO coordinates → photogrammetry → 3D model
+6. **Security & Patrol** — autonomous perimeter route; thermal detects people/animals; VO for stable flight between buildings
 
 ---
 
@@ -103,22 +243,27 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 
 ## API Endpoints
 
-| Method | Path                     | Description                          |
-|--------|--------------------------|--------------------------------------|
-| GET    | /api/health              | Runtime status, mode, build info     |
-| GET    | /api/state               | Full system state (attitude, sensors)|
-| GET    | /api/hardware            | Hardware detection status            |
-| GET    | /api/events              | Recent event log                     |
-| GET    | /api/telemetry/history   | Time-series telemetry data           |
-| GET    | /api/threads             | Thread stats (Hz, CPU, iterations)   |
-| GET    | /api/engines             | Engine stats (events, reflexes, etc) |
-| GET    | /api/camera              | Camera & VO pipeline stats           |
-| GET    | /api/mavlink             | MAVLink connection & message stats   |
-| GET    | /api/performance         | CPU, memory, latency breakdown       |
-| GET    | /api/simulator/config    | Current simulator parameters         |
-| POST   | /api/simulator/config    | Update simulator parameters          |
-| POST   | /api/command             | Send command (arm, takeoff, land)    |
-| WS     | /api/ws/telemetry        | Real-time telemetry @ 10Hz           |
+| Method | Path                         | Description                          |
+|--------|------------------------------|--------------------------------------|
+| GET    | /api/health                  | Runtime status, mode, build info     |
+| GET    | /api/state                   | Full system state (attitude, sensors)|
+| GET    | /api/hardware                | Hardware detection status            |
+| GET    | /api/events                  | Recent event log                     |
+| GET    | /api/telemetry/history       | Time-series telemetry data           |
+| GET    | /api/threads                 | Thread stats (Hz, CPU, iterations)   |
+| GET    | /api/engines                 | Engine stats (events, reflexes, etc) |
+| GET    | /api/camera                  | Primary camera & VO pipeline stats   |
+| GET    | /api/camera/frame            | Primary camera frame (PNG)           |
+| GET    | /api/cameras                 | List all camera slots                |
+| GET    | /api/camera/secondary/stats  | Secondary (thermal) camera stats     |
+| POST   | /api/camera/secondary/capture| Trigger on-demand thermal capture    |
+| GET    | /api/camera/secondary/frame  | Secondary camera frame (PNG)         |
+| GET    | /api/mavlink                 | MAVLink connection & message stats   |
+| GET    | /api/performance             | CPU, memory, latency breakdown       |
+| GET    | /api/simulator/config        | Current simulator parameters         |
+| POST   | /api/simulator/config        | Update simulator parameters          |
+| POST   | /api/command                 | Send command (arm, takeoff, land)    |
+| WS     | /api/ws/telemetry            | Real-time telemetry @ 10Hz           |
 
 ### /api/mavlink Response Fields
 ```json
