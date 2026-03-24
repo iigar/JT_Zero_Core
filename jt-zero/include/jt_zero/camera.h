@@ -230,6 +230,7 @@ enum class CSISensorType : uint8_t {
     OV9281     = 5,   // Global shutter — 1MP, ideal for VO
     IMX296     = 6,   // Pi GS Camera — 1.6MP, global shutter
     OV64A40    = 7,   // Arducam 64MP
+    GENERIC    = 99,  // Unknown CSI sensor detected by rpicam-hello
 };
 
 struct CSISensorInfo {
@@ -259,6 +260,7 @@ inline const char* csi_sensor_str(CSISensorType s) {
     for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
         if (CSI_SENSORS[i].sensor == s) return CSI_SENSORS[i].name;
     }
+    if (s == CSISensorType::GENERIC) return "Generic CSI";
     return "Unknown CSI";
 }
 
@@ -327,11 +329,15 @@ public:
     CameraType type() const override { return CameraType::PI_CSI; }
     const char* name() const override { return sensor_name_; }
     
-    // Auto-detect: check if rpicam-hello can see a camera
+    // Auto-detect: check if rpicam-hello can see ANY camera
     static bool detect();
     
     // Detect and identify the CSI sensor model
+    // Returns known type or GENERIC (with raw name stored)
     static CSISensorType detect_sensor();
+    
+    // Raw sensor chip string from rpicam-hello (e.g. "imx283")
+    static const char* detected_raw_name() { return raw_sensor_name_; }
     
     // Get detected sensor info (valid after detect_sensor())
     CSISensorType sensor_type() const { return sensor_type_; }
@@ -347,6 +353,7 @@ private:
     CSISensorType sensor_type_{CSISensorType::UNKNOWN};
     const CSISensorInfo* sensor_info_{nullptr};
     char sensor_name_[48]{"PiCSI_rpicam"};
+    static char raw_sensor_name_[64];  // raw chip id from rpicam-hello
 };
 
 // ─── USB Camera (via V4L2) ───────────────────────────────
@@ -584,6 +591,9 @@ struct CameraPipelineStats {
     float      hover_duration{0};
     float      yaw_drift_rate{0};
     float      corrected_yaw{0};
+    // CSI sensor info
+    uint8_t    csi_sensor_type{0};     // CSISensorType enum
+    char       csi_sensor_name[48]{};  // human-readable or raw chip id
 };
 
 class CameraPipeline {

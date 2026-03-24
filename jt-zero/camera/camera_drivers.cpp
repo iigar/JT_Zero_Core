@@ -30,6 +30,9 @@
 
 namespace jtzero {
 
+// Static storage
+char PiCSICamera::raw_sensor_name_[64] = "";
+
 // ═══════════════════════════════════════════════════════════
 // Pi CSI Camera (via rpicam-vid subprocess)
 // On modern Pi OS (Bookworm/Trixie), libcamera owns the camera.
@@ -52,11 +55,14 @@ CSISensorType PiCSICamera::detect_sensor() {
     
     char line[512];
     CSISensorType found = CSISensorType::UNKNOWN;
+    raw_sensor_name_[0] = '\0';
+    
     while (fgets(line, sizeof(line), pipe)) {
-        // Match against known sensor chip IDs
+        // First: try matching known sensors
         for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
             if (strstr(line, CSI_SENSORS[i].chip_id)) {
                 found = CSI_SENSORS[i].sensor;
+                std::strncpy(raw_sensor_name_, CSI_SENSORS[i].chip_id, sizeof(raw_sensor_name_) - 1);
                 // Trim newline
                 size_t len = strlen(line);
                 if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
@@ -66,11 +72,26 @@ CSISensorType PiCSICamera::detect_sensor() {
             }
         }
         if (found != CSISensorType::UNKNOWN) break;
+        
+        // Second: parse rpicam-hello format for unknown sensors
+        // Format: "0 : sensor_name [WxH ...]" or "1 : sensor_name [WxH ...]"
+        int cam_idx = -1;
+        char sensor_str[64] = "";
+        if (std::sscanf(line, " %d : %63s", &cam_idx, sensor_str) == 2 && cam_idx >= 0) {
+            // Found a camera line but sensor is not in known list
+            found = CSISensorType::GENERIC;
+            std::strncpy(raw_sensor_name_, sensor_str, sizeof(raw_sensor_name_) - 1);
+            raw_sensor_name_[sizeof(raw_sensor_name_) - 1] = '\0';
+            size_t len = strlen(line);
+            if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+            std::printf("[Camera] CSI detected (generic): %s (%s)\n", sensor_str, line);
+            break;
+        }
     }
     pclose(pipe);
     
     if (found == CSISensorType::UNKNOWN) {
-        std::printf("[Camera] rpicam-hello ran but no known CSI sensor detected\n");
+        std::printf("[Camera] rpicam-hello ran but no CSI sensor detected\n");
     }
     
     return found;
@@ -84,12 +105,18 @@ bool PiCSICamera::open() {
     // Detect sensor model before opening
     sensor_type_ = detect_sensor();
     if (sensor_type_ != CSISensorType::UNKNOWN) {
-        for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
-            if (CSI_SENSORS[i].sensor == sensor_type_) {
-                sensor_info_ = &CSI_SENSORS[i];
-                std::snprintf(sensor_name_, sizeof(sensor_name_), 
-                             "CSI_%s", CSI_SENSORS[i].name);
-                break;
+        if (sensor_type_ == CSISensorType::GENERIC) {
+            // Unknown sensor — use raw name from rpicam-hello
+            std::snprintf(sensor_name_, sizeof(sensor_name_), "CSI_%s", raw_sensor_name_);
+            sensor_info_ = nullptr;
+        } else {
+            for (size_t i = 0; i < NUM_CSI_SENSORS; ++i) {
+                if (CSI_SENSORS[i].sensor == sensor_type_) {
+                    sensor_info_ = &CSI_SENSORS[i];
+                    std::snprintf(sensor_name_, sizeof(sensor_name_), 
+                                 "CSI_%s", CSI_SENSORS[i].name);
+                    break;
+                }
             }
         }
     }
@@ -516,13 +543,17 @@ bool CameraPipeline::initialize_multicam() {
     bool has_usb = (usb_dev != nullptr);
     
     std::printf("\n[MultiCam] ══════════════════════════════════════\n");
-    std::printf("[MultiCam]   CSI: %s\n", has_csi ? csi_sensor_str(csi_sensor) : "not found");
+    std::printf("[MultiCam]   CSI: %s\n", has_csi ? 
+        (csi_sensor == CSISensorType::GENERIC ? PiCSICamera::detected_raw_name() : csi_sensor_str(csi_sensor))
+        : "not found");
     std::printf("[MultiCam]   USB: %s\n", has_usb ? usb_dev : "not found");
     
     // Step 3: Apply Variant B priority
     if (has_csi) {
         // CSI = PRIMARY (VO)
-        std::printf("[MultiCam]   PRIMARY:   CSI %s (VO)\n", csi_sensor_str(csi_sensor));
+        const char* csi_label = (csi_sensor == CSISensorType::GENERIC) ? 
+            PiCSICamera::detected_raw_name() : csi_sensor_str(csi_sensor);
+        std::printf("[MultiCam]   PRIMARY:   CSI %s (VO)\n", csi_label);
         if (!initialize(CameraType::PI_CSI)) {
             std::printf("[MultiCam]   CSI open failed, trying USB fallback\n");
             has_csi = false;

@@ -237,10 +237,14 @@ class NativeRuntime:
         self.__init_multicam()
         cam = self.get_camera_stats()
         cam_type = cam.get("camera_type", "SIM")
+        csi_name = cam.get("csi_sensor_name", "")
         
         # Determine primary label based on camera type
         if cam_type == "PI_CSI":
-            label = f"{self._csi_sensor_name} (VO)" if hasattr(self, '_csi_sensor_name') else "CSI (VO)"
+            if csi_name and csi_name != "none":
+                label = f"{csi_name} (VO)"
+            else:
+                label = "CSI (VO)"
             device = "rpicam-vid"
         elif cam_type == "USB":
             label = "USB (VO fallback)"
@@ -261,7 +265,7 @@ class NativeRuntime:
             "label": label,
             "device": device,
             "has_vo": True,
-            "csi_sensor": getattr(self, '_csi_sensor_name', None),
+            "csi_sensor": csi_name if csi_name and csi_name != "none" else None,
         }
         secondary = dict(self._secondary_camera)
         secondary["has_vo"] = False

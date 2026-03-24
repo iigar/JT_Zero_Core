@@ -1103,6 +1103,17 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.yaw_drift_rate = vo_.hover_state().yaw_drift_rate;
     stats.corrected_yaw  = vo_.hover_state().corrected_yaw;
     
+    // CSI sensor info
+    stats.csi_sensor_type = static_cast<uint8_t>(csi_camera_.sensor_type());
+    if (csi_camera_.sensor_type() == CSISensorType::GENERIC) {
+        std::strncpy(stats.csi_sensor_name, PiCSICamera::detected_raw_name(), 47);
+    } else if (csi_camera_.sensor_info()) {
+        std::strncpy(stats.csi_sensor_name, csi_camera_.sensor_info()->name, 47);
+    } else {
+        std::strncpy(stats.csi_sensor_name, "none", 47);
+    }
+    stats.csi_sensor_name[47] = '\0';
+    
     return stats;
 }
 

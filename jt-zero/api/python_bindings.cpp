@@ -174,7 +174,10 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "hover_detected"_a = cs.hover_detected,
         "hover_duration"_a = cs.hover_duration,
         "yaw_drift_rate"_a = cs.yaw_drift_rate,
-        "corrected_yaw"_a = cs.corrected_yaw
+        "corrected_yaw"_a = cs.corrected_yaw,
+        // CSI sensor info
+        "csi_sensor_type"_a = static_cast<int>(cs.csi_sensor_type),
+        "csi_sensor_name"_a = std::string(cs.csi_sensor_name)
     );
 }
 
