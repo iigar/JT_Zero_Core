@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture implemented** — CSI forward (VO) + USB thermal (downward, on-demand).
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture implemented** — CSI forward (VO) + USB thermal (downward, on-demand). **8 known CSI sensors + GENERIC fallback** for any libcamera-compatible camera. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js.
 
 ---
 
@@ -74,6 +74,9 @@ On startup, the runtime probes hardware interfaces:
 | OV9281 | OV9281 | 1MP | 80° | No | Yes (ideal for VO) |
 | IMX296 | Pi GS Camera | 1.6MP | 49° | No | Yes |
 | OV64A40 | Arducam 64MP | 64MP | 84° | Yes | No |
+| IMX290 | IMX290 STARVIS | 2MP (1920x1080) | 82° | No | No (excellent low-light) |
+
+**GENERIC fallback:** If `rpicam-hello` detects a CSI camera not in the list above, JT-Zero assigns it as `GENERIC` and still uses it for VO with default focal length (from PlatformConfig). The raw sensor name from rpicam-hello is stored and displayed in the dashboard.
 
 **Camera streams:**
 
@@ -395,6 +398,9 @@ jt-zero/
 
 ## Build & Deploy
 
+### Frontend (CI/CD — автоматично):
+Frontend білдиться автоматично через **GitHub Actions** при пуші змін до `frontend/`. Результат комітиться в `backend/static/`. На Pi **Node.js/npm не потрібен**.
+
 ### Автоматичне встановлення (рекомендовано):
 ```bash
 cd ~/jt-zero
@@ -402,6 +408,13 @@ chmod +x setup.sh
 ./setup.sh
 ```
 Скрипт автоматично: встановить пакети, увімкне UART/I2C/SPI/Camera, збілдить C++, створить venv, налаштує systemd, перезавантажить Pi. ~10-15 хвилин.
+
+### Оновлення:
+```bash
+cd ~/jt-zero
+git pull && ./update.sh
+```
+`update.sh` логіка: pre-built frontend (з git) → локальний білд (якщо є npm) → повідомлення про помилку.
 
 ### На Pi (ручна збірка):
 ```bash
@@ -430,6 +443,15 @@ print(f\"FC: {d['fc_type']} {d['fc_firmware']}\")
 "
 ```
 
+### Нова камера (не в списку підтримуваних):
+Якщо `rpicam-hello --list-cameras` показує `No cameras available`:
+1. Вимкніть автодетект: `camera_auto_detect=0` в `/boot/firmware/config.txt`
+2. Додайте overlay: `dtoverlay=<sensor_name>,clock-frequency=37125000`
+3. `sudo reboot`
+4. Перевірте: `rpicam-hello --list-cameras`
+
+JT-Zero автоматично визначить будь-яку камеру яку бачить libcamera.
+
 ---
 
 ## Session History
@@ -447,8 +469,14 @@ print(f\"FC: {d['fc_type']} {d['fc_firmware']}\")
 - **MAVLink FC integration verified:** Pi Zero 2W + Matek H743 @ 115200 — CONNECTED, HB OK, VISION_POSITION_ESTIMATE @ 25Hz confirmed in MAVLink Inspector
 - **EKF3 ExternalNav confirmed:** Both IMU0 and IMU1 using external nav data from JT-Zero
 - **Automation scripts:** setup.sh (first install), update.sh (quick update with auto Pi model detection)
-- **UI refresh:** Rounded corners (12px), ~1.5x larger fonts, 20-30% lighter colors (#2D3A4E borders, #33CCFF accents), expanded MAVLink panel (bytes/heartbeats/CRC/transport/msg_ids/telemetry/vision counters), Events tab scroll-lock (doesn't auto-scroll when user scrolls up)
-- Test reports: /app/test_reports/iteration_1-15.json
+- **UI refresh:** Rounded corners (12px), ~1.5x larger fonts, 20-30% lighter colors, expanded MAVLink panel, Events tab scroll-lock
+- **Multi-camera architecture:** CSI (PRIMARY/VO) + USB thermal (SECONDARY/on-demand), Variant B priority logic, 7 known CSI sensors + auto-detection
+- **GENERIC CSI fallback:** Unknown sensors detected via rpicam-hello output parsing, raw name stored and displayed
+- **IMX290 STARVIS added:** 8th known sensor (2MP, 1920x1080, FOV 82°, focal 400px)
+- **GitHub Actions CI/CD:** `.github/workflows/build-frontend.yml` auto-builds React on push, commits to `backend/static/`
+- **update.sh refactor:** Pre-built frontend from git (priority) → local npm build (fallback) → error message. Pi Zero no longer needs Node.js/npm
+- **Verified on Pi Zero 2W:** IMX290 STARVIS detected, VO active (DET:180, TRACK:44, INL:44, Valid:True), MAVLink CONNECTED
+- Test reports: /app/test_reports/iteration_1-16.json
 
 ---
 
@@ -496,7 +524,10 @@ EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 | `jt-zero/FC_CONNECTION.md` | Flight controller wiring (Matek, SpeedyBee, Pixhawk, Cube) |
 | `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
 | `setup.sh` | Auto-install script for fresh Pi OS (deps, UART, build, systemd) |
-| `update.sh` | Quick update script (auto-detect Pi model, git pull, build, restart) |
+| `update.sh` | Smart update (pre-built frontend priority, auto Pi model detection) |
+| `.github/workflows/build-frontend.yml` | GitHub Actions CI/CD for React frontend |
+| `commands_reminder.md` | Quick reference: all git, Pi, API, diagnostic commands |
 | `CLAUDE.md` | Technical reference for agents (this file) |
+| `ABOUT_PROJECT.md` | Project overview in Ukrainian (for humans) |
 | `memory/PRD.md` | Product requirements and backlog |
 | `memory/CHANGELOG.md` | Implementation changelog with dates |

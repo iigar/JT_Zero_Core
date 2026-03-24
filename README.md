@@ -12,57 +12,101 @@
 - **Python сервер** — FastAPI бекенд з WebSocket стрімінгом
 - **React Dashboard** — 7-вкладковий моніторинг у браузері
 - **MAVLink** — повна двостороння інтеграція з ArduPilot
+- **Multi-Camera** — CSI (Visual Odometry) + USB Thermal (сканування)
 
 ## Архітектура
 
 ```
 ┌─────────────────┐      ┌──────────────────┐      ┌────────────────┐
 │   CSI Camera    │─────>│  C++ Core        │─────>│  Flight        │
-│   (OV5647/      │ MIPI │  - Feature Det.  │ UART │  Controller    │
-│    IMX219)      │      │  - Visual Odom.  │      │  (ArduPilot)   │
+│   (IMX219/      │ MIPI │  - Feature Det.  │ UART │  Controller    │
+│    IMX290/...)  │      │  - Visual Odom.  │      │  (ArduPilot)   │
 └─────────────────┘      │  - MAVLink TX/RX │      └────────────────┘
                          └────────┬─────────┘
-                                  │ pybind11
-                         ┌────────┴─────────┐
-                         │  FastAPI Backend  │
-                         │  - WebSocket      │
-                         │  - REST API       │
-                         └────────┬─────────┘
-                                  │ HTTP/WS
-                         ┌────────┴─────────┐
-                         │  React Dashboard  │
-                         │  (браузер)        │
-                         └──────────────────┘
+┌─────────────────┐              │ pybind11
+│  USB Thermal    │──────>┌──────┴──────────┐
+│  (Caddx 256)    │ V4L2  │  FastAPI Backend │
+└─────────────────┘       │  - WebSocket     │
+                          │  - REST API      │
+                          └────────┬─────────┘
+                                   │ HTTP/WS
+                          ┌────────┴─────────┐
+                          │  React Dashboard  │
+                          │  (браузер)        │
+                          └──────────────────┘
+```
+
+## Підтримувані камери (CSI)
+
+| Сенсор | Камера | Роздільність | FOV |
+|--------|--------|-------------|-----|
+| OV5647 | Pi Camera v1 | 5MP | 62° |
+| IMX219 | Pi Camera v2 | 8MP | 62° |
+| IMX477 | Pi HQ Camera | 12.3MP | lens |
+| IMX708 | Pi Camera v3 | 12MP | 66° |
+| OV9281 | Global Shutter | 1MP | 80° |
+| IMX296 | Pi GS Camera | 1.6MP | 49° |
+| OV64A40 | Arducam 64MP | 64MP | 84° |
+| IMX290 | STARVIS (low-light) | 2MP | 82° |
+| *будь-який* | GENERIC fallback | auto | auto |
+
+## Швидкий старт
+
+```bash
+# Клонувати
+git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+cd ~/jt-zero
+
+# Встановити (deps, UART, build, systemd)
+chmod +x setup.sh && ./setup.sh
+
+# Оновити
+git pull && ./update.sh
+```
+
+**Frontend** білдиться автоматично через GitHub Actions. На Pi Node.js/npm **не потрібен**.
+
+## Встановлення без GitHub
+
+```bash
+# Завантажте ZIP на будь-який комп'ютер
+# https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip
+
+# Скопіюйте на Pi
+scp JT_Zero_Core-main.zip pi@jtzero.local:~/
+ssh pi@jtzero.local
+unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero
+cd jt-zero && chmod +x setup.sh && ./setup.sh
 ```
 
 ## Документація
 
 | Файл | Опис |
 |------|------|
-| **[SYSTEM.md](jt-zero/SYSTEM.md)** | Як працює система, алгоритм VO, характеристики, архітектура |
-| **[DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)** | Встановлення на Pi (через GitHub або офлайн через ZIP/USB) |
-| **[COMMANDS.md](jt-zero/COMMANDS.md)** | Всі команди: збірка, запуск, API, діагностика, troubleshooting |
-| **[FC_CONNECTION.md](jt-zero/FC_CONNECTION.md)** | Підключення до польотного контролера |
-
-## Встановлення без GitHub
-
-Не потрібен `git`! Скачайте ZIP і перенесіть на Pi:
-
-1. Завантажте: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
-2. Скопіюйте на Pi: `scp JT_Zero_Core-main.zip pi@jtzero.local:~/`
-3. На Pi: `unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero`
-
-Або використовуйте скрипт `create_archive.sh` для створення установочного архіву з автоінсталятором.
-
-Детальна інструкція: [DEPLOYMENT.md](jt-zero/DEPLOYMENT.md)
+| [ABOUT_PROJECT.md](ABOUT_PROJECT.md) | Детальний опис проєкту |
+| [CLAUDE.md](CLAUDE.md) | Технічна довідка (для розробників та AI) |
+| [commands_reminder.md](commands_reminder.md) | Шпаргалка команд |
+| [jt-zero/SYSTEM.md](jt-zero/SYSTEM.md) | Алгоритм VO, платформи, режими |
+| [jt-zero/DEPLOYMENT.md](jt-zero/DEPLOYMENT.md) | Встановлення на Pi |
+| [jt-zero/COMMANDS.md](jt-zero/COMMANDS.md) | API, діагностика |
+| [jt-zero/FC_CONNECTION.md](jt-zero/FC_CONNECTION.md) | Підключення до польотного контролера |
+| [jt-zero/LONG_RANGE_FLIGHT.md](jt-zero/LONG_RANGE_FLIGHT.md) | Гайд автономного польоту на 5км |
 
 ## Стек технологій
 
 | Компонент | Технологія |
 |-----------|-----------|
-| Ядро | C++17, lock-free, real-time |
+| Ядро | C++17, lock-free, real-time (8 threads) |
 | Зв'язка C++/Python | pybind11 |
 | Backend | FastAPI, WebSocket, uvicorn |
-| Frontend | React 19, Recharts, Tailwind CSS, Three.js |
-| Протокол | MAVLink v2 |
-| Платформа | Raspberry Pi Zero 2 W (ARM Cortex-A53) |
+| Frontend | React 19, Recharts, Tailwind CSS |
+| Протокол | MAVLink v2 (CRC-validated) |
+| CI/CD | GitHub Actions (auto-build frontend) |
+| Платформа | Raspberry Pi Zero 2W / Pi 4 / Pi 5 |
+
+## Статус
+
+- VO працює на реальному залізі (Pi Zero 2W + IMX290/IMX219)
+- MAVLink підключений до ArduPilot (Matek H743)
+- EKF3 ExternalNav підтверджено
+- 15 fps VO, 25Hz MAVLink, 0 CRC помилок

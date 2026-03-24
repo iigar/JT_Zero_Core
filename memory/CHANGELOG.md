@@ -1,6 +1,25 @@
 # JT-Zero Changelog
 
-## 2026-03-23 — GitHub Actions CI/CD + update.sh Refactor
+## 2026-03-24 — IMX290 STARVIS + GENERIC CSI Fallback
+
+### New Sensor Support
+- **IMX290 STARVIS** added to known CSI sensors (8th sensor): 2MP 1920x1080, FOV 82°, focal 400px, excellent low-light (Sony STARVIS back-illuminated)
+- **GENERIC CSI fallback**: Unknown sensors detected via `rpicam-hello` output parsing (`"N : sensor_name [WxH ...]"` format). Raw sensor chip name stored and displayed in dashboard
+- **CSISensorType::GENERIC = 99**: New enum value for unknown-but-working cameras
+- **PiCSICamera::detected_raw_name()**: Static method returns raw chip ID string
+- **CameraPipelineStats**: Added `csi_sensor_type` and `csi_sensor_name` fields
+- **Python bindings**: `camera_stats_to_dict()` now includes CSI sensor info
+- **native_bridge.py**: `get_cameras()` reads sensor name from C++ stats (not hardcoded)
+- **Verified on Pi Zero 2W**: IMX290 auto-detected as "IMX290 STARVIS (VO)", VO active
+
+### New Camera Setup (not in known list)
+If `rpicam-hello` shows "No cameras available":
+1. Set `camera_auto_detect=0` in `/boot/firmware/config.txt`
+2. Add `dtoverlay=<sensor>,clock-frequency=37125000`
+3. Reboot → `rpicam-hello --list-cameras` should show the camera
+4. JT-Zero auto-detects as GENERIC or known sensor
+
+## 2026-03-24 — GitHub Actions CI/CD + update.sh Refactor
 
 ### Frontend Build Automation
 - **GitHub Actions workflow** (`.github/workflows/build-frontend.yml`): Auto-builds frontend on push when `frontend/src/`, `frontend/public/`, or `package.json` changes. Commits `backend/static/` back to repo with `[skip ci]`.
