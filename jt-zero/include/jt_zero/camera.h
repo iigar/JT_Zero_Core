@@ -230,6 +230,7 @@ enum class CSISensorType : uint8_t {
     OV9281     = 5,   // Global shutter — 1MP, ideal for VO
     IMX296     = 6,   // Pi GS Camera — 1.6MP, global shutter
     OV64A40    = 7,   // Arducam 64MP
+    IMX290     = 8,   // Sony STARVIS — 2MP, excellent low-light, 1/2.8"
     GENERIC    = 99,  // Unknown CSI sensor detected by rpicam-hello
 };
 
@@ -253,6 +254,7 @@ static constexpr CSISensorInfo CSI_SENSORS[] = {
     {CSISensorType::OV9281,  "OV9281 GlobalShtr",  "ov9281",  1280, 800,  450.0f,  80.0f, false, true},
     {CSISensorType::IMX296,  "Pi GS Camera",      "imx296",  1456, 1088, 490.0f,  48.8f, false, true},
     {CSISensorType::OV64A40, "Arducam 64MP",      "ov64a40", 9248, 6944, 600.0f,  84.0f, true,  false},
+    {CSISensorType::IMX290,  "IMX290 STARVIS",    "imx290",  1920, 1080, 400.0f,  82.0f, false, false},
 };
 static constexpr size_t NUM_CSI_SENSORS = sizeof(CSI_SENSORS) / sizeof(CSI_SENSORS[0]);
 

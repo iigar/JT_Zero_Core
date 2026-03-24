@@ -56,7 +56,7 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - Python simulator, documentation, offline installation
 - Multi-Camera Architecture (CSI + USB Thermal) — Variant B
 - ThermalPanel with Iron palette false-color
-- CSI Priority + USB Fallback with 7 CSI sensor auto-detection
+- CSI Priority + USB Fallback with 8 CSI sensor auto-detection + GENERIC fallback
 - GitHub Actions CI/CD for frontend builds
 - Pre-built frontend in git (no Node.js on Pi)
 
