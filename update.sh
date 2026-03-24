@@ -81,107 +81,67 @@ else
     echo -e "  ${YELLOW}Модуль не знайдено (pybind11?)${NC}"
 fi
 
-# ─── [4/5] Збірка фронтенду ─────────────────────────────────
-echo -e "${CYAN}[4/5]${NC} Збірка фронтенду..."
-if [ -d "$FRONTEND_DIR" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
+# ─── [4/5] Фронтенд ──────────────────────────────────────────
+echo -e "${CYAN}[4/5]${NC} Фронтенд..."
+
+# Стратегія: pre-built (з git) > локальний білд (якщо є npm)
+if [ -f "$BACKEND_DIR/static/index.html" ]; then
+    # ── Pre-built фронтенд вже є в git (GitHub Actions або ручний білд) ──
+    echo -e "  ${GREEN}Pre-built frontend знайдено в backend/static/ (з git)${NC}"
+    echo -e "  Node.js/npm не потрібен"
+elif [ -d "$FRONTEND_DIR" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
+    # ── Fallback: локальний білд ──
+    echo -e "  ${YELLOW}Pre-built не знайдено, спроба локального білду...${NC}"
     cd "$FRONTEND_DIR"
     
-    # Визначити пакетний менеджер (yarn або npm)
-    if command -v yarn &>/dev/null; then
-        PKG="yarn"
-        PKG_INSTALL="yarn install --production=false"
-        PKG_BUILD="yarn build"
-    elif command -v npm &>/dev/null; then
-        PKG="npm"
-        PKG_INSTALL="npm install --prefer-offline --no-audit --no-fund --no-optional"
-        PKG_BUILD="npm run build"
-    else
-        echo -e "  ${RED}Ні yarn ні npm не знайдено!${NC}"
-        echo -e "  Встановіть: ${BOLD}sudo apt install nodejs npm${NC}"
-        PKG=""
-    fi
-    
-    if [ -n "$PKG" ]; then
-        # ── Swap для Pi Zero (npm install потребує > 512MB) ──
+    if command -v npm &>/dev/null || command -v yarn &>/dev/null; then
+        if command -v yarn &>/dev/null; then
+            PKG_INSTALL="yarn install --production=false"
+            PKG_BUILD="yarn build"
+        else
+            PKG_INSTALL="npm install --prefer-offline --no-audit --no-fund --no-optional"
+            PKG_BUILD="npm run build"
+        fi
+        
+        # Swap для Pi Zero
         SWAP_CREATED=false
-        if [ "$RAM_MB" -lt 600 ] && [ ! -f /swapfile ] && ! swapon --show | grep -q "/swapfile"; then
-            echo -e "  ${YELLOW}Pi Zero: створення swap 512MB для npm...${NC}"
-            sudo dd if=/dev/zero of=/swapfile bs=1M count=512 status=none 2>/dev/null
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile >/dev/null 2>&1
-            sudo swapon /swapfile 2>/dev/null
-            SWAP_CREATED=true
-            echo -e "  ${GREEN}Swap активовано${NC}"
+        if [ "$RAM_MB" -lt 600 ] && ! swapon --show 2>/dev/null | grep -q "swapfile"; then
+            echo -e "  ${YELLOW}Створення swap 1GB...${NC}"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=1024 status=none 2>/dev/null
+            sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null 2>&1
+            sudo swapon /swapfile 2>/dev/null && SWAP_CREATED=true
         fi
         
-        # Встановити залежності якщо node_modules відсутній або react-scripts немає
+        # Install + build
         if [ ! -d "node_modules" ] || [ ! -f "node_modules/.bin/react-scripts" ]; then
-            echo -e "  Встановлення залежностей ($PKG)..."
-            if [ "$RAM_MB" -lt 600 ]; then
-                # Pi Zero: обмежити пам'ять Node і показати прогрес
-                NODE_OPTIONS="--max-old-space-size=384" $PKG_INSTALL 2>&1 | tail -5
-            else
-                $PKG_INSTALL 2>&1 | tail -5
-            fi
-            
-            # Перевірити чи react-scripts встановився
-            if [ ! -f "node_modules/.bin/react-scripts" ]; then
-                echo -e "  ${RED}react-scripts не встановлено! npm install не вдався (можливо OOM).${NC}"
-                echo -e "  ${YELLOW}Спробуйте вручну:${NC}"
-                echo -e "    cd $FRONTEND_DIR"
-                echo -e "    npm install --prefer-offline --no-audit --no-fund"
-                echo -e "  ${YELLOW}Або збілдіть на Pi 4 і скопіюйте build/ папку.${NC}"
-                # Прибрати swap якщо створювали
-                if [ "$SWAP_CREATED" = true ]; then
-                    sudo swapoff /swapfile 2>/dev/null
-                    sudo rm -f /swapfile
-                fi
-                echo -e "  ${YELLOW}Фронтенд пропущено${NC}"
-                PKG=""
-            fi
+            echo -e "  npm install..."
+            NODE_OPTIONS="--max-old-space-size=384" $PKG_INSTALL 2>&1 | tail -5
         fi
         
-        if [ -n "$PKG" ]; then
-            # Перевірити чи потрібно перебілдити
-            BUILD_NEEDED=false
-            if [ ! -d "build" ]; then
-                BUILD_NEEDED=true
-            elif [ "$(find src/ -newer build/index.html -print -quit 2>/dev/null)" ]; then
-                BUILD_NEEDED=true
-            fi
-            
-            if [ "$BUILD_NEEDED" = true ]; then
-                echo -e "  $PKG build..."
-                # На Pi фронтенд обслуговується з того ж сервера — порожній URL
-                export REACT_APP_BACKEND_URL=""
-                # На Pi Zero обмежити RAM для Node
-                if [ "$RAM_MB" -lt 600 ]; then
-                    NODE_OPTIONS="--max-old-space-size=384" $PKG_BUILD 2>&1 | tail -5
-                else
-                    $PKG_BUILD 2>&1 | tail -5
-                fi
-                
-                # Перевірити чи білд успішний
-                if [ -f "build/index.html" ]; then
-                    echo -e "  Копіювання в backend/static/..."
-                    rm -rf "$BACKEND_DIR/static"
-                    cp -r build "$BACKEND_DIR/static"
-                    echo -e "  ${GREEN}Frontend збілдено та скопійовано!${NC}"
-                else
-                    echo -e "  ${RED}Frontend білд не вдався (build/index.html не створено)${NC}"
-                    echo -e "  ${YELLOW}Спробуйте: cd $FRONTEND_DIR && npm run build${NC}"
-                fi
+        if [ -f "node_modules/.bin/react-scripts" ]; then
+            echo -e "  npm build..."
+            export REACT_APP_BACKEND_URL=""
+            NODE_OPTIONS="--max-old-space-size=384" $PKG_BUILD 2>&1 | tail -5
+            if [ -f "build/index.html" ]; then
+                rm -rf "$BACKEND_DIR/static"
+                cp -r build "$BACKEND_DIR/static"
+                echo -e "  ${GREEN}Frontend збілдено!${NC}"
             else
-                echo -e "  ${GREEN}Frontend актуальний, пропуск${NC}"
+                echo -e "  ${RED}Білд не вдався${NC}"
             fi
+        else
+            echo -e "  ${RED}npm install не вдався (OOM? RAM=${RAM_MB}MB)${NC}"
+            echo -e "  ${YELLOW}Рішення: пуш змін в git — GitHub Actions збілдить автоматично${NC}"
+            echo -e "  ${YELLOW}Потім: git pull — і frontend з'явиться в backend/static/${NC}"
         fi
         
-        # Прибрати тимчасовий swap
+        # Cleanup swap
         if [ "$SWAP_CREATED" = true ]; then
-            sudo swapoff /swapfile 2>/dev/null
-            sudo rm -f /swapfile
-            echo -e "  Swap видалено"
+            sudo swapoff /swapfile 2>/dev/null && sudo rm -f /swapfile
         fi
+    else
+        echo -e "  ${RED}Node.js не знайдено і pre-built відсутній${NC}"
+        echo -e "  ${YELLOW}Рішення: пуш змін в git — GitHub Actions збілдить автоматично${NC}"
     fi
 else
     echo -e "  ${YELLOW}Фронтенд не знайдено${NC}"

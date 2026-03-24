@@ -18,20 +18,30 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 ## Architecture
 ```
 /app
-├── backend/           # FastAPI server, simulator, native bridge
-├── frontend/          # React dashboard (Tailwind CSS)
+├── .github/workflows/     # CI/CD
+│   └── build-frontend.yml # Auto-build frontend on push
+├── backend/               # FastAPI server, simulator, native bridge
+│   └── static/            # Pre-built React frontend (served by FastAPI)
+├── frontend/              # React dashboard (Tailwind CSS)
 │   └── src/components/
 │       ├── CameraPanel.js     # Primary VO camera
-│       ├── ThermalPanel.js    # Secondary thermal camera (NEW)
+│       ├── ThermalPanel.js    # Secondary thermal camera
 │       └── ...
-├── jt-zero/           # C++ core
-│   ├── core/          # runtime.cpp
-│   ├── camera/        # camera_pipeline.cpp, camera_drivers.cpp
-│   ├── mavlink/       # mavlink_interface.cpp
-│   ├── api/           # python_bindings.cpp
-│   └── include/       # Header files (camera.h with multi-cam)
-└── memory/            # PRD, changelog, roadmap
+├── jt-zero/               # C++ core
+│   ├── core/              # runtime.cpp
+│   ├── camera/            # camera_pipeline.cpp, camera_drivers.cpp
+│   ├── mavlink/           # mavlink_interface.cpp
+│   ├── api/               # python_bindings.cpp
+│   └── include/           # Header files (camera.h with multi-cam)
+├── update.sh              # Smart update script (pre-built priority)
+└── memory/                # PRD, changelog, roadmap
 ```
+
+## Deployment Strategy
+- **Frontend build**: GitHub Actions auto-builds on push, commits `backend/static/` to git
+- **Pi update**: `git pull && ./update.sh` — no Node.js needed on Pi
+- **Fallback**: Local npm build with swap (for Pi 4+ only)
+- **update.sh logic**: pre-built (git) > local build (npm) > error with instructions
 
 ## Implementation Status
 
@@ -44,57 +54,11 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - FastAPI backend with REST + WebSocket telemetry
 - React dashboard (7 tabs)
 - Python simulator, documentation, offline installation
-
-### Completed - Feb/Mar 2026
-- **USB Camera V4L2 MMAP Fix (P0)**: Rewrote USB camera driver for proper V4L2 MMAP streaming
-- **Platform/VO Mode Refactor**: Separated Platform (hardware) from VO Mode (algorithmic)
-- **LK Tracker Bilinear Interpolation (CRITICAL)**: Fixed fundamental bug — LK was using integer pixel access, preventing sub-pixel convergence
-- **Sobel 3x3 Gradients**: Replaced simple central differences with Sobel operator in LK tracker and Shi-Tomasi detector — 4x signal amplification, 16x better conditioning
-- **Shi-Tomasi Grid Corner Detector**: Fallback when FAST fails on low-contrast images — computes structure tensor eigenvalues to find actual corners (not edges)
-- **Convergence Tolerance**: Relaxed from 0.01 to 0.05 px for thermal images
-- **Verified on Pi 4 + Caddx thermal**: Det:180, Track:16-59, Inliers:100%, Valid:True, Conf:0.18-0.29
-- **MAVLink Parser Overhaul (P0)**: CRC validation, relaxed heartbeat filter, default 921600 baud, v2 signing support, diagnostic counters (bytes/heartbeats/CRC errors), raw hex dump
-- **MAVLink Heartbeat Parsing (P0)**: RESOLVED — auto-baud detection (CRC-validated), relaxed heartbeat filter, verified on Pi Zero 2W + Matek H743
-- **EKF3 ExternalNav Integration**: ArduPilot EKF3 using JT-Zero VO data (confirmed: "EKF3 IMU0/1 is using external nav data")
-- **Automation Scripts**: setup.sh (first install), update.sh (quick update with Pi model auto-detection)
-- **UI Refresh**: Rounded corners (12px), ~1.5x larger fonts, lighter colors, expanded MAVLink panel, Events scroll-lock
-
-### Completed - Mar 23, 2026
-- **Multi-Camera Architecture (P1)**: Full CSI + USB thermal dual camera support
-  - C++ layer: CameraSlot enum, CameraSlotInfo struct, multi-camera methods in CameraPipeline
-  - Backend: GET /api/cameras (list slots), GET/POST /api/camera/secondary/* (stats, capture, frame)
-  - WebSocket: cameras array in telemetry payload
-  - Frontend: Camera tab with SPLIT/VO ONLY/THERMAL view switcher
-  - ThermalPanel.js: On-demand capture, auto-refresh (1fps), iron palette false-color rendering
-  - Dashboard sidebar: CAMERAS section showing both camera slots
-  - All 24 tests pass (backend + frontend)
-
-## Multi-Camera Configuration (Variant B)
-
-**Priority logic:**
-| CSI | USB | Result |
-|-----|-----|--------|
-| Found | Found | CSI=PRIMARY(VO), USB=SECONDARY(thermal) |
-| Found | None | CSI=PRIMARY(VO), no SECONDARY |
-| None | Found | USB=PRIMARY(VO fallback), no SECONDARY |
-| None | None | SIMULATED=PRIMARY(VO) |
-
-**Supported CSI Sensors:**
-| Sensor | Camera | Resolution | FOV | Autofocus | Global Shutter |
-|--------|--------|-----------|-----|-----------|----------------|
-| OV5647 | Pi Camera v1 | 5MP | 62° | No | No |
-| IMX219 | Pi Camera v2 | 8MP | 62° | No | No |
-| IMX477 | Pi HQ Camera | 12.3MP | lens | No | No |
-| IMX708 | Pi Camera v3 | 12MP | 66° | Yes | No |
-| OV9281 | OV9281 | 1MP | 80° | No | Yes |
-| IMX296 | Pi GS Camera | 1.6MP | 49° | No | Yes |
-| OV64A40 | Arducam 64MP | 64MP | 84° | Yes | No |
-
-| Camera | Interface | Role | Stream | Pi Load |
-|--------|-----------|------|--------|---------|
-| CSI (Forward) | CSI → GPU/ISP | Visual Odometry | Always (15fps) | Low (GPU ISP) |
-| USB Thermal (Down) | USB 2.0 V4L2 | Thermal scanning | On-demand | Low (256x192) |
-| Analog FPV | Analog VTX | Pilot view | N/A (bypasses Pi) | None |
+- Multi-Camera Architecture (CSI + USB Thermal) — Variant B
+- ThermalPanel with Iron palette false-color
+- CSI Priority + USB Fallback with 7 CSI sensor auto-detection
+- GitHub Actions CI/CD for frontend builds
+- Pre-built frontend in git (no Node.js on Pi)
 
 ### API Endpoints
 - `GET /api/cameras` — List all camera slots (PRIMARY, SECONDARY)

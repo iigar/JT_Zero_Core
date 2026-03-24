@@ -1,5 +1,14 @@
 # JT-Zero Changelog
 
+## 2026-03-23 — GitHub Actions CI/CD + update.sh Refactor
+
+### Frontend Build Automation
+- **GitHub Actions workflow** (`.github/workflows/build-frontend.yml`): Auto-builds frontend on push when `frontend/src/`, `frontend/public/`, or `package.json` changes. Commits `backend/static/` back to repo with `[skip ci]`.
+- **Pre-built frontend in git**: `backend/static/` (8.7MB) committed to repo — Pi Zero no longer needs Node.js/npm
+- **update.sh refactored**: Checks for pre-built `backend/static/index.html` first (instant), falls back to local npm build only if missing
+- **Root cause fix**: Pi Zero 2W (416MB RAM) cannot run `npm install` — OOM kills the process silently. Pre-built approach eliminates this entirely.
+- **.gitignore cleaned**: Removed ~60 duplicate entries, kept `!backend/static/` exception
+
 ## 2026-03-23 — Multi-Camera Architecture (P1)
 
 ### Multi-Camera Support
