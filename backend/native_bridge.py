@@ -216,19 +216,49 @@ class NativeRuntime:
     # provide managed state for secondary (thermal) camera.
 
     def __init_multicam(self):
-        """Lazy-init multi-camera state."""
+        """Lazy-init multi-camera state with real USB camera detection."""
         if not hasattr(self, '_secondary_camera'):
+            # Try to find real USB camera
+            self._usb_capture = None
+            try:
+                from usb_camera import find_usb_camera, USBCameraCapture
+                dev_path, card, driver = find_usb_camera()
+                if dev_path:
+                    self._usb_capture = USBCameraCapture(dev_path, 256, 192)
+                    if self._usb_capture.open():
+                        self._secondary_camera = {
+                            "slot": "SECONDARY",
+                            "camera_type": "USB_THERMAL",
+                            "camera_open": True,
+                            "active": False,
+                            "frame_count": 0,
+                            "fps_actual": 0.0,
+                            "width": self._usb_capture.actual_w,
+                            "height": self._usb_capture.actual_h,
+                            "label": f"USB Thermal ({card or 'Down'})",
+                            "device": dev_path,
+                            "last_capture_time": 0,
+                        }
+                        print(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})")
+                        return
+                    else:
+                        self._usb_capture = None
+            except Exception as e:
+                print(f"[MultiCam] USB camera init failed: {e}")
+                self._usb_capture = None
+            
+            # Fallback: simulated secondary
             self._secondary_camera = {
                 "slot": "SECONDARY",
                 "camera_type": "USB_THERMAL",
-                "camera_open": True,
+                "camera_open": False,
                 "active": False,
                 "frame_count": 0,
                 "fps_actual": 0.0,
                 "width": 256,
                 "height": 192,
-                "label": "USB Thermal (Down)",
-                "device": "/dev/video2",
+                "label": "USB Thermal (not connected)",
+                "device": "none",
                 "last_capture_time": 0,
             }
 
@@ -277,6 +307,16 @@ class NativeRuntime:
 
     def capture_secondary(self) -> bool:
         self.__init_multicam()
+        if self._usb_capture and self._usb_capture.streaming:
+            frame = self._usb_capture.capture_frame(timeout_sec=2.0)
+            if frame:
+                self._last_secondary_frame = frame
+                self._secondary_camera["active"] = True
+                self._secondary_camera["frame_count"] += 1
+                self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+                self._secondary_camera["fps_actual"] = 1.0
+                return True
+            return False
         self._secondary_camera["active"] = True
         self._secondary_camera["frame_count"] += 1
         self._secondary_camera["last_capture_time"] = time.time() - self._start_time
@@ -284,30 +324,23 @@ class NativeRuntime:
         return True
 
     def get_secondary_frame_data(self) -> bytes:
-        """Generate simulated thermal frame (256x192 grayscale)."""
-        import math, random, struct
-        w, h = 256, 192
+        """Return real USB frame or simulated thermal frame."""
+        self.__init_multicam()
+        if hasattr(self, '_last_secondary_frame') and self._last_secondary_frame:
+            return self._last_secondary_frame
+        import math, random
+        w = self._secondary_camera.get("width", 256)
+        h = self._secondary_camera.get("height", 192)
         t = time.time() - self._start_time
-        # Vectorized-style: precompute hotspot centers
         cx1 = 128 + 30 * math.sin(t * 0.1)
         cy1 = 96 + 20 * math.cos(t * 0.15)
-        cx2 = 80 + 20 * math.cos(t * 0.2)
-        cy2 = 60 + 15 * math.sin(t * 0.12)
         data = bytearray(w * h)
         for y in range(h):
-            dy1 = y - cy1
-            dy2 = y - cy2
-            dy1_sq = dy1 * dy1
-            dy2_sq = dy2 * dy2
+            dy1_sq = (y - cy1) ** 2
             for x in range(w):
                 val = 40
-                dx1 = x - cx1
-                d1 = math.sqrt(dx1*dx1 + dy1_sq)
+                d1 = math.sqrt((x - cx1)**2 + dy1_sq)
                 if d1 < 40:
                     val += int(160 * (1.0 - d1 / 40.0))
-                dx2 = x - cx2
-                d2 = math.sqrt(dx2*dx2 + dy2_sq)
-                if d2 < 25:
-                    val += int(100 * (1.0 - d2 / 25.0))
                 data[y * w + x] = max(0, min(255, val + random.randint(-3, 3)))
         return bytes(data)

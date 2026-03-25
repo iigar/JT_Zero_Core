@@ -228,20 +228,49 @@ class JTZeroSimulator:
         self.camera_stats = CameraStats()
         self.mavlink_stats = MAVLinkStats()
         
-        # Multi-camera: secondary thermal camera (simulated)
-        self._secondary_camera = {
-            "slot": "SECONDARY",
-            "camera_type": "USB_THERMAL",
-            "camera_open": True,
-            "active": False,
-            "frame_count": 0,
-            "fps_actual": 0.0,
-            "width": 256,
-            "height": 192,
-            "label": "USB Thermal (Down)",
-            "device": "/dev/video2",
-            "last_capture_time": 0,
-        }
+        # Multi-camera: secondary thermal camera
+        self._usb_capture = None
+        self._last_secondary_frame = None
+        try:
+            from usb_camera import find_usb_camera, USBCameraCapture
+            dev_path, card, driver = find_usb_camera()
+            if dev_path:
+                self._usb_capture = USBCameraCapture(dev_path, 256, 192)
+                if self._usb_capture.open():
+                    self._secondary_camera = {
+                        "slot": "SECONDARY",
+                        "camera_type": "USB_THERMAL",
+                        "camera_open": True,
+                        "active": False,
+                        "frame_count": 0,
+                        "fps_actual": 0.0,
+                        "width": self._usb_capture.actual_w,
+                        "height": self._usb_capture.actual_h,
+                        "label": f"USB Thermal ({card or 'Down'})",
+                        "device": dev_path,
+                        "last_capture_time": 0,
+                    }
+                    print(f"[Simulator] USB camera ready: {card} @ {dev_path}")
+                else:
+                    self._usb_capture = None
+        except Exception as e:
+            print(f"[Simulator] USB camera init failed: {e}")
+            self._usb_capture = None
+        
+        if not self._usb_capture:
+            self._secondary_camera = {
+                "slot": "SECONDARY",
+                "camera_type": "USB_THERMAL",
+                "camera_open": False,
+                "active": False,
+                "frame_count": 0,
+                "fps_actual": 0.0,
+                "width": 256,
+                "height": 192,
+                "label": "USB Thermal (not connected)",
+                "device": "none",
+                "last_capture_time": 0,
+            }
         self._secondary_capturing = False
         
     def start(self):
@@ -598,33 +627,41 @@ class JTZeroSimulator:
     def capture_secondary(self) -> bool:
         """Trigger on-demand capture from secondary camera."""
         with self._lock:
+            if self._usb_capture and self._usb_capture.streaming:
+                frame = self._usb_capture.capture_frame(timeout_sec=2.0)
+                if frame:
+                    self._last_secondary_frame = frame
+                    self._secondary_capturing = True
+                    self._secondary_camera["active"] = True
+                    self._secondary_camera["frame_count"] += 1
+                    self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+                    self._secondary_camera["fps_actual"] = 1.0
+                    return True
+                return False
             self._secondary_capturing = True
             self._secondary_camera["active"] = True
             self._secondary_camera["frame_count"] += 1
             self._secondary_camera["last_capture_time"] = time.time() - self._start_time
-            self._secondary_camera["fps_actual"] = 1.0  # on-demand = ~1fps
+            self._secondary_camera["fps_actual"] = 1.0
             return True
 
     def get_secondary_frame_data(self) -> bytes:
-        """Return simulated thermal frame (256x192 grayscale)."""
-        w, h = 256, 192
+        """Return real USB frame or simulated thermal frame."""
+        if self._last_secondary_frame:
+            return self._last_secondary_frame
+        w = self._secondary_camera.get("width", 256)
+        h = self._secondary_camera.get("height", 192)
         data = bytearray(w * h)
         t = time.time() - self._start_time
         cx1 = 128 + 30 * math.sin(t * 0.1)
         cy1 = 96 + 20 * math.cos(t * 0.15)
-        cx2 = 80 + 20 * math.cos(t * 0.2)
-        cy2 = 60 + 15 * math.sin(t * 0.12)
         for y in range(h):
             dy1_sq = (y - cy1) ** 2
-            dy2_sq = (y - cy2) ** 2
             for x in range(w):
                 val = 40
                 d1 = math.sqrt((x - cx1)**2 + dy1_sq)
                 if d1 < 40:
                     val += int(160 * (1.0 - d1 / 40.0))
-                d2 = math.sqrt((x - cx2)**2 + dy2_sq)
-                if d2 < 25:
-                    val += int(100 * (1.0 - d2 / 25.0))
                 data[y * w + x] = max(0, min(255, val + random.randint(-3, 3)))
         return bytes(data)
 
