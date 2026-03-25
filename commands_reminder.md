@@ -175,6 +175,48 @@ ssh pi@<IP-Pi>
 scp файл.txt pi@<IP-Pi>:~/jt-zero/
 ```
 
+## Після перевстановлення Pi OS / дублювання SD карти
+
+```bash
+# SSH видає "REMOTE HOST IDENTIFICATION HAS CHANGED" —
+# нова Pi OS = нові SSH ключі. Це нормально, не атака.
+# На Windows (PowerShell):
+ssh-keygen -R jtzero.local
+ssh-keygen -R <IP-Pi>
+
+# На Linux/Mac:
+ssh-keygen -R jtzero.local
+ssh-keygen -R <IP-Pi>
+
+# Потім підключитись знову:
+ssh pi@jtzero.local
+# Прийняти новий ключ: yes
+
+# Після входу — встановити JT-Zero:
+cd ~/jt-zero || git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+cd ~/jt-zero
+git checkout main15   # або остання гілка
+chmod +x setup.sh && ./setup.sh
+```
+
+## Масштабування (кілька Pi з однаковою SD)
+
+```bash
+# Якщо клонуєте SD карту на інші Pi:
+# 1. Кожен Pi отримає нові SSH ключі при першому boot
+# 2. На вашому комп'ютері очистіть старі ключі:
+ssh-keygen -R <старий-IP>
+ssh-keygen -R <hostname>.local
+
+# 3. Змініть hostname на кожному Pi (щоб не конфліктували):
+sudo raspi-config  # → System Options → Hostname
+# Наприклад: jtzero-1, jtzero-2, jtzero-3
+
+# 4. Після зміни hostname:
+sudo reboot
+ssh pi@jtzero-1.local  # кожен Pi має унікальне ім'я
+```
+
 ## Emergent (розробка)
 
 ```bash
