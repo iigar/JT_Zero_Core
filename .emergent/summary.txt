@@ -1,430 +1,153 @@
 <analysis>**original_problem_statement**: 
-The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi (supporting Zero 2 W and Pi 4). The project includes a C++ core, Python bindings, a FastAPI backend, and a React monitoring dashboard. The primary goal is a robust Visual Odometry (VO) system capable of long-range navigation without GPS. Recent requests focused on implementing a multi-camera architecture (CSI for VO, USB for Thermal) and fixing deployment scripts for the physical Pi hardware.
+The user is building a complex robotics runtime, JT-Zero, for a drone on a Raspberry Pi (supporting Zero 2 W and Pi 4). The system includes a high-performance C++ core for Visual Odometry (VO), a FastAPI backend, and a React monitoring dashboard. Recent requests focused on fixing Out-Of-Memory (OOM) issues during local React builds on the Pi Zero, detecting exact CSI camera models (like the new IMX290), fixing the USB thermal camera to pull real hardware feeds instead of mocked data, and making the thermal camera stream continuously rather than requiring manual capture.
 
 **User's preferred language**: **Ukrainian**. (INSTRUCTION: The next agent MUST respond to the user in Ukrainian only).
 
 **what currently exists?** 
-A full-stack robotics application with a C++ core, FastAPI backend, and React frontend. The system successfully fuses Visual Odometry (VO) telemetry into ArduPilot's EKF3. A multi-camera architecture has been implemented where the system auto-detects up to 7 types of CSI cameras (Primary/VO) and USB cameras (Secondary/Thermal fallback). The React dashboard features a split-view mode with a dedicated Thermal Panel (Iron palette false-color). The deployment script () has been heavily refactored to compile the C++ core, build the React frontend via npm/yarn, and correctly serve it through FastAPI's static folder on the physical Pi. Extensive documentation on VO logic has been added to .
+A full-stack hardware-in-the-loop robotics application. The C++ core handles visual odometry via CSI cameras (auto-detecting 8 models including IMX219 and IMX290, with a fallback to  for unknown sensors). The React frontend is now auto-built via GitHub Actions CI/CD to prevent Pi Zero OOM crashes, and the pre-built  is pulled directly to the Pi. A new  module uses  via  to reliably capture real frames from a secondary USB thermal camera across different architectures (arm32/aarch64). 
 
 **Last working item**: 
-    - Last item agent was working: Updating  with a detailed, beginner-friendly explanation of the Visual Odometry (VO) system and troubleshooting an Reading package lists...
-Building dependency tree...
-Reading state information...
-0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded. 404 error the user encountered on their Pi Zero 2W.
+    - Last item agent was working: Converting the Thermal USB camera from a manual on-demand snapshot capture to a continuous live stream in the React frontend () and backend (, ).
     - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use? NA (Documentation update and providing bash commands for the user's physical machine).
-    - User Testing Done: N (Waiting for the user to run the provided Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
-Get:2 https://cloudfront.debian.net/debian bookworm-updates InRelease [55.4 kB]
-Get:3 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease [3005 B]
-Get:4 https://cloudfront.debian.net/debian-security bookworm-security InRelease [48.0 kB]
-Get:5 https://deb.nodesource.com/node_20.x nodistro InRelease [12.1 kB]
-Get:6 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0/multiverse amd64 Packages [109 kB]
-Get:7 https://cloudfront.debian.net/debian-security bookworm-security/main arm64 Packages [290 kB]
-Get:8 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0/multiverse arm64 Packages [107 kB]
-Get:9 https://deb.nodesource.com/node_20.x nodistro/main arm64 Packages [13.7 kB]
-Fetched 638 kB in 1s (797 kB/s)
-Reading package lists...
-Building dependency tree...
-Reading state information...
-11 packages can be upgraded. Run 'apt list --upgradable' to see them. command on their Pi Zero 2W).
+    - Which testing method agent to use? Python scripts () and  to verify backend API responses.
+    - User Testing Done: N (Waiting for the user to pull the latest code to their physical Pi and verify the continuous thermal stream).
 
 **All Pending/In progress Issue list**: 
-  Issue 1: Frontend build failing on Pi Zero 2W due to missing Node.js/npm (404 apt error)
-     - Attempted fixes: Agent provided Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
-Hit:2 https://cloudfront.debian.net/debian bookworm-updates InRelease
-Hit:3 https://cloudfront.debian.net/debian-security bookworm-security InRelease
-Hit:4 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease
-Hit:5 https://deb.nodesource.com/node_20.x nodistro InRelease
-Reading package lists...
-Building dependency tree...
-Reading state information...
-11 packages can be upgraded. Run 'apt list --upgradable' to see them. followed by Reading package lists...
-Building dependency tree...
-Reading state information...
-Some packages could not be installed. This may mean that you have
-requested an impossible situation or if you are using the unstable
-distribution that some required packages have not yet been created
-or been moved out of Incoming.
-The following information may help to resolve the situation:
-
-The following packages have unmet dependencies:
- nodejs : Conflicts: npm
- npm : Depends: node-agent-base but it is not going to be installed
-       Depends: node-archy but it is not going to be installed
-       Depends: node-cacache (>= 17) but it is not going to be installed
-       Depends: node-chalk (>= 5.1.2-2~) but it is not going to be installed
-       Depends: node-cli-table3
-       Depends: node-columnify but it is not going to be installed
-       Depends: node-cssesc
-       Depends: node-debug but it is not going to be installed
-       Depends: node-emoji-regex
-       Depends: node-gyp but it is not going to be installed
-       Depends: node-http-proxy-agent
-       Depends: node-https-proxy-agent but it is not going to be installed
-       Depends: node-mkdirp but it is not going to be installed
-       Depends: node-ms but it is not going to be installed
-       Depends: node-nopt but it is not going to be installed
-       Depends: node-normalize-package-data but it is not going to be installed
-       Depends: node-npm-bundled but it is not going to be installed
-       Depends: node-npm-normalize-package-bin
-       Depends: node-npm-package-arg (>= 10) but it is not going to be installed
-       Depends: node-npmlog but it is not going to be installed
-       Depends: node-postcss-selector-parser
-       Depends: node-read-package-json but it is not going to be installed
-       Depends: node-rimraf but it is not going to be installed
-       Depends: node-semver but it is not going to be installed
-       Depends: node-string-width but it is not going to be installed
-       Depends: node-strip-ansi but it is not going to be installed
-       Depends: node-tar but it is not going to be installed
-       Depends: node-validate-npm-package-name but it is not going to be installed
-       Depends: node-which but it is not going to be installed
-       Depends: nodejs:any
-       Recommends: node-tap but it is not going to be installed.
-     - Next debug checklist: Ask the user if the  command worked. If the Debian repo is still failing, provide instructions to install Node via NodeSource PPA or NVM.
-     - Why fix this issue and what will be achieved with the fix? Without npm <command>
-
-Usage:
-
-npm install        install all the dependencies in your project
-npm install <foo>  add the <foo> dependency to your project
-npm test           run this project's tests
-npm run <foo>      run the script named <foo>
-npm <command> -h   quick help on <command>
-npm -l             display usage info for all commands
-npm help <term>    search for help on <term>
-npm help npm       more involved overview
-
-All commands:
-
-    access, adduser, audit, bugs, cache, ci, completion,
-    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
-    edit, exec, explain, explore, find-dupes, fund, get, help,
-    help-search, hook, init, install, install-ci-test,
-    install-test, link, ll, login, logout, ls, org, outdated,
-    owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, sbom,
-    search, set, shrinkwrap, star, stars, start, stop, team,
-    test, token, uninstall, unpublish, unstar, update, version,
-    view, whoami
-
-Specify configs in the ini-formatted file:
-    /root/.npmrc
-or on the command line via: npm <command> --key=value
-
-More configuration info: npm help config
-Configuration fields: npm help 7 config
-
-npm@10.8.2 /usr/lib/node_modules/npm, the user cannot build the new React dashboard locally on their Pi Zero 2W via .
+  Issue 1: Verify Continuous USB Thermal Streaming
+     - Attempted fixes: Rewrote  to automatically fetch frames periodically instead of waiting for a button click, and updated the backend to continuously run the capture loop.
+     - Next debug checklist: Check with the user if the UI now displays a live stream from the USB thermal camera on their Pi. 
+     - Why fix this issue and what will be achieved with the fix? Provides real-time thermal situational awareness for the drone.
      - Status: USER VERIFICATION PENDING
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? NA (Hardware-specific setup issue).
+     - Should Test frontend/backend/both after fix? Both (Requires physical hardware testing by the user).
      - Blocked on other issue: None.
 
 **In progress Task List**: 
-None.
+  Task 1: VO Fallback to USB Thermal Camera
+     - Where to resume: The user requested that if the primary CSI camera loses tracking (e.g., CONF < 10% or complete darkness), the system should automatically use the secondary USB thermal camera for Visual Odometry.
+     - What will be achieved with this? Allows the drone to maintain position holding and navigation using thermal signatures in completely dark or featureless visual environments.
+     - Status: NOT STARTED (Agent just finished updating  and the streaming logic prior to starting this).
+     - Should Test frontend/backend/both after fix? Backend / C++ Core.
+     - Blocked on something: Waiting for user to confirm the continuous thermal stream works before diving into C++ pipeline changes.
 
 **Upcoming and Future Tasks**: 
     Upcoming Tasks:
-    - None immediately requested.
+    - (P0) Implement VO Fallback to USB camera when CSI loses tracking.
     Future Tasks:
     - (P2) IP camera (RTSP) support.
     - (P2) ARM NEON optimization for the C++ core.
     - (P2) Autonomous Mission Planning UI/features.
     - (P2) Calibration of focal length for USB thermal cameras.
     - (P3) MAVLink diagnostics page addition in the React Dashboard.
-    - (P3) Settings -> Camera Config panel (Discussed but deferred as auto-detect covers 99% of use cases).
 
 **Completed work in this session**:
-- Multi-camera software architecture (CSI + USB Thermal) across C++, Backend, and Frontend (, , ) (DONE)
-- Thermal capture feature with Iron palette false-color mapping () (DONE)
-- CSI Priority + USB Fallback logic (Variant B) with 7 CSI sensor auto-detection () (DONE)
-- Fixed deployment script  to correctly build React frontend and copy it to  for FastAPI serving (DONE)
-- Updated  with comprehensive Visual Odometry (VO) explanations and use-cases (DONE)
+- Created GitHub Actions CI/CD for React Frontend to solve Pi Zero OOM issues (DONE)
+- Simplified  to skip Unknown command: "install/build"
+
+To see a list of supported npm commands, run:
+  npm help if pre-built frontend exists (DONE)
+- Added C++ and Python logic to parse exact camera models from  (DONE)
+- Added IMX290 Starvis sensor support and  fallback for unknown CSI sensors (DONE)
+- Comprehensive rewrite of all project documentation (, , , ) (DONE)
+- Fixed USB camera capture by replacing aarch64-incompatible  calls with a  subprocess wrapper () (DONE)
+- Updated  to support continuous streaming instead of manual capture (DONE)
 
 **Earlier issues found/mentioned but not fixed**:
-None
+- None.
 
 **Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: Git object corruption ( empty files) occurred on the user's physical Pi due to power loss/SD card issues. Fixed by having the user clear empty objects () and doing a hard reset.
+  - Issue recurrence in previous fork: 
+    1. Git object corruption due to power loss (Fix added to ).
+    2. Architecture mismatch for V4L2 ioctls (Agent originally tried  in python, but it failed on 64-bit Pi OS due to struct padding. Fixed by switching to  subprocess).
   - Recurrence count: 1
-  - Status: RESOLVED (Keep in mind the user's Pi filesystem might be unstable).
+  - Status: RESOLVED 
 
 **Code Architecture**:
 
 
 **Key Technical Concepts**:
-- **Visual Odometry (VO):** Real-time VO processing feeding into ArduPilot EKF3. Prioritizes CSI cameras.
-- **Hardware Integration:**  for CSI cameras,  for USB Thermal. Auto-detection prioritizes CSI for slot 1, USB for slot 2.
-- **Deployment via update.sh:** Builds C++, builds React via npm <command>
-
-Usage:
-
-npm install        install all the dependencies in your project
-npm install <foo>  add the <foo> dependency to your project
-npm test           run this project's tests
-npm run <foo>      run the script named <foo>
-npm <command> -h   quick help on <command>
-npm -l             display usage info for all commands
-npm help <term>    search for help on <term>
-npm help npm       more involved overview
-
-All commands:
-
-    access, adduser, audit, bugs, cache, ci, completion,
-    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
-    edit, exec, explain, explore, find-dupes, fund, get, help,
-    help-search, hook, init, install, install-ci-test,
-    install-test, link, ll, login, logout, ls, org, outdated,
-    owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, sbom,
-    search, set, shrinkwrap, star, stars, start, stop, team,
-    test, token, uninstall, unpublish, unstar, update, version,
-    view, whoami
-
-Specify configs in the ini-formatted file:
-    /root/.npmrc
-or on the command line via: npm <command> --key=value
-
-More configuration info: npm help config
-Configuration fields: npm help 7 config
-
-npm@10.8.2 /usr/lib/node_modules/npm, and copies the React build to FastAPI's static folder on the Pi.
-- **Frontend Architecture:** React dashboard consumes high-frequency telemetry via WebSockets and HTTP image blobs.
+- **Visual Odometry (VO):** Uses FAST/Shi-Tomasi corner detection. 
+- **Multi-Camera Pipeline:** CSI (Primary/Visual) vs USB (Secondary/Thermal). 
+- **V4L2 Subprocess Capture:** Because standard Python  calls fail on aarch64 due to struct size differences, USB frames are pulled using .
+- **Pre-built Frontend Architecture:** The Pi Zero 2W lacks RAM to compile React. CI/CD compiles the frontend and commits it directly to  in the repo.
 
 **key DB schema**:
-- None. (Zero-database architecture).
+- N/A (Hardware runtime, no database).
 
 **changes in tech stack**:
-- Added /npm <command>
-
-Usage:
-
-npm install        install all the dependencies in your project
-npm install <foo>  add the <foo> dependency to your project
-npm test           run this project's tests
-npm run <foo>      run the script named <foo>
-npm <command> -h   quick help on <command>
-npm -l             display usage info for all commands
-npm help <term>    search for help on <term>
-npm help npm       more involved overview
-
-All commands:
-
-    access, adduser, audit, bugs, cache, ci, completion,
-    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
-    edit, exec, explain, explore, find-dupes, fund, get, help,
-    help-search, hook, init, install, install-ci-test,
-    install-test, link, ll, login, logout, ls, org, outdated,
-    owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, sbom,
-    search, set, shrinkwrap, star, stars, start, stop, team,
-    test, token, uninstall, unpublish, unstar, update, version,
-    view, whoami
-
-Specify configs in the ini-formatted file:
-    /root/.npmrc
-or on the command line via: npm <command> --key=value
-
-More configuration info: npm help config
-Configuration fields: npm help 7 config
-
-npm@10.8.2 /usr/lib/node_modules/npm as a strict requirement on the physical Raspberry Pi to facilitate local frontend builds via .
+- Added GitHub Actions for frontend CI/CD. Pi no longer requires Node.js/npm.
 
 **All files of reference**:
--  (Contains the CSI sensor auto-detection and fallback logic).
--  (Updated with multi-camera slots and structs).
--  &  (Updated to stream secondary camera data).
--  (New file for thermal rendering).
--  (Refactored to handle React builds).
--  (Updated with VO documentation).
+-  (New file handling hardware USB capture).
+-  (Rewritten for continuous streaming).
+-  &  (Updated to handle continuous thermal streaming).
+-  (Updated with IMX290 and GENERIC CSI detection).
+-  (New CI/CD pipeline).
 
 **Areas that need refactoring**:
-- None.
+- None currently.  was just refactored to bypass ioctl architecture issues.
 
 **key api endpoints**:
--  (Returns active camera slots, resolutions, and types).
--  (Thermal capture endpoint).
+-  (Returns active camera slots, resolutions, exact sensor names).
+-  (Endpoint for continuous thermal streaming).
 
 **Critical Info for New Agent**:
-- **Hardware-In-The-Loop:** The user works on physical hardware (Pi Zero 2W, Pi 4B). Code written here is simulated. Changes to C++ or Frontend require instructing the user to run [0;36m[1mJT-Zero Update[0m
+- **Hardware constraints:** The user runs this on physical Raspberry Pi hardware (Zero 2W and Pi 4). Local testing on Emergent environment will only yield simulated results (e.g., USB camera will say not connected). **Do not try to test hardware-specific V4L2 or CSI code locally, rely on the user running [0;36m[1mJT-Zero Update[0m
   Pi:    Unknown
-  RAM:   32046MB, Cores: 8, Jobs: 8
+  RAM:   15972MB, Cores: 4, Jobs: 4
 
 [0;36m[1/5][0m git pull...
 [1;33m  git pull не вдався, продовжуємо...[0m
-[0;36m[2/5][0m Збірка C++ (make -j8)...
+[0;36m[2/5][0m Збірка C++ (make -j4)...
 make: /usr/bin/cmake: No such file or directory
 make: *** [Makefile:580: cmake_check_build_system] Error 127
 [0;36m[3/5][0m Копіювання модуля...
   [0;32mOK[0m
-[0;36m[4/5][0m Збірка фронтенду...
-  yarn build...
-  https://cra.link/deployment
+[0;36m[4/5][0m Фронтенд...
+  [0;32mPre-built frontend знайдено в backend/static/ (з git)[0m
+  Node.js/npm не потрібен
+[0;36m[5/5][0m Перезапуск сервісу... and providing logs.**
+- **Frontend Changes:** Do NOT instruct the user to run Unknown command: "build"
 
-Done in 33.64s.
-  Копіювання в backend/static/...
-  [0;32mFrontend збілдено та скопійовано![0m
-[0;36m[5/5][0m Перезапуск сервісу... on their Pi.
-- **FastAPI Static Serving Fix:**  was heavily modified because FastAPI serves the React app from . The script now runs  inside  and copies the output to . Do not revert this behavior.
-- **Camera Priority:** CSI cameras are hard-coded to be the Primary VO source if detected. USB cameras act as secondary/thermal unless no CSI camera is present, in which case USB becomes Primary.
+To see a list of supported npm commands, run:
+  npm help on the Pi. Commit your frontend changes, tell the user to use the Save to Github button in the Emergent UI, wait a moment for GitHub Actions to build, and then run  on their Pi.
+- **aarch64 Context:** The Pi OS is 64-bit (). Be careful with low-level Python C-struct packing/unpacking (like ), which is why the agent moved to .
 
 **documents and test reports created in this job**:
-- 
-- 
-- 
-- 
+-  (New comprehensive guide in Ukrainian)
+-  (Updated)
+-  (Completely rewritten to reflect )
+-  (Added SSH fix and scaling instructions)
 
 **Last 10 User Messages and any pending HUMAN messages**:
-1. User provides a screenshot showing the UI successfully updated on their Pi 4.
-2. User asks to implement Variant B where CSI is strictly the primary camera and USB is secondary, regardless of setup.
-3. Agent implements Variant B with auto-detection for 7 CSI sensors. Takes screenshot.
-4. User agrees that a dedicated Camera Config panel might be over-engineering. Asks if front-facing thermal makes sense.
-5. User asks for a beginner-friendly, step-by-step explanation of how the Visual Odometry system works and its use cases.
-6. Agent provides a massive, detailed explanation of VO, algorithms used, and drone flight phases.
-7. User asks to add this explanation to the project documentation ().
-8. User pastes a terminal log showing they tried to run [0;36m[1mJT-Zero Update[0m
-  Pi:    Unknown
-  RAM:   32046MB, Cores: 8, Jobs: 8
-
-[0;36m[1/5][0m git pull...
-[1;33m  git pull не вдався, продовжуємо...[0m
-[0;36m[2/5][0m Збірка C++ (make -j8)...
-make: /usr/bin/cmake: No such file or directory
-make: *** [Makefile:580: cmake_check_build_system] Error 127
-[0;36m[3/5][0m Копіювання модуля...
-  [0;32mOK[0m
-[0;36m[4/5][0m Збірка фронтенду...
-  [0;32mFrontend актуальний, пропуск[0m
-[0;36m[5/5][0m Перезапуск сервісу... on their Pi Zero 2W, but it failed at the npm <command>
-
-Usage:
-
-npm install        install all the dependencies in your project
-npm install <foo>  add the <foo> dependency to your project
-npm test           run this project's tests
-npm run <foo>      run the script named <foo>
-npm <command> -h   quick help on <command>
-npm -l             display usage info for all commands
-npm help <term>    search for help on <term>
-npm help npm       more involved overview
-
-All commands:
-
-    access, adduser, audit, bugs, cache, ci, completion,
-    config, dedupe, deprecate, diff, dist-tag, docs, doctor,
-    edit, exec, explain, explore, find-dupes, fund, get, help,
-    help-search, hook, init, install, install-ci-test,
-    install-test, link, ll, login, logout, ls, org, outdated,
-    owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, sbom,
-    search, set, shrinkwrap, star, stars, start, stop, team,
-    test, token, uninstall, unpublish, unstar, update, version,
-    view, whoami
-
-Specify configs in the ini-formatted file:
-    /root/.npmrc
-or on the command line via: npm <command> --key=value
-
-More configuration info: npm help config
-Configuration fields: npm help 7 config
-
-npm@10.8.2 /usr/lib/node_modules/npm install step with a  apt error for .
-9. Agent updates  as requested. Agent provides the user with bash commands (Hit:1 https://cloudfront.debian.net/debian bookworm InRelease
-Hit:2 https://cloudfront.debian.net/debian bookworm-updates InRelease
-Hit:3 https://deb.nodesource.com/node_20.x nodistro InRelease
-Hit:4 https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 InRelease
-Hit:5 https://cloudfront.debian.net/debian-security bookworm-security InRelease
-Reading package lists...
-Building dependency tree...
-Reading state information...
-11 packages can be upgraded. Run 'apt list --upgradable' to see them. and Reading package lists...
-Building dependency tree...
-Reading state information...
-Some packages could not be installed. This may mean that you have
-requested an impossible situation or if you are using the unstable
-distribution that some required packages have not yet been created
-or been moved out of Incoming.
-The following information may help to resolve the situation:
-
-The following packages have unmet dependencies:
- nodejs : Conflicts: npm
- npm : Depends: node-agent-base but it is not going to be installed
-       Depends: node-archy but it is not going to be installed
-       Depends: node-cacache (>= 17) but it is not going to be installed
-       Depends: node-chalk (>= 5.1.2-2~) but it is not going to be installed
-       Depends: node-cli-table3
-       Depends: node-columnify but it is not going to be installed
-       Depends: node-cssesc
-       Depends: node-debug but it is not going to be installed
-       Depends: node-emoji-regex
-       Depends: node-gyp but it is not going to be installed
-       Depends: node-http-proxy-agent
-       Depends: node-https-proxy-agent but it is not going to be installed
-       Depends: node-mkdirp but it is not going to be installed
-       Depends: node-ms but it is not going to be installed
-       Depends: node-nopt but it is not going to be installed
-       Depends: node-normalize-package-data but it is not going to be installed
-       Depends: node-npm-bundled but it is not going to be installed
-       Depends: node-npm-normalize-package-bin
-       Depends: node-npm-package-arg (>= 10) but it is not going to be installed
-       Depends: node-npmlog but it is not going to be installed
-       Depends: node-postcss-selector-parser
-       Depends: node-read-package-json but it is not going to be installed
-       Depends: node-rimraf but it is not going to be installed
-       Depends: node-semver but it is not going to be installed
-       Depends: node-string-width but it is not going to be installed
-       Depends: node-strip-ansi but it is not going to be installed
-       Depends: node-tar but it is not going to be installed
-       Depends: node-validate-npm-package-name but it is not going to be installed
-       Depends: node-which but it is not going to be installed
-       Depends: nodejs:any
-       Recommends: node-tap but it is not going to be installed) to fix their Pi Zero 2W environment.
-*Pending:* Waiting for the user to confirm if the apt 2.6.1 (arm64)
-Usage: apt [options] command
-
-apt is a commandline package manager and provides commands for
-searching and managing as well as querying information about packages.
-It provides the same functionality as the specialized APT tools,
-like apt-get and apt-cache, but enables options more suitable for
-interactive use by default.
-
-Most used commands:
-  list - list packages based on package names
-  search - search in package descriptions
-  show - show package details
-  install - install packages
-  reinstall - reinstall packages
-  remove - remove packages
-  autoremove - automatically remove all unused packages
-  update - update list of available packages
-  upgrade - upgrade the system by installing/upgrading packages
-  full-upgrade - upgrade the system by removing/installing/upgrading packages
-  edit-sources - edit the source information file
-  satisfy - satisfy dependency strings
-
-See apt(8) for more information about the available commands.
-Configuration options and syntax is detailed in apt.conf(5).
-Information about how to configure sources can be found in sources.list(5).
-Package and version choices can be expressed via apt_preferences(5).
-Security details are available in apt-secure(8).
-                                        This APT has Super Cow Powers. fix worked on their Pi Zero 2W.
+1. User mentions Pi 4 updated successfully but USB thermal camera is off. 
+2. Agent explains it's on-demand and asks user to check .
+3. User mentions they re-flashed an SD card and hit an SSH warning.
+4. Agent provides  fix. User asks to add this to .
+5. User points out  has outdated manual instructions.
+6. Agent updates  and all other documentation.
+7. User runs  on a new Pi 4 but notes the USB thermal camera is not showing video on the UI, only simulation.
+8. Agent adds python script to test V4L2. User runs it and confirms camera is at .
+9. Agent realizes  is hardcoded to mock data. Creates  but user reports backend crashes due to  errors. Agent refactors to use .
+10. User confirms it works but is annoyed it's just screenshots (on-demand) and asks for a continuous stream. Also asks for VO fallback to USB if CSI fails.
+*Pending:* The agent just pushed the code for continuous USB streaming, but the VO fallback to USB feature is NOT YET STARTED. Need user to test streaming first.
 
 **Project Health Check:**
-- Broken: None (Locally in Emergent). Pi Zero 2W environment is temporarily blocked by an OS package manager issue.
-- Mocked: Thermal camera data is mocked in the .
+- Broken: None locally. 
+- Mocked: Hardware sensors and cameras are mocked in  when running inside the Emergent container.
 
 **3rd Party Integrations**:
-- None. Local hardware and UART/CSI/USB integrations only.
+- GitHub Actions (CI/CD for React build).
 
 **Testing status**:
-- Testing agent used after significant changes: YES (iteration 16 passed 100%).
+- Testing agent used after significant changes: NO (changes were highly specific to physical Pi hardware and Linux kernel drivers).
 - Troubleshoot agent used after agent stuck in loop: NO.
-- Test files created: 
+- Test files created: None.
 - Known regressions: None.
 
 **Credentials to test flow:**
 - N/A
 
 **What agent forgot to execute**:
-- Nothing. All requirements and document updates were fulfilled.</analysis>
+- The agent just finished the continuous streaming request but has not yet started the **VO fallback to USB** logic requested by the user in their last substantive message. This should be the next task after the user verifies the thermal stream UI works.</analysis>

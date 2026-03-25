@@ -625,19 +625,15 @@ class JTZeroSimulator:
             return dict(self._secondary_camera)
 
     def capture_secondary(self) -> bool:
-        """Trigger on-demand capture from secondary camera."""
+        """Trigger capture from secondary camera (continuous stream)."""
         with self._lock:
             if self._usb_capture and self._usb_capture.streaming:
-                frame = self._usb_capture.capture_frame(timeout_sec=2.0)
-                if frame:
-                    self._last_secondary_frame = frame
-                    self._secondary_capturing = True
-                    self._secondary_camera["active"] = True
-                    self._secondary_camera["frame_count"] += 1
-                    self._secondary_camera["last_capture_time"] = time.time() - self._start_time
-                    self._secondary_camera["fps_actual"] = 1.0
-                    return True
-                return False
+                self._secondary_capturing = True
+                self._secondary_camera["active"] = True
+                self._secondary_camera["frame_count"] = self._usb_capture.frame_count
+                self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+                self._secondary_camera["fps_actual"] = 5.0
+                return True
             self._secondary_capturing = True
             self._secondary_camera["active"] = True
             self._secondary_camera["frame_count"] += 1
@@ -646,9 +642,11 @@ class JTZeroSimulator:
             return True
 
     def get_secondary_frame_data(self) -> bytes:
-        """Return real USB frame or simulated thermal frame."""
-        if self._last_secondary_frame:
-            return self._last_secondary_frame
+        """Return latest frame from USB continuous stream or simulated."""
+        if self._usb_capture and self._usb_capture.streaming:
+            frame = self._usb_capture.capture_frame()
+            if frame:
+                return frame
         w = self._secondary_camera.get("width", 256)
         h = self._secondary_camera.get("height", 192)
         data = bytearray(w * h)
