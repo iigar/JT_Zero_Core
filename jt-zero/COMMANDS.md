@@ -80,30 +80,33 @@ sudo systemctl restart jtzero
 
 ## 3. Оновлення проєкту
 
-### Оновлення з GitHub (якщо є інтернет)
+### Автоматичне оновлення (рекомендовано)
 
 ```bash
 cd ~/jt-zero
 git pull
-cd jt-zero/build
-make -j4
-cp jtzero_native*.so ../../backend/
-sudo systemctl restart jtzero
+./update.sh
 ```
+
+**`update.sh` автоматично:**
+1. `git pull` (якщо є нові зміни)
+2. Перекомпілює C++ (тільки змінені файли)
+3. Копіює модуль в backend
+4. Перевіряє frontend (pre-built з git, npm НЕ потрібен)
+5. Перезапускає сервіс
+6. Показує статус (MAVLink, камери)
 
 ### Оновлення з архіву (без GitHub)
 
 ```bash
 # На комп'ютері: скачайте новий ZIP і скопіюйте на Pi через SCP
-# Далі на Pi:
+scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/
+
+# На Pi:
 cd ~
 unzip -o JT_Zero_Core-main.zip
-rm -rf jt-zero
-mv JT_Zero_Core-main jt-zero
-cd ~/jt-zero/jt-zero/build
-make -j4
-cp jtzero_native*.so ../../backend/
-sudo systemctl restart jtzero
+rm -rf jt-zero && mv JT_Zero_Core-main jt-zero
+cd ~/jt-zero && ./update.sh
 ```
 
 ### Оновлення Python залежностей
@@ -115,24 +118,9 @@ pip install -r requirements-pi.txt
 sudo systemctl restart jtzero
 ```
 
-### Оновлення Dashboard (frontend)
+### Dashboard (frontend)
 
-Dashboard компілюється на комп'ютері (не на Pi):
-
-```bash
-# На комп'ютері:
-cd frontend
-yarn install
-yarn build
-
-# Скопіювати на Pi:
-scp -r build/* pi@jtzero.local:~/jt-zero/backend/static/
-```
-
-На Pi:
-```bash
-sudo systemctl restart jtzero
-```
+Frontend білдиться автоматично через **GitHub Actions** при пуші змін. На Pi Node.js/npm **не потрібен** — pre-built файли приходять через `git pull`.
 
 ---
 
@@ -254,19 +242,31 @@ print(f'Disk: {s.get(\"disk\",{}).get(\"used_gb\",0):.1f} / {s.get(\"disk\",{}).
 ### Камера
 
 ```bash
-# Статистика камери
+# Список камер (CSI + USB)
+curl -s http://localhost:8001/api/cameras | python3 -m json.tool
+
+# Статистика основної камери (VO)
 curl -s http://localhost:8001/api/camera | python3 -c "
 import sys,json; d=json.load(sys.stdin)
 print(f'Type:     {d.get(\"camera_type\",\"?\")}')
+print(f'Sensor:   {d.get(\"csi_sensor_name\",\"?\")}')
 print(f'Status:   {\"Open\" if d.get(\"camera_open\") else \"Closed\"}')
 print(f'FPS:      {d.get(\"fps_actual\",0):.1f}')
 print(f'Frames:   {d.get(\"frame_count\",0)}')
 print(f'Features: {d.get(\"vo_features_tracked\",0)}/{d.get(\"vo_features_detected\",0)}')
+print(f'Conf:     {d.get(\"vo_confidence\",0):.0%}')
 print(f'VO valid: {d.get(\"vo_valid\",False)}')
 "
 
 # Зберегти кадр з камери
 curl -s http://localhost:8001/api/camera/frame -o frame.png
+
+# Список мульти-камер (PRIMARY + SECONDARY)
+curl -s http://localhost:8001/api/cameras | python3 -c "
+import sys,json; cams=json.load(sys.stdin)
+for c in cams:
+    print(f'{c[\"slot\"]:10s} {c[\"label\"]:25s} [{\"ACTIVE\" if c[\"active\"] else \"OFF\"}] {c.get(\"csi_sensor\",\"\")}')
+"
 ```
 
 ### USB термальна камера (діагностика)

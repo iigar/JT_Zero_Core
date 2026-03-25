@@ -13,7 +13,7 @@
 
 ### Рішення: JT-Zero
 
-JT-Zero використовує **звичайну камеру Raspberry Pi** ($15) для визначення позиції дрона. Камера дивиться вниз, бачить текстуру поверхні (підлога, земля, трава), і обчислює переміщення дрона аналізуючи як "зсувається" картинка між кадрами.
+JT-Zero використовує **камеру Raspberry Pi** ($15) для визначення позиції дрона. CSI камера дивиться **вперед**, бачить ландшафт (будівлі, дерева, рельєф), і обчислює переміщення дрона аналізуючи як "зсувається" картинка між кадрами. Додатково USB термальна камера може дивитися **вниз** для теплового сканування.
 
 Ці дані передаються на польотний контролер через **MAVLink** — стандартний протокол зв'язку дронів. ArduPilot приймає ці дані і використовує їх замість (або разом з) GPS.
 
@@ -38,10 +38,14 @@ JT-Zero використовує **звичайну камеру Raspberry Pi** 
 
 Камера знімає 15-25 кадрів на секунду. Підтримуються два типи камер:
 
-| Камера | Інтерфейс | Роздільність | Формат |
-|--------|-----------|-------------|--------|
-| Pi Camera v2/v3 (CSI) | MIPI CSI | 640x480 | Grayscale |
-| USB термальна (Caddx 256) | USB UVC | 480x320 | YUYV → Grayscale |
+| Камера | Інтерфейс | Роздільність | Призначення |
+|--------|-----------|-------------|------------|
+| CSI (IMX219, IMX290, ще 6 + GENERIC) | MIPI CSI | 640x480 | PRIMARY — VO (вперед) |
+| USB термальна (Caddx 256) | USB UVC | 480x320 | SECONDARY — термосканування (вниз) |
+
+**Пріоритет камер (Variant B):** CSI завжди PRIMARY (VO). USB завжди SECONDARY. Якщо CSI немає — USB стає PRIMARY як fallback.
+
+**Авто-детекція CSI:** 8 відомих моделей (OV5647, IMX219, IMX477, IMX708, OV9281, IMX296, OV64A40, IMX290) + GENERIC для будь-якої іншої libcamera-сумісної камери.
 
 **V4L2 MMAP streaming:** Для USB камер використовується апаратно-ефективний MMAP потік з 4 буферами та `select()` таймаутом. Це стандартний метод для UVC камер — простий `read()` не працює з більшістю USB камер.
 
@@ -315,16 +319,24 @@ JT-Zero автоматично визначає яке обладнання до
 
 Система протестована і працює з наступним обладнанням:
 
-### Конфігурація 1: Pi Zero 2W + CSI Camera
-- **Pi:** Raspberry Pi Zero 2 W (Raspbian Bookworm 64-bit)
-- **Камера:** Pi Camera v2 (OV5647), CSI, 15 FPS @ 640x480
+### Конфігурація 1: Pi Zero 2W + IMX219
+- **Pi:** Raspberry Pi Zero 2 W (Raspbian Trixie 64-bit)
+- **Камера:** Pi Camera v2 (IMX219), CSI, 15 FPS @ 640x480
 - **FC:** Matek H743-SLIM V3, ArduCopter V4.3.6
 - **З'єднання:** UART (GPIO14 TX → SERIAL4 RX, GPIO15 RX → SERIAL4 TX)
 - **EKF:** EKF3, ExternalNav як джерело позиції
 
-### Конфігурація 2: Pi 4 + USB Thermal Camera
-- **Pi:** Raspberry Pi 4B (Raspbian Bookworm 64-bit)
-- **Камера:** Caddx Thermal 256, USB UVC, 25 FPS @ 480x320 YUYV
-- **Драйвер:** V4L2 MMAP streaming (4 буфери)
+### Конфігурація 2: Pi Zero 2W + IMX290 STARVIS
+- **Pi:** Raspberry Pi Zero 2 W (Raspbian Trixie 64-bit)
+- **Камера:** IMX290 STARVIS, CSI, 15 FPS @ 640x480 (нічне бачення)
+- **dtoverlay:** `imx290,clock-frequency=37125000` (camera_auto_detect=0)
+- **FC:** Matek H743-SLIM V3, ArduCopter V4.3.6
+- **Результат:** DET:180, TRACK:44, INL:44, Valid:True
+
+### Конфігурація 3: Pi 4 + IMX219 + USB Thermal
+- **Pi:** Raspberry Pi 4B (Raspbian Trixie 64-bit)
+- **CSI (PRIMARY):** Pi Camera v2 (IMX219), VO forward-facing
+- **USB (SECONDARY):** Caddx Thermal 256, USB UVC, 25 FPS @ 480x320 YUYV
+- **Драйвер USB:** V4L2 MMAP streaming (4 буфери)
 - **VO:** Shi-Tomasi grid corner detection + Sobel gradients + bilinear LK
 - **Результат:** Det:180, Track:16-59, Inliers:100%, Valid:True, Conf:0.18-0.29
