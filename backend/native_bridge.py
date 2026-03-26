@@ -224,7 +224,7 @@ class NativeRuntime:
                 from usb_camera import find_usb_camera, USBCameraCapture
                 dev_path, card, driver = find_usb_camera()
                 if dev_path:
-                    self._usb_capture = USBCameraCapture(dev_path, 256, 192)
+                    self._usb_capture = USBCameraCapture(dev_path, 640, 480)
                     if self._usb_capture.open():
                         self._secondary_camera = {
                             "slot": "SECONDARY",
@@ -240,14 +240,16 @@ class NativeRuntime:
                             "last_capture_time": 0,
                             "frame_format": self._usb_capture.frame_format,
                         }
-                        import logging
-                        logging.getLogger("uvicorn").info(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})")
+                        import sys
+                        sys.stderr.write(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})\n")
+                        sys.stderr.flush()
                         return
                     else:
                         self._usb_capture = None
             except Exception as e:
-                import logging
-                logging.getLogger("uvicorn").warning(f"[MultiCam] USB camera init failed: {e}")
+                import sys
+                sys.stderr.write(f"[MultiCam] USB camera init failed: {e}\n")
+                sys.stderr.flush()
                 self._usb_capture = None
             
             # Fallback: simulated secondary
@@ -329,7 +331,8 @@ class NativeRuntime:
             frame = self._usb_capture.capture_frame()
             if frame:
                 return frame
-        import math, random
+        import math
+        import random
         w = self._secondary_camera.get("width", 256)
         h = self._secondary_camera.get("height", 192)
         t = time.time() - self._start_time

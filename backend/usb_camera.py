@@ -7,15 +7,24 @@ Detection via v4l2-ctl --list-devices (no ioctl, reliable on aarch64).
 """
 
 import os
+import sys
 import subprocess
 import re
 import time
 import threading
 
-# Warm-up frames per batch (capture card needs ~2-3 frames to sync)
+# Warm-up frames per batch (capture card needs ~3 frames to produce real output)
 BATCH_SIZE = 4
-# Smaller batch for fast test capture during init
-TEST_BATCH = 2
+# Test capture batch (must be enough for warm-up; 4 is safe)
+TEST_BATCH = 4
+# Pause between batch captures (seconds) — gives USB device time to reset
+CAPTURE_GAP = 0.5
+
+
+def _log(msg: str):
+    """Log to stderr so messages appear in systemd journal."""
+    sys.stderr.write(f"[USBCam] {msg}\n")
+    sys.stderr.flush()
 
 
 def find_usb_camera():
@@ -34,7 +43,6 @@ def find_usb_camera():
         i = 0
         while i < len(lines):
             header = lines[i]
-            # USB devices contain "usb-" in bus info; skip platform devices
             if 'usb-' in header and 'platform:' not in header:
                 name = header.split('(')[0].strip()
                 i += 1
@@ -106,7 +114,7 @@ def _extract_last_jpeg(data: bytes) -> bytes:
 class USBCameraCapture:
     """USB camera: batch capture with warm-up, keep last (real) frame."""
 
-    def __init__(self, device: str, width: int = 256, height: int = 192):
+    def __init__(self, device: str, width: int = 640, height: int = 480):
         self.device = device
         self.req_width = width
         self.req_height = height
@@ -119,6 +127,7 @@ class USBCameraCapture:
         self._frame_count = 0
         self._lock = threading.Lock()
         self._thread = None
+        self._formats = {}
 
     def open(self) -> bool:
         """Detect format, test capture, start streaming thread."""
@@ -126,18 +135,22 @@ class USBCameraCapture:
             _log(f"Device {self.device} not found")
             return False
 
-        formats = _query_formats(self.device)
-        _log(f"Formats: {list(formats.keys())}")
+        self._formats = _query_formats(self.device)
+        _log(f"Formats: {self._formats}")
 
-        self._use_mjpeg = 'MJPG' in formats and formats['MJPG']
+        self._use_mjpeg = 'MJPG' in self._formats and self._formats['MJPG']
         if self._use_mjpeg:
-            res = formats['MJPG']
-            best = min(res, key=lambda r: abs(r[0] - self.req_width) + abs(r[1] - self.req_height))
-            self.actual_w, self.actual_h = best
+            res = self._formats['MJPG']
+            # Prefer 640x480 if available (known reliable), else pick largest
+            if (640, 480) in res:
+                self.actual_w, self.actual_h = 640, 480
+            else:
+                best = max(res, key=lambda r: r[0] * r[1])
+                self.actual_w, self.actual_h = best
             self.frame_format = "jpeg"
-        elif 'YUYV' in formats and formats['YUYV']:
-            res = formats['YUYV']
-            best = min(res, key=lambda r: abs(r[0] - self.req_width) + abs(r[1] - self.req_height))
+        elif 'YUYV' in self._formats and self._formats['YUYV']:
+            res = self._formats['YUYV']
+            best = max(res, key=lambda r: r[0] * r[1])
             self.actual_w, self.actual_h = best
             self.frame_format = "gray"
         else:
@@ -145,12 +158,16 @@ class USBCameraCapture:
             return False
 
         fmt_name = "MJPG" if self._use_mjpeg else "YUYV"
-        _log(f"Using {fmt_name} {self.actual_w}x{self.actual_h}, batch={BATCH_SIZE}")
+        _log(f"Using {fmt_name} {self.actual_w}x{self.actual_h}")
 
-        # Quick test capture (small batch for fast init)
+        # Test capture
         frame = self._capture_batch(count=TEST_BATCH)
         if not frame:
-            _log("Test capture FAILED")
+            _log("Test capture FAILED — trying larger batch")
+            time.sleep(1)
+            frame = self._capture_batch(count=8)
+        if not frame:
+            _log("Test capture FAILED after retry")
             return False
 
         _log(f"Test OK: {len(frame)} bytes ({self.frame_format})")
@@ -176,10 +193,12 @@ class USBCameraCapture:
                     "--stream-mmap", f"--stream-count={n}",
                     "--stream-to=-"
                 ],
-                capture_output=True, timeout=10
+                capture_output=True, timeout=15
             )
             raw = result.stdout
             if not raw:
+                if result.returncode != 0:
+                    _log(f"v4l2-ctl rc={result.returncode}: {result.stderr.decode(errors='ignore').strip()[:100]}")
                 return b''
             if self._use_mjpeg:
                 return _extract_last_jpeg(raw)
@@ -211,7 +230,7 @@ class USBCameraCapture:
         return bytes(gray)
 
     def _stream_loop(self):
-        """Background: continuously capture batches."""
+        """Background: continuously capture batches with gaps for device recovery."""
         _log("Stream loop started")
         consecutive_fails = 0
         while self.streaming:
@@ -224,13 +243,19 @@ class USBCameraCapture:
                     consecutive_fails = 0
                 else:
                     consecutive_fails += 1
-                    if consecutive_fails > 5:
-                        _log(f"Too many failures ({consecutive_fails}), pausing 2s")
-                        time.sleep(2)
+                    _log(f"Batch empty (fail #{consecutive_fails})")
+                    if consecutive_fails > 3:
+                        _log(f"Pausing 3s after {consecutive_fails} failures")
+                        time.sleep(3)
                         consecutive_fails = 0
+                    else:
+                        time.sleep(1)
             except Exception as e:
                 _log(f"Stream error: {e}")
-                time.sleep(1)
+                time.sleep(2)
+
+            # Always pause between captures — USB capture cards need recovery time
+            time.sleep(CAPTURE_GAP)
 
     def capture_frame(self) -> bytes:
         """Return latest frame."""
@@ -247,13 +272,3 @@ class USBCameraCapture:
         self.streaming = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
-
-
-import logging
-
-_logger = logging.getLogger("uvicorn")
-
-
-def _log(msg: str):
-    """Log via uvicorn logger so messages appear in systemd journal."""
-    _logger.info(f"[USBCam] {msg}")
