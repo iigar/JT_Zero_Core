@@ -4,19 +4,16 @@ import { Thermometer, RefreshCw, Power, Flame } from 'lucide-react';
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
 export default function ThermalPanel({ secondary }) {
-  const imgDisplayRef = useRef(null);
   const canvasRef = useRef(null);
-  const [lastFrame, setLastFrame] = useState(null);
-  const [error, setError] = useState(null);
+  const imgRef = useRef(new Image());
+  const [streamActive, setStreamActive] = useState(false);
+  const [frameId, setFrameId] = useState(0);
   const [fps, setFps] = useState(0);
   const [streaming, setStreaming] = useState(false);
   const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
-  const prevBlobUrl = useRef(null);
 
   const {
-    camera_type = 'USB_THERMAL',
     camera_open = false,
-    active = false,
     frame_count = 0,
     width = 640,
     height = 480,
@@ -26,7 +23,7 @@ export default function ThermalPanel({ secondary }) {
   } = secondary || {};
 
   const isRealCamera = camera_open && device !== 'none';
-  const isJpeg = frame_format === 'jpeg';
+  const frameUrl = `${API}/api/camera/secondary/frame`;
 
   // Auto-start streaming when real camera is connected
   useEffect(() => {
@@ -36,98 +33,46 @@ export default function ThermalPanel({ secondary }) {
     }
   }, [isRealCamera]);
 
-  // Sequential polling — fetch next frame only after current one completes
+  // Poll thermal frames — EXACT same pattern as CameraPanel
   useEffect(() => {
-    if (!streaming) {
-      setFps(0);
-      return;
-    }
-    let running = true;
+    if (!streaming) return;
+    let active = true;
 
     const fetchFrame = async () => {
-      if (!running) return;
+      if (!active) return;
       try {
-        const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
-        if (!running) return;
+        const resp = await fetch(`${frameUrl}?t=${Date.now()}`);
         if (resp.ok && resp.status === 200) {
           const blob = await resp.blob();
-          if (!running) return;
           if (blob.size > 0) {
-            // Revoke previous blob URL to prevent memory leak
-            if (prevBlobUrl.current) {
-              URL.revokeObjectURL(prevBlobUrl.current);
-            }
             const url = URL.createObjectURL(blob);
-            prevBlobUrl.current = url;
-
-            if (isJpeg && imgDisplayRef.current) {
-              // Direct <img> update — simplest, most reliable for JPEG
-              imgDisplayRef.current.src = url;
-            } else if (canvasRef.current) {
-              // Grayscale: draw to canvas with false-color palette
-              const img = new Image();
-              img.onload = () => {
-                drawGrayscaleFrame(img);
-                URL.revokeObjectURL(url);
-                prevBlobUrl.current = null;
-              };
-              img.src = url;
-            }
-
-            setLastFrame(Date.now());
-            setError(null);
-
-            // FPS counter
-            fpsCounterRef.current.count++;
-            const now = Date.now();
-            if (now - fpsCounterRef.current.lastTime >= 1000) {
-              setFps(fpsCounterRef.current.count);
-              fpsCounterRef.current.count = 0;
-              fpsCounterRef.current.lastTime = now;
-            }
+            imgRef.current.onload = () => {
+              drawFrame(imgRef.current);
+              URL.revokeObjectURL(url);
+              setStreamActive(true);
+              setFrameId(prev => prev + 1);
+              // FPS counter
+              fpsCounterRef.current.count++;
+              const now = Date.now();
+              if (now - fpsCounterRef.current.lastTime >= 1000) {
+                setFps(fpsCounterRef.current.count);
+                fpsCounterRef.current.count = 0;
+                fpsCounterRef.current.lastTime = now;
+              }
+            };
+            imgRef.current.src = url;
           }
         }
-      } catch (e) {
-        if (running) setError('No signal');
-      }
-      // Schedule next fetch after current completes
-      if (running) setTimeout(fetchFrame, 50);
+      } catch (e) { /* ignore */ }
+      if (active) setTimeout(fetchFrame, 70);
     };
 
     fetchFrame();
-    return () => {
-      running = false;
-      if (prevBlobUrl.current) {
-        URL.revokeObjectURL(prevBlobUrl.current);
-        prevBlobUrl.current = null;
-      }
-    };
-  }, [streaming, isJpeg]);
+    return () => { active = false; };
+  }, [streaming, frameUrl]);
 
-  // Manual snapshot
-  const handleSnapshot = async () => {
-    try {
-      const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
-      if (resp.ok && resp.status === 200) {
-        const blob = await resp.blob();
-        if (blob.size > 0) {
-          if (prevBlobUrl.current) URL.revokeObjectURL(prevBlobUrl.current);
-          const url = URL.createObjectURL(blob);
-          prevBlobUrl.current = url;
-          if (isJpeg && imgDisplayRef.current) {
-            imgDisplayRef.current.src = url;
-          }
-          setLastFrame(Date.now());
-          setError(null);
-        }
-      }
-    } catch (e) {
-      setError('No signal');
-    }
-  };
-
-  // Draw grayscale frame with iron palette (only for non-JPEG)
-  const drawGrayscaleFrame = (img) => {
+  // Draw thermal frame on canvas
+  const drawFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -136,43 +81,8 @@ export default function ThermalPanel({ secondary }) {
 
     ctx.drawImage(img, 0, 0, cw, ch);
 
-    const imageData = ctx.getImageData(0, 0, cw, ch);
-    const data = imageData.data;
-
-    let vmin = 255, vmax = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const v = data[i];
-      if (v < vmin) vmin = v;
-      if (v > vmax) vmax = v;
-    }
-    const range = vmax - vmin;
-    const scale = range > 2 ? 255.0 / range : 1.0;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const raw = data[i];
-      const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
-      let r, g, b;
-      if (v < 64) {
-        const t = v / 64;
-        r = 0; g = 0; b = Math.floor(t * 180);
-      } else if (v < 128) {
-        const t = (v - 64) / 64;
-        r = Math.floor(t * 220); g = 0; b = 180 - Math.floor(t * 100);
-      } else if (v < 200) {
-        const t = (v - 128) / 72;
-        r = 220 + Math.floor(t * 35); g = Math.floor(t * 200); b = 80 - Math.floor(t * 80);
-      } else {
-        const t = (v - 200) / 55;
-        r = 255; g = 200 + Math.floor(t * 55); b = Math.floor(t * 200);
-      }
-      data[i] = r;
-      data[i + 1] = g;
-      data[i + 2] = b;
-    }
-    ctx.putImageData(imageData, 0, 0);
-
     // Crosshair overlay
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -181,6 +91,23 @@ export default function ThermalPanel({ secondary }) {
     ctx.stroke();
     ctx.setLineDash([]);
   };
+
+  // Placeholder when no frames
+  useEffect(() => {
+    if (!streamActive) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const cw = canvas.width;
+      const ch = canvas.height;
+      ctx.fillStyle = '#0A0510';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.fillStyle = 'rgba(255, 120, 60, 0.2)';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(isRealCamera ? 'Starting stream...' : 'THERMAL CAMERA - Not connected', cw / 2, ch / 2);
+    }
+  }, [streamActive, isRealCamera]);
 
   return (
     <div className="h-full flex flex-col bg-[#080508] border border-[#3D1E1E] rounded-sm overflow-hidden" data-testid="thermal-panel">
@@ -195,7 +122,7 @@ export default function ThermalPanel({ secondary }) {
           <span className="text-[8px] text-slate-500">{width}x{height}</span>
         </div>
         <div className="flex items-center gap-2">
-          {streaming && lastFrame && (
+          {streamActive && (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
               LIVE {fps > 0 ? `${fps}fps` : ''}
             </span>
@@ -204,35 +131,16 @@ export default function ThermalPanel({ secondary }) {
         </div>
       </div>
 
-      {/* Video display */}
-      <div className="flex-1 relative min-h-0 bg-black">
-        {isJpeg ? (
-          <img
-            ref={imgDisplayRef}
-            className="absolute inset-0 w-full h-full object-contain"
-            alt="Thermal"
-            data-testid="thermal-img"
-          />
-        ) : (
-          <canvas
-            ref={canvasRef}
-            width={width || 256}
-            height={height || 192}
-            className="absolute inset-0 w-full h-full"
-            style={{ imageRendering: 'pixelated' }}
-            data-testid="thermal-canvas"
-          />
-        )}
-        {!lastFrame && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-[11px] text-orange-400/30 font-mono">THERMAL CAMERA</p>
-              <p className="text-[10px] text-orange-400/20 font-mono mt-1">
-                {isRealCamera ? 'Starting stream...' : 'Not connected'}
-              </p>
-            </div>
-          </div>
-        )}
+      {/* Canvas — fixed resolution like CameraPanel */}
+      <div className="flex-1 relative min-h-0">
+        <canvas
+          ref={canvasRef}
+          width={640}
+          height={480}
+          className="absolute inset-0 w-full h-full"
+          style={{ imageRendering: 'auto' }}
+          data-testid="thermal-canvas"
+        />
       </div>
 
       {/* Controls */}
@@ -253,7 +161,18 @@ export default function ThermalPanel({ secondary }) {
           )}
         </button>
         <button
-          onClick={handleSnapshot}
+          onClick={() => {
+            fetch(`${frameUrl}?t=${Date.now()}`)
+              .then(r => r.blob())
+              .then(blob => {
+                const url = URL.createObjectURL(blob);
+                imgRef.current.onload = () => {
+                  drawFrame(imgRef.current);
+                  URL.revokeObjectURL(url);
+                };
+                imgRef.current.src = url;
+              }).catch(() => {});
+          }}
           disabled={streaming}
           className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm
                      bg-slate-700/20 text-slate-400 border border-slate-600/30 
@@ -263,10 +182,9 @@ export default function ThermalPanel({ secondary }) {
           <RefreshCw className="w-3 h-3" />
           Snapshot
         </button>
-        {error && <span className="text-[8px] text-red-400">{error}</span>}
-        {lastFrame && (
+        {streamActive && (
           <span className="text-[8px] text-slate-600 ml-auto">
-            {new Date(lastFrame).toLocaleTimeString()}
+            {new Date().toLocaleTimeString()}
           </span>
         )}
       </div>
