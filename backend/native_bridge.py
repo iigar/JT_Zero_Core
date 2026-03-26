@@ -330,6 +330,8 @@ class NativeRuntime:
         if self._usb_capture and self._usb_capture.streaming:
             frame = self._usb_capture.capture_frame()
             if frame:
+                self._secondary_camera['active'] = True
+                self._secondary_camera['frame_count'] = self._usb_capture.frame_count
                 return frame
         import math
         import random
