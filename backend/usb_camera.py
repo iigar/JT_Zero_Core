@@ -18,7 +18,7 @@ BATCH_SIZE = 4
 # Test capture batch (must be enough for warm-up; 4 is safe)
 TEST_BATCH = 4
 # Pause between batch captures (seconds) — gives USB device time to reset
-CAPTURE_GAP = 0.5
+CAPTURE_GAP = 0.15
 
 
 def _log(msg: str):

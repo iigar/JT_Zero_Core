@@ -4,21 +4,22 @@ import { Thermometer, RefreshCw, Power, Flame } from 'lucide-react';
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
 export default function ThermalPanel({ secondary }) {
+  const imgDisplayRef = useRef(null);
   const canvasRef = useRef(null);
-  const imgRef = useRef(new Image());
   const [lastFrame, setLastFrame] = useState(null);
   const [error, setError] = useState(null);
   const [fps, setFps] = useState(0);
   const [streaming, setStreaming] = useState(false);
   const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
+  const prevBlobUrl = useRef(null);
 
   const {
     camera_type = 'USB_THERMAL',
     camera_open = false,
     active = false,
     frame_count = 0,
-    width = 256,
-    height = 192,
+    width = 640,
+    height = 480,
     label = 'Thermal (Down)',
     device = 'none',
     frame_format = 'gray',
@@ -30,75 +31,94 @@ export default function ThermalPanel({ secondary }) {
   // Auto-start streaming when real camera is connected
   useEffect(() => {
     if (isRealCamera && !streaming) {
-      // Trigger initial capture
       fetch(`${API}/api/camera/secondary/capture`, { method: 'POST' }).catch(() => {});
       setStreaming(true);
     }
   }, [isRealCamera]);
 
-  // Sequential polling (like CameraPanel) — prevents request pileup
+  // Sequential polling — fetch next frame only after current one completes
   useEffect(() => {
     if (!streaming) {
       setFps(0);
       return;
     }
-    let active = true;
+    let running = true;
 
     const fetchFrame = async () => {
-      if (!active) return;
+      if (!running) return;
       try {
         const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
+        if (!running) return;
         if (resp.ok && resp.status === 200) {
           const blob = await resp.blob();
+          if (!running) return;
           if (blob.size > 0) {
+            // Revoke previous blob URL to prevent memory leak
+            if (prevBlobUrl.current) {
+              URL.revokeObjectURL(prevBlobUrl.current);
+            }
             const url = URL.createObjectURL(blob);
-            imgRef.current.onload = () => {
-              drawThermalFrame(imgRef.current);
-              URL.revokeObjectURL(url);
-              setLastFrame(Date.now());
-              setError(null);
-              // FPS counter
-              fpsCounterRef.current.count++;
-              const now = Date.now();
-              if (now - fpsCounterRef.current.lastTime >= 1000) {
-                setFps(fpsCounterRef.current.count);
-                fpsCounterRef.current.count = 0;
-                fpsCounterRef.current.lastTime = now;
-              }
-            };
-            imgRef.current.onerror = () => {
-              URL.revokeObjectURL(url);
-            };
-            imgRef.current.src = url;
+            prevBlobUrl.current = url;
+
+            if (isJpeg && imgDisplayRef.current) {
+              // Direct <img> update — simplest, most reliable for JPEG
+              imgDisplayRef.current.src = url;
+            } else if (canvasRef.current) {
+              // Grayscale: draw to canvas with false-color palette
+              const img = new Image();
+              img.onload = () => {
+                drawGrayscaleFrame(img);
+                URL.revokeObjectURL(url);
+                prevBlobUrl.current = null;
+              };
+              img.src = url;
+            }
+
+            setLastFrame(Date.now());
+            setError(null);
+
+            // FPS counter
+            fpsCounterRef.current.count++;
+            const now = Date.now();
+            if (now - fpsCounterRef.current.lastTime >= 1000) {
+              setFps(fpsCounterRef.current.count);
+              fpsCounterRef.current.count = 0;
+              fpsCounterRef.current.lastTime = now;
+            }
           }
         }
       } catch (e) {
-        setError('No signal');
+        if (running) setError('No signal');
       }
-      // Schedule next fetch AFTER current one completes (sequential, no pileup)
-      if (active) setTimeout(fetchFrame, 300);
+      // Schedule next fetch after current completes
+      if (running) setTimeout(fetchFrame, 100);
     };
 
     fetchFrame();
-    return () => { active = false; };
-  }, [streaming]);
+    return () => {
+      running = false;
+      if (prevBlobUrl.current) {
+        URL.revokeObjectURL(prevBlobUrl.current);
+        prevBlobUrl.current = null;
+      }
+    };
+  }, [streaming, isJpeg]);
 
-  // Manual snapshot (one-shot fetch)
+  // Manual snapshot
   const handleSnapshot = async () => {
     try {
       const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
       if (resp.ok && resp.status === 200) {
         const blob = await resp.blob();
         if (blob.size > 0) {
+          if (prevBlobUrl.current) URL.revokeObjectURL(prevBlobUrl.current);
           const url = URL.createObjectURL(blob);
-          imgRef.current.onload = () => {
-            drawThermalFrame(imgRef.current);
-            URL.revokeObjectURL(url);
-            setLastFrame(Date.now());
-            setError(null);
-          };
-          imgRef.current.onerror = () => { URL.revokeObjectURL(url); };
-          imgRef.current.src = url;
+          prevBlobUrl.current = url;
+          if (isJpeg && imgDisplayRef.current) {
+            imgDisplayRef.current.src = url;
+          }
+          setLastFrame(Date.now());
+          setError(null);
         }
       }
     } catch (e) {
@@ -106,8 +126,8 @@ export default function ThermalPanel({ secondary }) {
     }
   };
 
-  // Draw thermal frame — JPEG: display as-is (camera provides colors), Grayscale: apply iron palette
-  const drawThermalFrame = (img) => {
+  // Draw grayscale frame with iron palette (only for non-JPEG)
+  const drawGrayscaleFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -116,43 +136,40 @@ export default function ThermalPanel({ secondary }) {
 
     ctx.drawImage(img, 0, 0, cw, ch);
 
-    // For grayscale PNG: apply auto-contrast + iron palette false-color
-    if (!isJpeg) {
-      const imageData = ctx.getImageData(0, 0, cw, ch);
-      const data = imageData.data;
+    const imageData = ctx.getImageData(0, 0, cw, ch);
+    const data = imageData.data;
 
-      let vmin = 255, vmax = 0;
-      for (let i = 0; i < data.length; i += 4) {
-        const v = data[i];
-        if (v < vmin) vmin = v;
-        if (v > vmax) vmax = v;
-      }
-      const range = vmax - vmin;
-      const scale = range > 2 ? 255.0 / range : 1.0;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const raw = data[i];
-        const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
-        let r, g, b;
-        if (v < 64) {
-          const t = v / 64;
-          r = 0; g = 0; b = Math.floor(t * 180);
-        } else if (v < 128) {
-          const t = (v - 64) / 64;
-          r = Math.floor(t * 220); g = 0; b = 180 - Math.floor(t * 100);
-        } else if (v < 200) {
-          const t = (v - 128) / 72;
-          r = 220 + Math.floor(t * 35); g = Math.floor(t * 200); b = 80 - Math.floor(t * 80);
-        } else {
-          const t = (v - 200) / 55;
-          r = 255; g = 200 + Math.floor(t * 55); b = Math.floor(t * 200);
-        }
-        data[i] = r;
-        data[i + 1] = g;
-        data[i + 2] = b;
-      }
-      ctx.putImageData(imageData, 0, 0);
+    let vmin = 255, vmax = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const v = data[i];
+      if (v < vmin) vmin = v;
+      if (v > vmax) vmax = v;
     }
+    const range = vmax - vmin;
+    const scale = range > 2 ? 255.0 / range : 1.0;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const raw = data[i];
+      const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
+      let r, g, b;
+      if (v < 64) {
+        const t = v / 64;
+        r = 0; g = 0; b = Math.floor(t * 180);
+      } else if (v < 128) {
+        const t = (v - 64) / 64;
+        r = Math.floor(t * 220); g = 0; b = 180 - Math.floor(t * 100);
+      } else if (v < 200) {
+        const t = (v - 128) / 72;
+        r = 220 + Math.floor(t * 35); g = Math.floor(t * 200); b = 80 - Math.floor(t * 80);
+      } else {
+        const t = (v - 200) / 55;
+        r = 255; g = 200 + Math.floor(t * 55); b = Math.floor(t * 200);
+      }
+      data[i] = r;
+      data[i + 1] = g;
+      data[i + 2] = b;
+    }
+    ctx.putImageData(imageData, 0, 0);
 
     // Crosshair overlay
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
@@ -164,36 +181,6 @@ export default function ThermalPanel({ secondary }) {
     ctx.stroke();
     ctx.setLineDash([]);
   };
-
-  // Placeholder when no frame
-  useEffect(() => {
-    if (!lastFrame) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      const cw = canvas.width;
-      const ch = canvas.height;
-
-      ctx.fillStyle = '#0A0510';
-      ctx.fillRect(0, 0, cw, ch);
-
-      ctx.strokeStyle = 'rgba(255, 80, 40, 0.06)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < cw; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
-      for (let y = 0; y < ch; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke(); }
-
-      ctx.fillStyle = 'rgba(255, 120, 60, 0.2)';
-      ctx.font = '11px monospace';
-      ctx.textAlign = 'center';
-      if (isRealCamera) {
-        ctx.fillText('THERMAL CAMERA', cw / 2, ch / 2 - 10);
-        ctx.fillText('Starting stream...', cw / 2, ch / 2 + 10);
-      } else {
-        ctx.fillText('THERMAL CAMERA', cw / 2, ch / 2 - 10);
-        ctx.fillText('Not connected', cw / 2, ch / 2 + 10);
-      }
-    }
-  }, [lastFrame, isRealCamera]);
 
   return (
     <div className="h-full flex flex-col bg-[#080508] border border-[#3D1E1E] rounded-sm overflow-hidden" data-testid="thermal-panel">
@@ -217,16 +204,35 @@ export default function ThermalPanel({ secondary }) {
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 relative min-h-0">
-        <canvas
-          ref={canvasRef}
-          width={width || 256}
-          height={height || 192}
-          className="absolute inset-0 w-full h-full"
-          style={{ imageRendering: 'pixelated' }}
-          data-testid="thermal-canvas"
-        />
+      {/* Video display */}
+      <div className="flex-1 relative min-h-0 bg-black">
+        {isJpeg ? (
+          <img
+            ref={imgDisplayRef}
+            className="absolute inset-0 w-full h-full object-contain"
+            alt="Thermal"
+            data-testid="thermal-img"
+          />
+        ) : (
+          <canvas
+            ref={canvasRef}
+            width={width || 256}
+            height={height || 192}
+            className="absolute inset-0 w-full h-full"
+            style={{ imageRendering: 'pixelated' }}
+            data-testid="thermal-canvas"
+          />
+        )}
+        {!lastFrame && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <p className="text-[11px] text-orange-400/30 font-mono">THERMAL CAMERA</p>
+              <p className="text-[10px] text-orange-400/20 font-mono mt-1">
+                {isRealCamera ? 'Starting stream...' : 'Not connected'}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Controls */}
