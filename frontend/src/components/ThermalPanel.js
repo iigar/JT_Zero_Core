@@ -78,7 +78,7 @@ export default function ThermalPanel({ secondary }) {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [streaming, fetchFrame]);
 
-  // Draw thermal frame with iron palette false-color
+  // Draw thermal frame with iron palette false-color + auto-contrast
   const drawThermalFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -88,11 +88,23 @@ export default function ThermalPanel({ secondary }) {
 
     ctx.drawImage(img, 0, 0, cw, ch);
 
-    // Apply thermal false-color (iron palette)
     const imageData = ctx.getImageData(0, 0, cw, ch);
     const data = imageData.data;
+
+    // Auto-contrast: find actual min/max brightness and stretch to 0-255
+    let vmin = 255, vmax = 0;
     for (let i = 0; i < data.length; i += 4) {
       const v = data[i];
+      if (v < vmin) vmin = v;
+      if (v > vmax) vmax = v;
+    }
+    const range = vmax - vmin;
+    const scale = range > 2 ? 255.0 / range : 1.0;
+
+    // Apply auto-contrast + iron palette false-color
+    for (let i = 0; i < data.length; i += 4) {
+      const raw = data[i];
+      const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
       let r, g, b;
       if (v < 64) {
         const t = v / 64;
@@ -194,8 +206,8 @@ export default function ThermalPanel({ secondary }) {
       <div className="flex-1 relative min-h-0">
         <canvas
           ref={canvasRef}
-          width={256}
-          height={192}
+          width={width || 256}
+          height={height || 192}
           className="absolute inset-0 w-full h-full"
           style={{ imageRendering: 'pixelated' }}
           data-testid="thermal-canvas"
