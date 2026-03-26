@@ -1,7 +1,7 @@
 """
-USB Camera capture via persistent v4l2-ctl process.
-MJPEG stream parsed in real-time from stdout pipe.
-Architecture-safe: works on arm32/aarch64/x86.
+USB Camera capture via v4l2-ctl subprocess.
+Batch capture: each grab reopens device (forces MS210x to produce fresh frame).
+MJPEG format. Architecture-safe (arm32/aarch64/x86).
 Detection via v4l2-ctl --list-devices (no ioctl).
 """
 
@@ -11,10 +11,10 @@ import subprocess
 import re
 import time
 import threading
+import hashlib
 
 
 def _log(msg: str):
-    """Log to stderr so messages appear in systemd journal."""
     sys.stderr.write(f"[USBCam] {msg}\n")
     sys.stderr.flush()
 
@@ -27,9 +27,7 @@ def find_usb_camera():
             capture_output=True, text=True, timeout=10
         )
         if result.returncode != 0:
-            _log(f"v4l2-ctl --list-devices failed: {result.stderr.strip()}")
             return None, None, None
-
         lines = result.stdout.splitlines()
         i = 0
         while i < len(lines):
@@ -45,17 +43,9 @@ def find_usb_camera():
                     i += 1
             else:
                 i += 1
-
-        _log("No USB camera in v4l2-ctl output")
-        return None, None, None
-    except subprocess.TimeoutExpired:
-        _log("v4l2-ctl --list-devices timed out")
-        return None, None, None
-    except FileNotFoundError:
-        _log("v4l2-ctl not installed")
         return None, None, None
     except Exception as e:
-        _log(f"find_usb_camera error: {e}")
+        _log(f"find error: {e}")
         return None, None, None
 
 
@@ -84,13 +74,29 @@ def _query_formats(device: str):
         return {}
 
 
+def _extract_last_jpeg(data: bytes) -> bytes:
+    """Extract the LAST complete JPEG from concatenated MJPEG stream."""
+    last = b''
+    pos = 0
+    while pos < len(data):
+        soi = data.find(b'\xff\xd8', pos)
+        if soi < 0:
+            break
+        eoi = data.find(b'\xff\xd9', soi + 2)
+        if eoi < 0:
+            break
+        frame = data[soi:eoi + 2]
+        if len(frame) > 500:
+            last = frame
+        pos = eoi + 2
+    return last
+
+
 class USBCameraCapture:
-    """USB camera: persistent v4l2-ctl process with MJPEG stream parsing."""
+    """Batch capture: reopen device each time to force fresh analog frame."""
 
     def __init__(self, device: str, width: int = 640, height: int = 480):
         self.device = device
-        self.req_width = width
-        self.req_height = height
         self.actual_w = width
         self.actual_h = height
         self.frame_format = "jpeg"
@@ -98,13 +104,13 @@ class USBCameraCapture:
         self._latest_frame = b''
         self._frame_count = 0
         self._lock = threading.Lock()
-        self._proc = None
-        self._reader_thread = None
-        self._watchdog_thread = None
-        self._last_frame_time = 0
+        self._thread = None
+        self._prev_hash = ''
+        # Pre-build the v4l2-ctl command (reused every capture)
+        self._cmd = None
 
     def open(self) -> bool:
-        """Detect format, start persistent capture process."""
+        """Detect format, test capture, start streaming thread."""
         if not os.path.exists(self.device):
             _log(f"Device {self.device} not found")
             return False
@@ -113,142 +119,97 @@ class USBCameraCapture:
         _log(f"Formats: {formats}")
 
         if 'MJPG' not in formats or not formats['MJPG']:
-            _log("No MJPEG support — cannot stream")
+            _log("No MJPEG support")
             return False
 
         res = formats['MJPG']
         if (640, 480) in res:
             self.actual_w, self.actual_h = 640, 480
         else:
-            best = max(res, key=lambda r: r[0] * r[1])
-            self.actual_w, self.actual_h = best
+            self.actual_w, self.actual_h = max(res, key=lambda r: r[0] * r[1])
 
+        # Build reusable command (--stream-count=2: 1 warm-up + 1 real)
+        self._cmd = [
+            "v4l2-ctl", "--device", self.device,
+            "--set-fmt-video", f"width={self.actual_w},height={self.actual_h},pixelformat=MJPG",
+            "--stream-mmap", "--stream-count=2",
+            "--stream-to=-"
+        ]
         _log(f"Using MJPG {self.actual_w}x{self.actual_h}")
 
-        # Start persistent process
-        if not self._start_process():
+        # Test capture with more warm-up frames
+        frame = self._grab(count=4)
+        if not frame:
+            _log("Test capture FAILED, retrying with 8 frames...")
+            time.sleep(0.5)
+            frame = self._grab(count=8)
+        if not frame:
+            _log("Test capture FAILED")
             return False
 
-        # Wait for first valid frame (warm-up)
-        _log("Waiting for first frame (warm-up)...")
-        deadline = time.time() + 8
-        while time.time() < deadline:
-            with self._lock:
-                if self._frame_count >= 1 and len(self._latest_frame) > 500:
-                    _log(f"First frame OK: {len(self._latest_frame)}B, count={self._frame_count}")
-                    self.streaming = True
-                    # Start watchdog
-                    self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
-                    self._watchdog_thread.start()
-                    return True
-            time.sleep(0.1)
+        _log(f"Test OK: {len(frame)}B")
+        with self._lock:
+            self._latest_frame = frame
+            self._frame_count = 1
+        self.streaming = True
 
-        _log("Timeout waiting for first frame")
-        self._kill_process()
-        return False
+        self._thread = threading.Thread(target=self._stream_loop, daemon=True)
+        self._thread.start()
+        _log("Streaming started")
+        return True
 
-    def _start_process(self) -> bool:
-        """Start v4l2-ctl persistent streaming process."""
-        self._kill_process()
+    def _grab(self, count=2) -> bytes:
+        """Single batch grab: open device, capture N frames, close, return last JPEG."""
         try:
             cmd = [
                 "v4l2-ctl", "--device", self.device,
                 "--set-fmt-video", f"width={self.actual_w},height={self.actual_h},pixelformat=MJPG",
-                "--stream-mmap", "--stream-count=0",
+                "--stream-mmap", f"--stream-count={count}",
                 "--stream-to=-"
             ]
-            _log(f"Starting: {' '.join(cmd)}")
-            self._proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0
-            )
-            self._last_frame_time = time.time()
-            # Start reader thread
-            self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
-            self._reader_thread.start()
-            _log(f"Process started (PID {self._proc.pid})")
-            return True
-        except Exception as e:
-            _log(f"Failed to start process: {e}")
-            return False
+            result = subprocess.run(cmd, capture_output=True, timeout=10)
+            if not result.stdout:
+                return b''
+            return _extract_last_jpeg(result.stdout)
+        except subprocess.TimeoutExpired:
+            return b''
+        except Exception:
+            return b''
 
-    def _kill_process(self):
-        """Kill the v4l2-ctl process if running."""
-        if self._proc:
-            try:
-                self._proc.kill()
-                self._proc.wait(timeout=3)
-            except Exception:
-                pass
-            self._proc = None
-
-    def _reader_loop(self):
-        """Read MJPEG stream from v4l2-ctl stdout, parse frame boundaries."""
-        _log("Reader thread started")
-        buf = bytearray()
-        proc = self._proc
-        MAX_BUF = 2 * 1024 * 1024  # 2MB max buffer
-
-        try:
-            while proc and proc.poll() is None:
-                # Read chunk from pipe (blocks until data available)
-                chunk = proc.stdout.read(32768)
-                if not chunk:
-                    break
-                buf.extend(chunk)
-
-                # Prevent buffer overflow
-                if len(buf) > MAX_BUF:
-                    # Keep only last 500KB (should contain at least 1 frame)
-                    buf = buf[-500000:]
-
-                # Extract all complete JPEG frames from buffer
-                while True:
-                    soi = buf.find(b'\xff\xd8')
-                    if soi < 0:
-                        buf.clear()
-                        break
-                    # Discard data before SOI
-                    if soi > 0:
-                        buf = buf[soi:]
-                        soi = 0
-
-                    eoi = buf.find(b'\xff\xd9', 2)
-                    if eoi < 0:
-                        break  # Incomplete frame, wait for more data
-
-                    # Complete JPEG frame: SOI to EOI+2
-                    frame = bytes(buf[:eoi + 2])
-                    buf = buf[eoi + 2:]
-
-                    # Skip tiny frames (likely corrupt or warm-up)
-                    if len(frame) > 500:
-                        with self._lock:
-                            self._latest_frame = frame
-                            self._frame_count += 1
-                            self._last_frame_time = time.time()
-        except Exception as e:
-            _log(f"Reader error: {e}")
-
-        _log(f"Reader thread ended (proc alive: {proc.poll() is None if proc else 'N/A'})")
-
-    def _watchdog_loop(self):
-        """Restart process if no frames received for 5 seconds."""
-        _log("Watchdog started")
+    def _stream_loop(self):
+        """Background: rapid batch captures, no gap (device reopen forces fresh frame)."""
+        _log("Stream loop started")
+        fails = 0
         while self.streaming:
-            time.sleep(2)
-            with self._lock:
-                elapsed = time.time() - self._last_frame_time
-                count = self._frame_count
+            t0 = time.time()
+            frame = self._grab(count=2)
+            dt = time.time() - t0
 
-            if elapsed > 5:
-                _log(f"Watchdog: no frame for {elapsed:.0f}s (count={count}), restarting process")
-                self._start_process()
+            if frame:
+                h = hashlib.md5(frame).hexdigest()[:8]
+                changed = h != self._prev_hash
+                self._prev_hash = h
+
+                with self._lock:
+                    self._latest_frame = frame
+                    self._frame_count += 1
+                cnt = self._frame_count
+                fails = 0
+
+                # Log every 10th frame (or every changed frame for first 30)
+                if cnt <= 30 or cnt % 10 == 0:
+                    _log(f"#{cnt}: {len(frame)}B {dt:.2f}s hash={h} {'NEW' if changed else 'same'}")
+            else:
+                fails += 1
+                if fails <= 3:
+                    _log(f"Grab empty (fail #{fails}, {dt:.2f}s)")
+                    time.sleep(0.3)
+                else:
+                    _log(f"Pausing 2s after {fails} failures")
+                    time.sleep(2)
+                    fails = 0
 
     def capture_frame(self) -> bytes:
-        """Return latest frame."""
         with self._lock:
             return self._latest_frame
 
@@ -258,9 +219,7 @@ class USBCameraCapture:
             return self._frame_count
 
     def close(self):
-        """Stop streaming and kill process."""
         _log("Closing")
         self.streaming = False
-        self._kill_process()
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=3)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
