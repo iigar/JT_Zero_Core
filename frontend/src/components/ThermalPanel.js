@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Thermometer, RefreshCw, Power, Flame } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL || '';
@@ -6,11 +6,10 @@ const API = process.env.REACT_APP_BACKEND_URL || '';
 export default function ThermalPanel({ secondary }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
-  const [streaming, setStreaming] = useState(false);
   const [lastFrame, setLastFrame] = useState(null);
   const [error, setError] = useState(null);
   const [fps, setFps] = useState(0);
-  const intervalRef = useRef(null);
+  const [streaming, setStreaming] = useState(false);
   const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
 
   const {
@@ -28,8 +27,64 @@ export default function ThermalPanel({ secondary }) {
   const isRealCamera = camera_open && device !== 'none';
   const isJpeg = frame_format === 'jpeg';
 
-  // Fetch and draw a single frame
-  const fetchFrame = useCallback(async () => {
+  // Auto-start streaming when real camera is connected
+  useEffect(() => {
+    if (isRealCamera && !streaming) {
+      // Trigger initial capture
+      fetch(`${API}/api/camera/secondary/capture`, { method: 'POST' }).catch(() => {});
+      setStreaming(true);
+    }
+  }, [isRealCamera]);
+
+  // Sequential polling (like CameraPanel) — prevents request pileup
+  useEffect(() => {
+    if (!streaming) {
+      setFps(0);
+      return;
+    }
+    let active = true;
+
+    const fetchFrame = async () => {
+      if (!active) return;
+      try {
+        const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
+        if (resp.ok && resp.status === 200) {
+          const blob = await resp.blob();
+          if (blob.size > 0) {
+            const url = URL.createObjectURL(blob);
+            imgRef.current.onload = () => {
+              drawThermalFrame(imgRef.current);
+              URL.revokeObjectURL(url);
+              setLastFrame(Date.now());
+              setError(null);
+              // FPS counter
+              fpsCounterRef.current.count++;
+              const now = Date.now();
+              if (now - fpsCounterRef.current.lastTime >= 1000) {
+                setFps(fpsCounterRef.current.count);
+                fpsCounterRef.current.count = 0;
+                fpsCounterRef.current.lastTime = now;
+              }
+            };
+            imgRef.current.onerror = () => {
+              URL.revokeObjectURL(url);
+            };
+            imgRef.current.src = url;
+          }
+        }
+      } catch (e) {
+        setError('No signal');
+      }
+      // Schedule next fetch AFTER current one completes (sequential, no pileup)
+      if (active) setTimeout(fetchFrame, 300);
+    };
+
+    fetchFrame();
+    return () => { active = false; };
+  }, [streaming]);
+
+  // Manual snapshot (one-shot fetch)
+  const handleSnapshot = async () => {
     try {
       const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
       if (resp.ok && resp.status === 200) {
@@ -41,44 +96,15 @@ export default function ThermalPanel({ secondary }) {
             URL.revokeObjectURL(url);
             setLastFrame(Date.now());
             setError(null);
-            // FPS counter
-            fpsCounterRef.current.count++;
-            const now = Date.now();
-            if (now - fpsCounterRef.current.lastTime >= 1000) {
-              setFps(fpsCounterRef.current.count);
-              fpsCounterRef.current.count = 0;
-              fpsCounterRef.current.lastTime = now;
-            }
           };
+          imgRef.current.onerror = () => { URL.revokeObjectURL(url); };
           imgRef.current.src = url;
         }
       }
     } catch (e) {
       setError('No signal');
     }
-  }, []);
-
-  // Auto-start streaming when real camera is connected
-  useEffect(() => {
-    if (isRealCamera && !streaming) {
-      setStreaming(true);
-    }
-  }, [isRealCamera]);
-
-  // Streaming loop
-  useEffect(() => {
-    if (streaming) {
-      // Trigger initial capture to activate the camera
-      fetch(`${API}/api/camera/secondary/capture`, { method: 'POST' }).catch(() => {});
-      fetchFrame();
-      // Stream at ~5fps (200ms interval)
-      intervalRef.current = setInterval(fetchFrame, 200);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      setFps(0);
-    }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [streaming, fetchFrame]);
+  };
 
   // Draw thermal frame — JPEG: display as-is (camera provides colors), Grayscale: apply iron palette
   const drawThermalFrame = (img) => {
@@ -221,7 +247,7 @@ export default function ThermalPanel({ secondary }) {
           )}
         </button>
         <button
-          onClick={fetchFrame}
+          onClick={handleSnapshot}
           disabled={streaming}
           className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm
                      bg-slate-700/20 text-slate-400 border border-slate-600/30 

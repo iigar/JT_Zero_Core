@@ -12,8 +12,10 @@ import re
 import time
 import threading
 
-# Warm-up frames per batch (capture card needs ~5 frames to sync with analog signal)
-BATCH_SIZE = 8
+# Warm-up frames per batch (capture card needs ~2-3 frames to sync)
+BATCH_SIZE = 4
+# Smaller batch for fast test capture during init
+TEST_BATCH = 2
 
 
 def find_usb_camera():
@@ -145,8 +147,8 @@ class USBCameraCapture:
         fmt_name = "MJPG" if self._use_mjpeg else "YUYV"
         _log(f"Using {fmt_name} {self.actual_w}x{self.actual_h}, batch={BATCH_SIZE}")
 
-        # Test capture
-        frame = self._capture_batch()
+        # Quick test capture (small batch for fast init)
+        frame = self._capture_batch(count=TEST_BATCH)
         if not frame:
             _log("Test capture FAILED")
             return False
@@ -162,18 +164,19 @@ class USBCameraCapture:
         _log("Streaming started")
         return True
 
-    def _capture_batch(self) -> bytes:
-        """Capture BATCH_SIZE frames via v4l2-ctl, return the last one."""
+    def _capture_batch(self, count=None) -> bytes:
+        """Capture N frames via v4l2-ctl, return the last one."""
+        n = count or BATCH_SIZE
         fmt = "MJPG" if self._use_mjpeg else "YUYV"
         try:
             result = subprocess.run(
                 [
                     "v4l2-ctl", "--device", self.device,
                     "--set-fmt-video", f"width={self.actual_w},height={self.actual_h},pixelformat={fmt}",
-                    "--stream-mmap", f"--stream-count={BATCH_SIZE}",
+                    "--stream-mmap", f"--stream-count={n}",
                     "--stream-to=-"
                 ],
-                capture_output=True, timeout=15
+                capture_output=True, timeout=10
             )
             raw = result.stdout
             if not raw:
