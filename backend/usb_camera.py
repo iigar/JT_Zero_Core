@@ -3,53 +3,59 @@ USB Camera capture via v4l2-ctl subprocess.
 Each capture: batch of N frames (warm-up + real), keep last frame.
 MJPEG preferred (preserves camera's native colors).
 Architecture-safe: works on arm32/aarch64/x86.
+Detection via v4l2-ctl --list-devices (no ioctl, reliable on aarch64).
 """
 
 import os
-import sys
 import subprocess
-import struct
-import fcntl
 import re
 import time
 import threading
-
-# V4L2 capability query
-VIDIOC_QUERYCAP = 0x80685600
-V4L2_CAP_VIDEO_CAPTURE = 0x00000001
 
 # Warm-up frames per batch (capture card needs ~5 frames to sync with analog signal)
 BATCH_SIZE = 8
 
 
 def find_usb_camera():
-    """Scan /dev/video* for USB cameras."""
-    for i in range(10):
-        path = f"/dev/video{i}"
-        if not os.path.exists(path):
-            continue
-        try:
-            fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
-        except OSError:
-            continue
-        try:
-            buf = bytearray(104)
-            fcntl.ioctl(fd, VIDIOC_QUERYCAP, buf)
-            driver = buf[0:16].split(b'\x00')[0].decode('utf-8', errors='ignore')
-            card = buf[16:48].split(b'\x00')[0].decode('utf-8', errors='ignore')
-            bus = buf[48:80].split(b'\x00')[0].decode('utf-8', errors='ignore')
-            caps = struct.unpack_from('<I', buf, 84)[0]
-            if ('uvc' in driver.lower() or 'usb' in bus.lower()) and (caps & V4L2_CAP_VIDEO_CAPTURE):
-                os.close(fd)
-                return path, card, driver
-        except OSError:
-            pass
-        finally:
-            try:
-                os.close(fd)
-            except:
-                pass
-    return None, None, None
+    """Find USB camera by parsing v4l2-ctl --list-devices output.
+    Works reliably on aarch64 (no Python ioctl needed)."""
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "--list-devices"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            _log(f"v4l2-ctl --list-devices failed: {result.stderr.strip()}")
+            return None, None, None
+
+        lines = result.stdout.splitlines()
+        i = 0
+        while i < len(lines):
+            header = lines[i]
+            # USB devices contain "usb-" in bus info; skip platform devices
+            if 'usb-' in header and 'platform:' not in header:
+                name = header.split('(')[0].strip()
+                i += 1
+                while i < len(lines) and (lines[i].startswith('\t') or lines[i].startswith('  ')):
+                    dev = lines[i].strip()
+                    if dev.startswith('/dev/video'):
+                        _log(f"Detected: {name} @ {dev}")
+                        return dev, name, "usb"
+                    i += 1
+            else:
+                i += 1
+
+        _log("No USB camera in v4l2-ctl output")
+        return None, None, None
+    except subprocess.TimeoutExpired:
+        _log("v4l2-ctl --list-devices timed out (10s)")
+        return None, None, None
+    except FileNotFoundError:
+        _log("v4l2-ctl not installed")
+        return None, None, None
+    except Exception as e:
+        _log(f"find_usb_camera error: {e}")
+        return None, None, None
 
 
 def _query_formats(device: str):
