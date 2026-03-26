@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture implemented** — CSI forward (VO) + USB thermal (downward, on-demand). **8 known CSI sensors + GENERIC fallback** for any libcamera-compatible camera. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js.
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl (Python, architecture-independent). **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **Next:** Continuous USB streaming + VO fallback on USB when CSI loses tracking.
 
 ---
 
@@ -82,9 +82,16 @@ On startup, the runtime probes hardware interfaces:
 
 | Camera | Interface | Role | Stream Mode | Pi Load |
 |--------|-----------|------|-------------|---------|
-| CSI (Forward) | CSI → GPU/ISP via libcamera | Visual Odometry | Always (15fps) | Low (GPU ISP) |
-| USB Thermal (Down) | USB 2.0, V4L2 MMAP | Thermal scanning | On-demand | Low (256x192) |
+| CSI (Forward) | CSI → GPU/ISP via libcamera | Visual Odometry | Continuous (15fps) | Low (GPU ISP) |
+| USB Thermal (Down) | USB 2.0, v4l2-ctl subprocess | Thermal + VO fallback | Continuous (background thread) | Low (256x192) |
 | Analog FPV | Analog VTX | Pilot view | Bypasses Pi | None |
+
+**USB Camera Implementation:**
+- `backend/usb_camera.py` — Pure Python, uses `v4l2-ctl --stream-mmap` subprocess (no raw ioctl — works on arm32/arm64/x86)
+- `find_usb_camera()` — scans `/dev/video0..9`, uses VIDIOC_QUERYCAP to identify UVC devices
+- `USBCameraCapture` — captures frames via v4l2-ctl, converts YUYV → grayscale
+- Both `native_bridge.py` and `simulator.py` auto-detect USB cameras at init via `usb_camera.py`
+- If no USB camera found — gracefully degrades to "not connected" (no fake data)
 
 **API endpoints for multi-camera:**
 
@@ -103,7 +110,7 @@ On startup, the runtime probes hardware interfaces:
 
 ### What is Visual Odometry (VO)?
 
-VO measures drone displacement by comparing consecutive camera frames. The camera looks down at the ground and tracks how features (rocks, bushes, paths) move between frames — if a rock shifts 10 pixels left in the frame, the drone moved right by X meters.
+VO measures drone displacement by comparing consecutive camera frames. The CSI camera faces **forward** and tracks features in the landscape (buildings, trees, terrain) — if features shift left in the frame, the drone moved right. The USB thermal camera faces **downward** and can serve as VO fallback when the CSI camera loses tracking (night, fog, featureless sky).
 
 ### Full Flight Cycle
 
@@ -476,6 +483,9 @@ JT-Zero автоматично визначить будь-яку камеру �
 - **GitHub Actions CI/CD:** `.github/workflows/build-frontend.yml` auto-builds React on push, commits to `backend/static/`
 - **update.sh refactor:** Pre-built frontend from git (priority) → local npm build (fallback) → error message. Pi Zero no longer needs Node.js/npm
 - **Verified on Pi Zero 2W:** IMX290 STARVIS detected, VO active (DET:180, TRACK:44, INL:44, Valid:True), MAVLink CONNECTED
+- **Real USB camera capture:** `usb_camera.py` — v4l2-ctl subprocess (architecture-independent), auto-detect UVC devices, YUYV→grayscale
+- **Verified on Pi 4:** AV TO USB2.0 (Caddx thermal) detected and streaming real frames via v4l2-ctl
+- **V4L2 ioctl ABI fix:** Replaced raw fcntl/mmap V4L2 (broken on aarch64 due to struct size mismatch) with v4l2-ctl subprocess
 - Test reports: /app/test_reports/iteration_1-16.json
 
 ---

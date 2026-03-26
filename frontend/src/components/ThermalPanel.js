@@ -6,11 +6,12 @@ const API = process.env.REACT_APP_BACKEND_URL || '';
 export default function ThermalPanel({ secondary }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
-  const [capturing, setCapturing] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [streaming, setStreaming] = useState(false);
   const [lastFrame, setLastFrame] = useState(null);
   const [error, setError] = useState(null);
+  const [fps, setFps] = useState(0);
   const intervalRef = useRef(null);
+  const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
 
   const {
     camera_type = 'USB_THERMAL',
@@ -20,16 +21,14 @@ export default function ThermalPanel({ secondary }) {
     width = 256,
     height = 192,
     label = 'Thermal (Down)',
+    device = 'none',
   } = secondary || {};
 
-  // Capture a single frame on demand
-  const captureFrame = useCallback(async () => {
-    setCapturing(true);
-    setError(null);
+  const isRealCamera = camera_open && device !== 'none';
+
+  // Fetch and draw a single frame
+  const fetchFrame = useCallback(async () => {
     try {
-      // Trigger capture
-      await fetch(`${API}/api/camera/secondary/capture`, { method: 'POST' });
-      // Fetch frame
       const resp = await fetch(`${API}/api/camera/secondary/frame?t=${Date.now()}`);
       if (resp.ok && resp.status === 200) {
         const blob = await resp.blob();
@@ -39,28 +38,47 @@ export default function ThermalPanel({ secondary }) {
             drawThermalFrame(imgRef.current);
             URL.revokeObjectURL(url);
             setLastFrame(Date.now());
+            setError(null);
+            // FPS counter
+            fpsCounterRef.current.count++;
+            const now = Date.now();
+            if (now - fpsCounterRef.current.lastTime >= 1000) {
+              setFps(fpsCounterRef.current.count);
+              fpsCounterRef.current.count = 0;
+              fpsCounterRef.current.lastTime = now;
+            }
           };
           imgRef.current.src = url;
         }
       }
     } catch (e) {
-      setError('Capture failed');
+      setError('No signal');
     }
-    setCapturing(false);
   }, []);
 
-  // Auto-refresh mode (1fps)
+  // Auto-start streaming when real camera is connected
   useEffect(() => {
-    if (autoRefresh) {
-      captureFrame();
-      intervalRef.current = setInterval(captureFrame, 1000);
+    if (isRealCamera && !streaming) {
+      setStreaming(true);
+    }
+  }, [isRealCamera]);
+
+  // Streaming loop
+  useEffect(() => {
+    if (streaming) {
+      // Trigger initial capture to activate the camera
+      fetch(`${API}/api/camera/secondary/capture`, { method: 'POST' }).catch(() => {});
+      fetchFrame();
+      // Stream at ~5fps (200ms interval)
+      intervalRef.current = setInterval(fetchFrame, 200);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      setFps(0);
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [autoRefresh, captureFrame]);
+  }, [streaming, fetchFrame]);
 
-  // Draw thermal frame with false-color overlay
+  // Draw thermal frame with iron palette false-color
   const drawThermalFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -68,15 +86,13 @@ export default function ThermalPanel({ secondary }) {
     const cw = canvas.width;
     const ch = canvas.height;
 
-    // Draw grayscale image
     ctx.drawImage(img, 0, 0, cw, ch);
 
     // Apply thermal false-color (iron palette)
     const imageData = ctx.getImageData(0, 0, cw, ch);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-      const v = data[i]; // grayscale value
-      // Iron palette: black -> blue -> red -> yellow -> white
+      const v = data[i];
       let r, g, b;
       if (v < 64) {
         const t = v / 64;
@@ -107,7 +123,7 @@ export default function ThermalPanel({ secondary }) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Temperature legend
+    // Temperature legend bar
     const legendW = 12, legendH = ch - 20;
     const legendX = cw - legendW - 8, legendY = 10;
     const gradient = ctx.createLinearGradient(legendX, legendY + legendH, legendX, legendY);
@@ -122,7 +138,7 @@ export default function ThermalPanel({ secondary }) {
     ctx.strokeRect(legendX, legendY, legendW, legendH);
   };
 
-  // Draw placeholder when no frame
+  // Placeholder when no frame
   useEffect(() => {
     if (!lastFrame) {
       const canvas = canvasRef.current;
@@ -131,11 +147,9 @@ export default function ThermalPanel({ secondary }) {
       const cw = canvas.width;
       const ch = canvas.height;
 
-      // Dark thermal placeholder
       ctx.fillStyle = '#0A0510';
       ctx.fillRect(0, 0, cw, ch);
 
-      // Grid
       ctx.strokeStyle = 'rgba(255, 80, 40, 0.06)';
       ctx.lineWidth = 1;
       for (let x = 0; x < cw; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke(); }
@@ -144,10 +158,15 @@ export default function ThermalPanel({ secondary }) {
       ctx.fillStyle = 'rgba(255, 120, 60, 0.2)';
       ctx.font = '11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('THERMAL CAMERA', cw / 2, ch / 2 - 10);
-      ctx.fillText('Press CAPTURE to start', cw / 2, ch / 2 + 10);
+      if (isRealCamera) {
+        ctx.fillText('THERMAL CAMERA', cw / 2, ch / 2 - 10);
+        ctx.fillText('Starting stream...', cw / 2, ch / 2 + 10);
+      } else {
+        ctx.fillText('THERMAL CAMERA', cw / 2, ch / 2 - 10);
+        ctx.fillText('Not connected', cw / 2, ch / 2 + 10);
+      }
     }
-  }, [lastFrame]);
+  }, [lastFrame, isRealCamera]);
 
   return (
     <div className="h-full flex flex-col bg-[#080508] border border-[#3D1E1E] rounded-sm overflow-hidden" data-testid="thermal-panel">
@@ -162,9 +181,9 @@ export default function ThermalPanel({ secondary }) {
           <span className="text-[8px] text-slate-500">{width}x{height}</span>
         </div>
         <div className="flex items-center gap-2">
-          {autoRefresh && (
+          {streaming && lastFrame && (
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
-              LIVE
+              LIVE {fps > 0 ? `${fps}fps` : ''}
             </span>
           )}
           <span className="text-[9px] text-slate-500">#{frame_count}</span>
@@ -186,32 +205,35 @@ export default function ThermalPanel({ secondary }) {
       {/* Controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0C0810] border-t border-[#3D1E1E]/50 shrink-0">
         <button
-          onClick={captureFrame}
-          disabled={capturing}
-          className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm
-                     bg-orange-500/15 text-orange-400 border border-orange-500/25 
-                     hover:bg-orange-500/25 transition-colors disabled:opacity-50"
-          data-testid="thermal-capture-btn"
+          onClick={() => setStreaming(!streaming)}
+          className={`flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm border transition-colors ${
+            streaming
+              ? 'bg-red-500/20 text-red-400 border-red-500/30 hover:bg-red-500/30'
+              : 'bg-orange-500/15 text-orange-400 border-orange-500/25 hover:bg-orange-500/25'
+          }`}
+          data-testid="thermal-stream-btn"
         >
-          <Flame className="w-3 h-3" />
-          {capturing ? 'Capturing...' : 'Capture'}
+          {streaming ? (
+            <><Power className="w-3 h-3" /> Stop</>
+          ) : (
+            <><Flame className="w-3 h-3" /> Stream</>
+          )}
         </button>
         <button
-          onClick={() => setAutoRefresh(!autoRefresh)}
-          className={`flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm border transition-colors ${
-            autoRefresh
-              ? 'bg-red-500/20 text-red-400 border-red-500/30'
-              : 'bg-slate-700/20 text-slate-400 border-slate-600/30 hover:bg-slate-700/30'
-          }`}
-          data-testid="thermal-autorefresh-btn"
+          onClick={fetchFrame}
+          disabled={streaming}
+          className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold uppercase rounded-sm
+                     bg-slate-700/20 text-slate-400 border border-slate-600/30 
+                     hover:bg-slate-700/30 transition-colors disabled:opacity-30"
+          data-testid="thermal-capture-btn"
         >
-          <RefreshCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} />
-          {autoRefresh ? 'Stop' : 'Auto (1fps)'}
+          <RefreshCw className="w-3 h-3" />
+          Snapshot
         </button>
         {error && <span className="text-[8px] text-red-400">{error}</span>}
         {lastFrame && (
           <span className="text-[8px] text-slate-600 ml-auto">
-            Last: {new Date(lastFrame).toLocaleTimeString()}
+            {new Date(lastFrame).toLocaleTimeString()}
           </span>
         )}
       </div>
