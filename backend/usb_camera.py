@@ -249,6 +249,11 @@ class USBCameraCapture:
             self._thread.join(timeout=5)
 
 
+import logging
+
+_logger = logging.getLogger("uvicorn")
+
+
 def _log(msg: str):
-    """Print with flush for systemd journal visibility."""
-    print(f"[USBCam] {msg}", flush=True)
+    """Log via uvicorn logger so messages appear in systemd journal."""
+    _logger.info(f"[USBCam] {msg}")

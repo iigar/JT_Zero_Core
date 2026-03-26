@@ -240,12 +240,14 @@ class NativeRuntime:
                             "last_capture_time": 0,
                             "frame_format": self._usb_capture.frame_format,
                         }
-                        print(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})")
+                        import logging
+                        logging.getLogger("uvicorn").info(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})")
                         return
                     else:
                         self._usb_capture = None
             except Exception as e:
-                print(f"[MultiCam] USB camera init failed: {e}")
+                import logging
+                logging.getLogger("uvicorn").warning(f"[MultiCam] USB camera init failed: {e}")
                 self._usb_capture = None
             
             # Fallback: simulated secondary
