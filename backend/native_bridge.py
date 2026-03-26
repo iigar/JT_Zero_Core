@@ -238,6 +238,7 @@ class NativeRuntime:
                             "label": f"USB Thermal ({card or 'Down'})",
                             "device": dev_path,
                             "last_capture_time": 0,
+                            "frame_format": self._usb_capture.frame_format,
                         }
                         print(f"[MultiCam] USB camera ready: {card} @ {dev_path} ({self._usb_capture.actual_w}x{self._usb_capture.actual_h})")
                         return
@@ -260,6 +261,7 @@ class NativeRuntime:
                 "label": "USB Thermal (not connected)",
                 "device": "none",
                 "last_capture_time": 0,
+                "frame_format": "gray",
             }
 
     def get_cameras(self) -> list:

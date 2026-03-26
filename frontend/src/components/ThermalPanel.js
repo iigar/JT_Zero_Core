@@ -22,9 +22,11 @@ export default function ThermalPanel({ secondary }) {
     height = 192,
     label = 'Thermal (Down)',
     device = 'none',
+    frame_format = 'gray',
   } = secondary || {};
 
   const isRealCamera = camera_open && device !== 'none';
+  const isJpeg = frame_format === 'jpeg';
 
   // Fetch and draw a single frame
   const fetchFrame = useCallback(async () => {
@@ -78,7 +80,7 @@ export default function ThermalPanel({ secondary }) {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [streaming, fetchFrame]);
 
-  // Draw thermal frame with iron palette false-color + auto-contrast
+  // Draw thermal frame — JPEG: display as-is (camera provides colors), Grayscale: apply iron palette
   const drawThermalFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -88,45 +90,46 @@ export default function ThermalPanel({ secondary }) {
 
     ctx.drawImage(img, 0, 0, cw, ch);
 
-    const imageData = ctx.getImageData(0, 0, cw, ch);
-    const data = imageData.data;
+    // For grayscale PNG: apply auto-contrast + iron palette false-color
+    if (!isJpeg) {
+      const imageData = ctx.getImageData(0, 0, cw, ch);
+      const data = imageData.data;
 
-    // Auto-contrast: find actual min/max brightness and stretch to 0-255
-    let vmin = 255, vmax = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      const v = data[i];
-      if (v < vmin) vmin = v;
-      if (v > vmax) vmax = v;
-    }
-    const range = vmax - vmin;
-    const scale = range > 2 ? 255.0 / range : 1.0;
-
-    // Apply auto-contrast + iron palette false-color
-    for (let i = 0; i < data.length; i += 4) {
-      const raw = data[i];
-      const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
-      let r, g, b;
-      if (v < 64) {
-        const t = v / 64;
-        r = 0; g = 0; b = Math.floor(t * 180);
-      } else if (v < 128) {
-        const t = (v - 64) / 64;
-        r = Math.floor(t * 220); g = 0; b = 180 - Math.floor(t * 100);
-      } else if (v < 200) {
-        const t = (v - 128) / 72;
-        r = 220 + Math.floor(t * 35); g = Math.floor(t * 200); b = 80 - Math.floor(t * 80);
-      } else {
-        const t = (v - 200) / 55;
-        r = 255; g = 200 + Math.floor(t * 55); b = Math.floor(t * 200);
+      let vmin = 255, vmax = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const v = data[i];
+        if (v < vmin) vmin = v;
+        if (v > vmax) vmax = v;
       }
-      data[i] = r;
-      data[i + 1] = g;
-      data[i + 2] = b;
-    }
-    ctx.putImageData(imageData, 0, 0);
+      const range = vmax - vmin;
+      const scale = range > 2 ? 255.0 / range : 1.0;
 
-    // Crosshair
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      for (let i = 0; i < data.length; i += 4) {
+        const raw = data[i];
+        const v = range > 2 ? Math.min(255, Math.max(0, Math.round((raw - vmin) * scale))) : raw;
+        let r, g, b;
+        if (v < 64) {
+          const t = v / 64;
+          r = 0; g = 0; b = Math.floor(t * 180);
+        } else if (v < 128) {
+          const t = (v - 64) / 64;
+          r = Math.floor(t * 220); g = 0; b = 180 - Math.floor(t * 100);
+        } else if (v < 200) {
+          const t = (v - 128) / 72;
+          r = 220 + Math.floor(t * 35); g = Math.floor(t * 200); b = 80 - Math.floor(t * 80);
+        } else {
+          const t = (v - 200) / 55;
+          r = 255; g = 200 + Math.floor(t * 55); b = Math.floor(t * 200);
+        }
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    // Crosshair overlay
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -134,20 +137,6 @@ export default function ThermalPanel({ secondary }) {
     ctx.moveTo(0, ch / 2); ctx.lineTo(cw, ch / 2);
     ctx.stroke();
     ctx.setLineDash([]);
-
-    // Temperature legend bar
-    const legendW = 12, legendH = ch - 20;
-    const legendX = cw - legendW - 8, legendY = 10;
-    const gradient = ctx.createLinearGradient(legendX, legendY + legendH, legendX, legendY);
-    gradient.addColorStop(0, '#000040');
-    gradient.addColorStop(0.25, '#0000B4');
-    gradient.addColorStop(0.5, '#DC0050');
-    gradient.addColorStop(0.75, '#FFC800');
-    gradient.addColorStop(1, '#FFFFFF');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(legendX, legendY, legendW, legendH);
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.strokeRect(legendX, legendY, legendW, legendH);
   };
 
   // Placeholder when no frame

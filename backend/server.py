@@ -327,11 +327,11 @@ async def get_camera_frame():
     )
 
 # Secondary (thermal) camera frame cache
-_secondary_frame_cache = {"png": b'', "frame_id": -1}
+_secondary_frame_cache = {"data": b'', "frame_id": -1, "media_type": "image/png"}
 
 @app.get("/api/camera/secondary/frame")
 async def get_secondary_camera_frame():
-    """Return latest secondary (thermal) camera frame as PNG image."""
+    """Return latest secondary (thermal) camera frame as JPEG or PNG."""
     if not hasattr(runtime, 'get_secondary_frame_data'):
         return Response(content=b'', media_type="image/png", status_code=204)
     
@@ -339,20 +339,26 @@ async def get_secondary_camera_frame():
     if not frame_data or len(frame_data) == 0:
         return Response(content=b'', media_type="image/png", status_code=204)
     
-    # Secondary camera: 256x192 thermal
     sec = runtime.get_secondary_camera_stats() if hasattr(runtime, 'get_secondary_camera_stats') else {}
     fid = sec.get("frame_count", 0)
+    frame_fmt = sec.get("frame_format", "gray")
+    
     if fid != _secondary_frame_cache["frame_id"]:
-        w = sec.get("width", 256) or 256
-        h = sec.get("height", 192) or 192
-        expected = w * h
-        if len(frame_data) >= expected:
-            _secondary_frame_cache["png"] = _grayscale_to_png(frame_data[:expected], w, h)
-            _secondary_frame_cache["frame_id"] = fid
+        if frame_fmt == "jpeg" and len(frame_data) > 100 and frame_data[:2] == b'\xff\xd8':
+            _secondary_frame_cache["data"] = frame_data
+            _secondary_frame_cache["media_type"] = "image/jpeg"
+        else:
+            w = sec.get("width", 256) or 256
+            h = sec.get("height", 192) or 192
+            expected = w * h
+            if len(frame_data) >= expected:
+                _secondary_frame_cache["data"] = _grayscale_to_png(frame_data[:expected], w, h)
+                _secondary_frame_cache["media_type"] = "image/png"
+        _secondary_frame_cache["frame_id"] = fid
     
     return Response(
-        content=_secondary_frame_cache["png"],
-        media_type="image/png",
+        content=_secondary_frame_cache["data"],
+        media_type=_secondary_frame_cache["media_type"],
         headers={"Cache-Control": "no-cache", "X-Frame-Id": str(fid)}
     )
 

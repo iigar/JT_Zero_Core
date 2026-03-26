@@ -249,6 +249,7 @@ class JTZeroSimulator:
                         "label": f"USB Thermal ({card or 'Down'})",
                         "device": dev_path,
                         "last_capture_time": 0,
+                        "frame_format": self._usb_capture.frame_format,
                     }
                     print(f"[Simulator] USB camera ready: {card} @ {dev_path}")
                 else:
@@ -270,6 +271,7 @@ class JTZeroSimulator:
                 "label": "USB Thermal (not connected)",
                 "device": "none",
                 "last_capture_time": 0,
+                "frame_format": "gray",
             }
         self._secondary_capturing = False
         
