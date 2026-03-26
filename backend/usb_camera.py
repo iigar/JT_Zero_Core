@@ -234,16 +234,21 @@ class USBCameraCapture:
         _log("Stream loop started")
         consecutive_fails = 0
         while self.streaming:
+            t0 = time.time()
             try:
                 frame = self._capture_batch()
+                dt = time.time() - t0
                 if frame:
                     with self._lock:
                         self._latest_frame = frame
                         self._frame_count += 1
+                    cnt = self._frame_count
                     consecutive_fails = 0
+                    # Log every frame for diagnosis
+                    _log(f"Frame #{cnt}: {len(frame)}B in {dt:.1f}s")
                 else:
                     consecutive_fails += 1
-                    _log(f"Batch empty (fail #{consecutive_fails})")
+                    _log(f"Batch empty (fail #{consecutive_fails}, {dt:.1f}s)")
                     if consecutive_fails > 3:
                         _log(f"Pausing 3s after {consecutive_fails} failures")
                         time.sleep(3)
