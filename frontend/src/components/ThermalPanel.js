@@ -91,7 +91,7 @@ export default function ThermalPanel({ secondary }) {
         if (running) setError('No signal');
       }
       // Schedule next fetch after current completes
-      if (running) setTimeout(fetchFrame, 100);
+      if (running) setTimeout(fetchFrame, 50);
     };
 
     fetchFrame();
