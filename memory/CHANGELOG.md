@@ -1,5 +1,41 @@
 # JT-Zero Changelog
 
+## 2026-03-26 — USB Thermal Camera Live Streaming (P0 Fix)
+
+### Root Cause: Frame Cache Never Invalidated
+- **Bug**: `get_secondary_frame_data()` in `native_bridge.py` returned frame data but did NOT update `frame_count` in the camera state dict. Server's cache in `server.py` used `frame_count` to decide whether to serve fresh data. Since `frame_count` never changed, the server returned the first cached frame forever.
+- **Fix**: Added `self._secondary_camera['frame_count'] = self._usb_capture.frame_count` in `get_secondary_frame_data()`.
+- **Symptoms**: Backend captured different frames (unique MD5 hashes), FPS counter showed 12fps, but displayed image was static.
+
+### USB Camera Detection Rewrite
+- **Old**: Python `ioctl(VIDIOC_QUERYCAP)` — failed silently on aarch64 Pi
+- **New**: Parses `v4l2-ctl --list-devices` subprocess output — reliable on all architectures
+- Device shows as `AV TO USB2.0 (usb-...)` at `/dev/video1`
+
+### Capture Architecture: Batch (not Persistent)
+- **Persistent process** (`--stream-count=0`): MS210x capture card repeats same frame when device stays open (analog converter "sticks"). Achieved 12fps but all frames identical.
+- **Batch capture** (`--stream-count=2`): Each call reopens device, forcing fresh analog-to-digital conversion. Slower (~5fps) but frames are genuinely different.
+- Added MD5 hash logging to confirm frame uniqueness: every frame logged as `NEW`
+
+### Frontend ThermalPanel Rewrite
+- Rewritten to match CameraPanel's proven pattern: offscreen `new Image()` + canvas + `drawFrame()` in `onload`
+- Fixed canvas dimensions: 640x480 (matching MJPEG resolution)
+- Sequential polling (70ms delay between fetches)
+
+### Logging Fix
+- `_log()` changed from `print()` to `sys.stderr.write()` — now visible in `journalctl`
+- `[MultiCam]` messages in `native_bridge.py` also use stderr
+
+### Configuration
+- `BATCH_SIZE=2` (1 warm-up + 1 real frame), `TEST_BATCH=4` for initial test
+- Resolution: 640x480 MJPEG (known working on MS210x)
+- No gap between batch captures (device reopen is sufficient reset)
+
+### Verified on Pi 4
+- CSI Camera v2 (VO): ACTIVE, ~14fps
+- USB Thermal (AV TO USB2.0): ACTIVE, live video streaming, ~5fps
+- Both cameras running simultaneously
+
 ## 2026-03-24 — IMX290 STARVIS + GENERIC CSI Fallback
 
 ### New Sensor Support
@@ -48,11 +84,6 @@ If `rpicam-hello` shows "No cameras available":
 - **Backend labels**: Dynamic PRIMARY label (CSI sensor name or "USB fallback"), "USB Thermal (Down)" for secondary
 - **Frontend**: CSI sensor badge in Camera tab header, "USB Fallback" warning badge when no CSI
 
-### Resource Management Strategy
-- Primary CSI camera: Always active for VO navigation
-- Secondary USB thermal: On-demand capture only (not continuous streaming)
-- Suitable for both Pi Zero 2W (512MB) and Pi 4B (4GB)
-
 ## 2026-03-23 — EKF3 Integration, Automation, UI Refresh
 
 ### EKF3 ExternalNav
@@ -65,40 +96,18 @@ If `rpicam-hello` shows "No cameras available":
 - `update.sh` — quick update with auto Pi model detection (make -j2 for Zero, -j4 for Pi 4/5)
 
 ### UI Refresh
-- Rounded corners: 12px on all panels (was sharp/2px)
-- Font scaling: ~1.5x larger globally (8px→10, 9→11, 10→12, 11→13, xs→13px)
-- Colors lightened 20-30%: borders #1E293B→#2D3A4E, accent #00F0FF→#33CCFF, bg #050505→#080A0F
-- MAVLink panel expanded: bytes TX/RX, heartbeats_received, CRC errors, transport info, vision message counters, FC telemetry (att/imu/gps/batt), detected msg_ids
-- Events tab: scroll-lock — log stays at user's scroll position, "Scroll to bottom" button appears
+- Rounded corners, font scaling, colors lightened
+- MAVLink panel expanded with full diagnostics
+- Events tab: scroll-lock
 
 ## 2026-03-22 — MAVLink Parser Overhaul (P0 Fix)
 
 ### Bug Fixes
-- **Auto-baud detection**: Probes 115200/921600/57600/230400/460800, picks first with valid MAVLink STX markers (~500ms/rate)
-- **CRC validation**: Added CRC-16/MCRF4XX on all received frames. Previously garbage bytes from baud mismatch counted as valid messages.
-- **Heartbeat filter relaxed**: Old code rejected type=0 (GENERIC) and type=18 unconditionally. Now only filters own echoes (sysid=1+type=18), GCS, ADSB.
-- **MAVLink v2 zero truncation**: Heartbeat min payload length 7→5. v2 trims trailing zeros, so base_mode=0 heartbeats had len<7.
-- **MAVLink v2 signing**: Parser detects incompat_flags bit 0, adds 13-byte signature to frame length.
-
-### New Diagnostics
-- `bytes_sent` / `bytes_received` raw byte counters in /api/mavlink
-- `heartbeats_received` separate heartbeat counter
-- `crc_errors` count of CRC-failed frames
-- `detected_msg_ids` always visible (not just after heartbeat)
-- `transport_info` shows port + baud rate
-- Raw hex dump of first 32 bytes in journalctl logs
-- Per-heartbeat logging (first 10) with type/sysid/autopilot
-
-### Verified
-- Pi Zero 2W + Matek H743 @ 115200 baud
-- State=CONNECTED, Heartbeats=4, FC=ArduPilot QUADROTOR
-- Attitude + IMU telemetry flowing, 0 CRC errors
+- Auto-baud detection, CRC validation, heartbeat filter, v2 zero truncation, v2 signing support
+- Verified: Pi Zero 2W + Matek H743 @ 115200 baud, 0 CRC errors
 
 ## 2026-02/03 — Visual Odometry & Camera Overhaul
-
 - USB Camera V4L2 MMAP rewrite
-- Platform/VO Mode separation
-- LK Tracker bilinear interpolation (critical fix)
-- Sobel 3x3 gradients (4x signal amplification)
+- LK Tracker bilinear interpolation, Sobel 3x3 gradients
 - Shi-Tomasi grid corner detector for thermal
 - Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Conf:0.18-0.29
