@@ -173,6 +173,11 @@ class CameraStats:
     hover_duration: float = 0.0
     yaw_drift_rate: float = 0.0
     corrected_yaw: float = 0.0
+    # VO Fallback state
+    vo_source: str = "CSI_PRIMARY"
+    vo_fallback_reason: str = ""
+    vo_fallback_duration: float = 0.0
+    vo_fallback_switches: int = 0
 
 @dataclass
 class MAVLinkStats:

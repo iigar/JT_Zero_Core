@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl (Python, architecture-independent). **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **Next:** Continuous USB streaming + VO fallback on USB when CSI loses tracking.
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl subprocess (architecture-independent). **USB thermal live streaming** — MJPEG batch capture (~5fps), frame cache invalidation fixed. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **VO Fallback** — automatic switch to USB thermal camera when CSI loses tracking (confidence < 10% for ~1s). Auto-recovery when CSI regains tracking.
 
 ---
 
@@ -88,10 +88,13 @@ On startup, the runtime probes hardware interfaces:
 
 **USB Camera Implementation:**
 - `backend/usb_camera.py` — Pure Python, uses `v4l2-ctl --stream-mmap` subprocess (no raw ioctl — works on arm32/arm64/x86)
-- `find_usb_camera()` — scans `/dev/video0..9`, uses VIDIOC_QUERYCAP to identify UVC devices
-- `USBCameraCapture` — captures frames via v4l2-ctl, converts YUYV → grayscale
+- `find_usb_camera()` — parses `v4l2-ctl --list-devices` output (Python `ioctl(VIDIOC_QUERYCAP)` fails on aarch64 Pi due to struct size mismatch)
+- `USBCameraCapture` — **batch capture** (`v4l2-ctl --stream-count=2`): each call reopens device, forcing fresh analog-to-digital conversion. MS210x capture card repeats same frame when device stays open (persistent stream), batch reopen fixes this.
+- Frame format: MJPEG only (YUYV returns all-zero data on MS210x hardware)
+- Resolution: 640x480. FPS: ~5fps with batch capture (0.2s per grab)
 - Both `native_bridge.py` and `simulator.py` auto-detect USB cameras at init via `usb_camera.py`
 - If no USB camera found — gracefully degrades to "not connected" (no fake data)
+- **Frame cache bug (FIXED)**: `get_secondary_frame_data()` must update `frame_count` in camera state dict, otherwise server cache never invalidates
 
 **API endpoints for multi-camera:**
 
@@ -102,7 +105,52 @@ On startup, the runtime probes hardware interfaces:
 | GET | /api/camera/frame | Primary camera frame (PNG) |
 | GET | /api/camera/secondary/stats | Thermal camera stats |
 | POST | /api/camera/secondary/capture | Trigger on-demand thermal capture |
-| GET | /api/camera/secondary/frame | Thermal camera frame (PNG) |
+| GET | /api/camera/secondary/frame | Thermal camera frame (JPEG or PNG) |
+
+---
+
+## VO Fallback — Automatic Camera Switching
+
+When the CSI camera loses tracking (darkness, fog, featureless surface), the system automatically switches Visual Odometry to the USB thermal camera.
+
+### State Machine
+
+```
+CSI_PRIMARY (normal) ──[low confidence N frames]──> THERMAL_FALLBACK
+                                                        │
+THERMAL_FALLBACK ──[CSI probe OK, high confidence]──> CSI_PRIMARY
+```
+
+### Configuration
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `CONF_DROP_THRESH` | 0.10 | Switch to fallback below this confidence |
+| `CONF_RECOVER_THRESH` | 0.25 | Return to CSI above this confidence |
+| `FRAMES_TO_SWITCH` | 15 (~1s) | Consecutive low-confidence frames before switch |
+| `CSI_PROBE_INTERVAL_S` | 3.0 | Seconds between CSI recovery probes |
+| `THERMAL_FOCAL_PX` | 180.0 | Default focal length for USB thermal at 640x480 |
+
+### Switch Logic (in `CameraPipeline::tick()`)
+
+1. **Monitor** `running_confidence_` from VO on every frame
+2. **Count** consecutive frames where confidence < `CONF_DROP_THRESH`
+3. After `FRAMES_TO_SWITCH` low-conf frames → switch to thermal:
+   - Save CSI camera reference, set `active_camera_` = secondary
+   - `vo_.reset()` (different focal length/resolution)
+   - Set thermal focal length for VO
+   - Record switch reason and timestamp
+4. **In fallback mode**: every `CSI_PROBE_INTERVAL_S`, capture one CSI frame and run VO:
+   - If CSI confidence > `CONF_RECOVER_THRESH` → switch back to CSI
+   - `vo_.reset()` again (restore CSI focal length)
+5. **Telemetry**: `vo_source`, `fallback_reason`, `fallback_duration` exposed via API
+
+### Hardware Constraints (Pi Zero 2 W)
+
+- USB bus shared between thermal camera and WiFi → thermal capture adds ~3ms CPU per frame
+- Both cameras cannot do simultaneous VO (CPU overload on 4× Cortex-A53 @ 1GHz)
+- Fallback design: **one active VO source at a time**, other camera idle or probe-only
+- USB thermal FOV is narrower (typical 25-50°) → fewer trackable features, lower VO confidence expected
 
 ---
 
@@ -486,6 +534,10 @@ JT-Zero автоматично визначить будь-яку камеру �
 - **Real USB camera capture:** `usb_camera.py` — v4l2-ctl subprocess (architecture-independent), auto-detect UVC devices, YUYV→grayscale
 - **Verified on Pi 4:** AV TO USB2.0 (Caddx thermal) detected and streaming real frames via v4l2-ctl
 - **V4L2 ioctl ABI fix:** Replaced raw fcntl/mmap V4L2 (broken on aarch64 due to struct size mismatch) with v4l2-ctl subprocess
+- **USB thermal live streaming (FIXED):** Batch capture (v4l2-ctl --stream-count=2) — each call reopens device to force fresh analog conversion on MS210x. Frame cache bug fixed in native_bridge.py (frame_count not updating)
+- **USB camera detection rewrite:** Parses `v4l2-ctl --list-devices` output instead of Python ioctl (which fails on aarch64)
+- **Frontend ThermalPanel rewrite:** Matches CameraPanel MJPEG pattern (offscreen Image + canvas + sequential polling)
+- **VO Fallback:** Automatic switch to USB thermal when CSI confidence drops below 10% for ~1s. Auto-recovery when CSI regains tracking. State machine: CSI_PRIMARY ↔ THERMAL_FALLBACK
 - Test reports: /app/test_reports/iteration_1-16.json
 
 ---

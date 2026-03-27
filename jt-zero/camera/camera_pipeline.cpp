@@ -832,7 +832,11 @@ bool CameraPipeline::initialize(CameraType type) {
     running_ = true;
     frame_count_ = 0;
     start_time_us_ = now_us();
+    runtime_seconds_ = 0;
     vo_.reset();
+    
+    // Save primary camera reference for VO fallback recovery
+    primary_camera_ = active_camera_;
     
     // Auto-detect platform based on Pi model (sets resolution + focal length)
 #ifdef __aarch64__
@@ -908,6 +912,10 @@ void CameraPipeline::set_yaw_hint(float yaw_rad) {
 bool CameraPipeline::tick(float ground_distance) {
     if (!running_ || !active_camera_) return false;
     
+    // Update runtime clock
+    uint64_t elapsed_us = now_us() - start_time_us_;
+    runtime_seconds_ = static_cast<float>(elapsed_us) / 1'000'000.0f;
+    
     if (!active_camera_->capture(current_frame_)) {
         return false;
     }
@@ -919,6 +927,114 @@ bool CameraPipeline::tick(float ground_distance) {
     vo_result_ = vo_.process(current_frame_, ground_distance);
     
     frame_count_++;
+    
+    // ═══════════════════════════════════════════════════════
+    // VO Fallback Logic: CSI_PRIMARY ↔ THERMAL_FALLBACK
+    // ═══════════════════════════════════════════════════════
+    
+    if (fallback_state_.source == VOSource::CSI_PRIMARY) {
+        // ── Normal mode: monitor CSI confidence ──
+        if (has_secondary() && primary_camera_ == nullptr) {
+            // Save primary camera reference for later recovery
+            primary_camera_ = active_camera_;
+        }
+        
+        if (has_secondary() && vo_result_.confidence < fallback_config_.conf_drop_thresh) {
+            fallback_state_.low_conf_count++;
+            if (fallback_state_.low_conf_count >= fallback_config_.frames_to_switch) {
+                // ── SWITCH TO THERMAL FALLBACK ──
+                std::printf("[VO Fallback] CSI confidence %.2f < %.2f for %u frames → switching to THERMAL\n",
+                           vo_result_.confidence, fallback_config_.conf_drop_thresh,
+                           fallback_state_.low_conf_count);
+                
+                // Save CSI camera reference if not already saved
+                if (primary_camera_ == nullptr) {
+                    primary_camera_ = active_camera_;
+                }
+                
+                // Switch VO to thermal camera
+                active_camera_ = secondary_camera_;
+                
+                // Reset VO (different focal length/resolution)
+                vo_.reset();
+                
+                // Set thermal camera focal length
+                PlatformConfig thermal_platform = vo_.platform();
+                thermal_platform.focal_length_px = fallback_config_.thermal_focal_px;
+                vo_.set_platform(thermal_platform);
+                // Restore VO mode after platform reset
+                set_vo_mode(active_vo_mode());
+                
+                // Update state
+                fallback_state_.source = VOSource::THERMAL_FALLBACK;
+                std::snprintf(fallback_state_.reason, sizeof(fallback_state_.reason),
+                             "CSI conf %.0f%% < %.0f%% for %us",
+                             vo_result_.confidence * 100,
+                             fallback_config_.conf_drop_thresh * 100,
+                             fallback_state_.low_conf_count / 15);
+                fallback_state_.fallback_start_time = runtime_seconds_;
+                fallback_state_.last_csi_probe_time = runtime_seconds_;
+                fallback_state_.total_switches++;
+                fallback_state_.low_conf_count = 0;
+            }
+        } else {
+            // Confidence OK — reset counter
+            fallback_state_.low_conf_count = 0;
+        }
+    } else {
+        // ── Fallback mode: update duration, probe CSI periodically ──
+        fallback_state_.fallback_duration = runtime_seconds_ - fallback_state_.fallback_start_time;
+        
+        // Periodic CSI probe: capture one CSI frame and check confidence
+        if (primary_camera_ != nullptr &&
+            (runtime_seconds_ - fallback_state_.last_csi_probe_time) >= fallback_config_.csi_probe_interval_s) {
+            
+            fallback_state_.last_csi_probe_time = runtime_seconds_;
+            
+            // Try to capture a frame from CSI
+            FrameBuffer probe_frame;
+            if (primary_camera_->capture(probe_frame)) {
+                // Create a temporary VO instance to test CSI quality
+                // We use the main VO running_confidence as proxy after a quick process
+                // Instead of full VO, just check if FAST finds enough features
+                FASTDetector probe_detector;
+                FeaturePoint probe_features[100];
+                int found = probe_detector.detect(probe_frame.data,
+                                                   probe_frame.info.width,
+                                                   probe_frame.info.height,
+                                                   probe_features, 100, 25);
+                
+                float probe_quality = static_cast<float>(found) / 30.0f;
+                if (probe_quality > 1.0f) probe_quality = 1.0f;
+                fallback_state_.last_csi_probe_conf = probe_quality;
+                
+                std::printf("[VO Fallback] CSI probe: %d features, quality=%.2f (need %.2f)\n",
+                           found, probe_quality, fallback_config_.conf_recover_thresh);
+                
+                if (probe_quality >= fallback_config_.conf_recover_thresh) {
+                    // ── RECOVER TO CSI ──
+                    std::printf("[VO Fallback] CSI recovered (quality=%.2f) → switching back to CSI_PRIMARY\n",
+                               probe_quality);
+                    
+                    active_camera_ = primary_camera_;
+                    
+                    // Reset VO (restore CSI focal length/resolution)
+                    vo_.reset();
+                    // Platform auto-detection already set CSI focal — just restore it
+                    PlatformType current_platform = active_platform();
+                    set_platform(current_platform);
+                    set_vo_mode(active_vo_mode());
+                    
+                    // Update state
+                    fallback_state_.source = VOSource::CSI_PRIMARY;
+                    std::memset(fallback_state_.reason, 0, sizeof(fallback_state_.reason));
+                    fallback_state_.fallback_duration = 0;
+                    fallback_state_.low_conf_count = 0;
+                }
+            }
+        }
+    }
+    
     return true;
 }
 
@@ -1113,6 +1229,13 @@ CameraPipelineStats CameraPipeline::get_stats() const {
         std::strncpy(stats.csi_sensor_name, "none", 47);
     }
     stats.csi_sensor_name[47] = '\0';
+    
+    // VO Fallback state
+    stats.vo_source = static_cast<uint8_t>(fallback_state_.source);
+    std::strncpy(stats.vo_fallback_reason, fallback_state_.reason, 63);
+    stats.vo_fallback_reason[63] = '\0';
+    stats.vo_fallback_duration = fallback_state_.fallback_duration;
+    stats.vo_fallback_switches = fallback_state_.total_switches;
     
     return stats;
 }

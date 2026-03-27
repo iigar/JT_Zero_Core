@@ -522,6 +522,43 @@ private:
     static float compute_mad(float* arr, int n, float median);
 };
 
+// ─── VO Fallback Source ──────────────────────────────────
+// When CSI camera loses tracking, VO can fall back to USB thermal
+
+enum class VOSource : uint8_t {
+    CSI_PRIMARY      = 0,   // Normal: CSI forward camera
+    THERMAL_FALLBACK = 1,   // Fallback: USB thermal camera
+};
+
+inline const char* vo_source_str(VOSource s) {
+    switch(s) {
+        case VOSource::CSI_PRIMARY:      return "CSI_PRIMARY";
+        case VOSource::THERMAL_FALLBACK: return "THERMAL_FALLBACK";
+        default: return "UNKNOWN";
+    }
+}
+
+// VO Fallback configuration thresholds
+struct VOFallbackConfig {
+    float    conf_drop_thresh{0.10f};      // switch to fallback below this
+    float    conf_recover_thresh{0.25f};   // return to CSI above this
+    uint16_t frames_to_switch{15};         // ~1s at 15fps before switching
+    float    csi_probe_interval_s{3.0f};   // seconds between CSI recovery probes
+    float    thermal_focal_px{180.0f};     // default focal length for USB thermal at 640x480
+};
+
+// VO Fallback runtime state
+struct VOFallbackState {
+    VOSource  source{VOSource::CSI_PRIMARY};
+    char      reason[64]{};                // human-readable switch reason
+    uint16_t  low_conf_count{0};           // consecutive low-confidence frames
+    float     fallback_start_time{0};      // when fallback started (runtime seconds)
+    float     fallback_duration{0};        // seconds in fallback mode
+    float     last_csi_probe_time{0};      // last time CSI was probed for recovery
+    float     last_csi_probe_conf{0};      // confidence from last CSI probe
+    uint32_t  total_switches{0};           // total number of switches since boot
+};
+
 // ─── Camera Slot (multi-camera support) ──────────────────
 // PRIMARY = main camera for VO (CSI forward)
 // SECONDARY = auxiliary camera (USB thermal downward), on-demand
@@ -596,6 +633,11 @@ struct CameraPipelineStats {
     // CSI sensor info
     uint8_t    csi_sensor_type{0};     // CSISensorType enum
     char       csi_sensor_name[48]{};  // human-readable or raw chip id
+    // VO Fallback state
+    uint8_t    vo_source{0};           // VOSource enum
+    char       vo_fallback_reason[64]{};
+    float      vo_fallback_duration{0};
+    uint32_t   vo_fallback_switches{0};
 };
 
 class CameraPipeline {
@@ -670,6 +712,17 @@ public:
     
     // CSI sensor info (from primary camera)
     CSISensorType csi_sensor_type() const { return csi_camera_.sensor_type(); }
+    
+    // ── VO Fallback ──
+    
+    // Get current VO source
+    VOSource vo_source() const { return fallback_state_.source; }
+    
+    // Get fallback state (read-only)
+    const VOFallbackState& fallback_state() const { return fallback_state_; }
+    
+    // Get fallback config
+    const VOFallbackConfig& fallback_config() const { return fallback_config_; }
 
 private:
     SimulatedCamera sim_camera_;
@@ -697,6 +750,12 @@ private:
     
     // ── Device path for USB cameras ──
     static char usb_device_buf_[16];  // e.g., "/dev/video2"
+    
+    // ── VO Fallback state ──
+    VOFallbackConfig fallback_config_;
+    VOFallbackState  fallback_state_;
+    CameraSource*    primary_camera_{nullptr};  // saved CSI ref during fallback
+    float            runtime_seconds_{0};       // elapsed time for fallback tracking
 };
 
 } // namespace jtzero

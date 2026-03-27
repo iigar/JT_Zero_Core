@@ -229,6 +229,14 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
               <span className="text-[8px] text-slate-400">Primary</span>
             </div>
           )}
+          {/* VO Source indicator */}
+          <div className="flex items-center gap-1.5 mt-1 pt-1 border-t border-slate-800">
+            <div className={`w-1.5 h-1.5 rounded-full ${camera?.vo_source === 'THERMAL_FALLBACK' ? 'bg-amber-500 animate-pulse' : 'bg-cyan-500'}`} />
+            <span className="text-[8px] text-slate-400">VO:</span>
+            <span className={`text-[8px] font-bold ${camera?.vo_source === 'THERMAL_FALLBACK' ? 'text-amber-400' : 'text-cyan-400'}`} data-testid="sidebar-vo-source">
+              {camera?.vo_source === 'THERMAL_FALLBACK' ? 'THERMAL' : 'CSI'}
+            </span>
+          </div>
         </Section>
         <Section title="Threads">
           {threads?.map((t, i) => (
@@ -285,15 +293,43 @@ function CameraTab({ camera, features, cameras }) {
   const isCsi = primaryCam?.camera_type === 'PI_CSI';
   const isUsbFallback = primaryCam?.camera_type === 'USB' && !isCsi;
 
+  // VO Fallback state from camera telemetry
+  const voSource = camera?.vo_source || 'CSI_PRIMARY';
+  const isVOFallback = voSource === 'THERMAL_FALLBACK';
+  const fallbackReason = camera?.vo_fallback_reason || '';
+  const fallbackDuration = camera?.vo_fallback_duration || 0;
+  const fallbackSwitches = camera?.vo_fallback_switches || 0;
+
   return (
     <div className="h-full flex flex-col p-3 gap-2">
+      {/* VO Fallback Alert */}
+      {isVOFallback && (
+        <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 rounded-sm bg-amber-500/10 border border-amber-500/30" data-testid="vo-fallback-alert">
+          <span className="text-amber-400 text-[10px] font-bold animate-pulse">VO FALLBACK</span>
+          <span className="text-amber-300/70 text-[8px]">
+            Thermal camera active | {fallbackReason} | {fallbackDuration.toFixed(1)}s
+          </span>
+          {fallbackSwitches > 1 && (
+            <span className="text-amber-500/50 text-[8px] ml-auto">switches: {fallbackSwitches}</span>
+          )}
+        </div>
+      )}
+
       {/* Camera tab header with view selector */}
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Multi-Camera</span>
         <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-bold">
           {cameras?.filter(c => c.camera_open).length || 1} / {cameras?.length || 1} Active
         </span>
-        {isCsi && csiSensor && (
+        {/* VO Source badge */}
+        <span className={`text-[8px] px-1.5 py-0.5 rounded-sm font-bold border ${
+          isVOFallback
+            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+        }`} data-testid="vo-source-badge">
+          VO: {isVOFallback ? 'THERMAL' : 'CSI'}
+        </span>
+        {isCsi && csiSensor && !isVOFallback && (
           <span className="text-[8px] px-1.5 py-0.5 rounded-sm bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
             CSI: {csiSensor}
           </span>

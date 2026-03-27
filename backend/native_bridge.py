@@ -136,6 +136,11 @@ class NativeRuntime:
         d.setdefault("hover_duration", 0.0)
         d.setdefault("yaw_drift_rate", 0.0)
         d.setdefault("corrected_yaw", 0.0)
+        # VO Fallback state
+        d.setdefault("vo_source", "CSI_PRIMARY")
+        d.setdefault("vo_fallback_reason", "")
+        d.setdefault("vo_fallback_duration", 0.0)
+        d.setdefault("vo_fallback_switches", 0)
         return d
     
     def get_frame_data(self) -> bytes:

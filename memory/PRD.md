@@ -61,7 +61,8 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 
 ### Dual Camera VO Strategy
 - **Current**: CSI for VO (high-res visual features), USB thermal for situational awareness
-- **Planned**: VO Fallback — switch to USB thermal when CSI confidence drops
+- **Implemented**: VO Fallback — auto-switch to USB thermal when CSI confidence < 10% for ~1s
+- **Recovery**: CSI probed every 3s during fallback, auto-returns when feature quality > 25%
 - **Future**: Sensor fusion — use both simultaneously with confidence weighting
 
 ## Deployment Strategy
@@ -87,6 +88,9 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - GitHub Actions CI/CD for frontend builds
 - Pre-built frontend in git (no Node.js on Pi)
 - IMX290 STARVIS added to known CSI sensors
+- VO Fallback: automatic switch to USB thermal when CSI loses tracking (CONF<10% for ~1s)
+- VO Recovery: periodic CSI probe every 3s, auto-switch back when CSI feature quality > 25%
+- Dashboard VO source indicators (badge + alert + sidebar)
 
 ### API Endpoints
 - `GET /api/cameras` — List all camera slots (PRIMARY, SECONDARY)
@@ -99,8 +103,8 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 ## Backlog
 
 ### P1 - Next
-- VO Fallback to USB thermal camera when CSI loses tracking
 - Thermal camera FPS optimization (target: 10-15fps)
+- VO Fallback testing on real hardware (CSI + USB thermal)
 
 ### P2 - Planned
 - IP camera (RTSP) support

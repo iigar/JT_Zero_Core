@@ -1,5 +1,31 @@
 # JT-Zero Changelog
 
+## 2026-03-27 — VO Fallback to USB Thermal Camera (P1)
+
+### C++ Core: Automatic Camera Switching
+- **VOSource enum** (CSI_PRIMARY, THERMAL_FALLBACK): identifies current VO camera source
+- **VOFallbackConfig**: configurable thresholds — CONF_DROP_THRESH=0.10, CONF_RECOVER_THRESH=0.25, FRAMES_TO_SWITCH=15 (~1s), CSI_PROBE_INTERVAL=3s
+- **VOFallbackState**: runtime state tracking — source, reason, low_conf_count, fallback_duration, total_switches
+- **CameraPipeline::tick()** modified: monitors running_confidence_, counts consecutive low-confidence frames, auto-switches to thermal when threshold exceeded
+- **CSI Recovery Probe**: every 3s during fallback, captures one CSI frame, runs FAST detector, switches back if feature quality >= 25%
+- **vo_.reset()** on each switch (different focal length between CSI and thermal)
+- **THERMAL_FOCAL_PX=180.0**: default focal length for USB thermal camera at 640x480
+
+### Backend: Telemetry Extension
+- `native_bridge.py`: Added vo_source, vo_fallback_reason, vo_fallback_duration, vo_fallback_switches to camera stats
+- `simulator.py`: CameraStats dataclass extended with fallback fields
+- `/api/camera` endpoint now returns VO fallback state
+
+### Frontend: Dashboard Indicators
+- **VO Source badge** in Camera tab header: green "VO: CSI" or amber "VO: THERMAL"
+- **VO Fallback alert** banner: shows when thermal is active with reason and duration
+- **Sidebar VO indicator**: dot + label showing current VO source with pulse animation during fallback
+
+### CLAUDE.md Updated
+- Added VO Fallback documentation section (state machine, config, switch logic, hardware constraints)
+- Updated USB Camera Implementation section (batch capture, frame cache bug fix)
+- Updated session history
+
 ## 2026-03-26 — USB Thermal Camera Live Streaming (P0 Fix)
 
 ### Root Cause: Frame Cache Never Invalidated
