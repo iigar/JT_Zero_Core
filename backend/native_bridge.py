@@ -35,6 +35,13 @@ try:
 except ImportError:
     NUMPY_AVAILABLE = False
 
+# Pillow ImageFilter/ImageChops for Pillow-only feature detection
+try:
+    from PIL import ImageFilter, ImageChops
+    PILLOW_FILTERS = True
+except ImportError:
+    PILLOW_FILTERS = False
+
 
 class NativeRuntime:
     """Adapter wrapping C++ Runtime with simulator-compatible interface."""
@@ -102,10 +109,6 @@ class NativeRuntime:
         self._VO_INJECT_H = 240
         
         # ── Python-side feature detection for visualization ──
-        # Stores the latest injected grayscale frame for Python feature detection
-        # (used when C++ get_features() returns empty due to ARM64 thread visibility)
-        self._vo_last_gray_frame = None
-        self._vo_last_gray_lock = threading.Lock()
         self._vo_python_features = []  # cached Python-detected features
     
     def start(self):
@@ -412,20 +415,48 @@ class NativeRuntime:
                 continue
             
             # Decode JPEG → grayscale → resize to VO resolution
-            gray_bytes = self._decode_jpeg_to_gray(jpeg_data)
+            gray_bytes, gray_img = self._decode_jpeg_to_gray(jpeg_data)
             if not gray_bytes:
                 time.sleep(0.05)
                 continue
             
-            # Store frame for Python-side feature detection
-            with self._vo_last_gray_lock:
-                self._vo_last_gray_frame = gray_bytes
-            
-            # Run Python feature detection on this frame (for visualization)
-            if NUMPY_AVAILABLE:
+            # Run Python feature detection on the grayscale frame (for visualization)
+            # Uses Pillow filters (no numpy needed) — detects corners on thermal content
+            if gray_img and PILLOW_FILTERS:
                 try:
-                    py_feats = self._detect_features_python(gray_bytes, self._VO_INJECT_W, self._VO_INJECT_H)
+                    py_feats = self._detect_features_pillow(gray_img)
                     self._vo_python_features = py_feats
+                    if not getattr(self, '_pyfeat_logged', False):
+                        sys.stderr.write(f"[VO PyDetect] Pillow corner detector: {len(py_feats)} features\n")
+                        sys.stderr.flush()
+                        self._pyfeat_logged = True
+                except Exception as e:
+                    if not getattr(self, '_pyfeat_err_logged', False):
+                        sys.stderr.write(f"[VO PyDetect] Error: {e}\n")
+                        sys.stderr.flush()
+                        self._pyfeat_err_logged = True
+            elif NUMPY_AVAILABLE:
+                try:
+                    # numpy fallback (for environments without Pillow filters)
+                    frame = np.frombuffer(gray_bytes, dtype=np.uint8).reshape(self._VO_INJECT_H, self._VO_INJECT_W)
+                    Ix = frame[:, 2:].astype(np.int16) - frame[:, :-2].astype(np.int16)
+                    Iy = frame[2:, :].astype(np.int16) - frame[:-2, :].astype(np.int16)
+                    h2, w2 = min(Ix.shape[0], Iy.shape[0]), min(Ix.shape[1], Iy.shape[1])
+                    response = np.minimum(np.abs(Ix[:h2, :w2]), np.abs(Iy[:, :w2][:h2, :]))
+                    border = 12
+                    response[:border, :] = 0
+                    response[-border:, :] = 0
+                    response[:, :border] = 0
+                    response[:, -border:] = 0
+                    thresh = max(8.0, float(np.percentile(response, 92)))
+                    ys, xs = np.where(response > thresh)
+                    if len(ys) > 0:
+                        resps = response[ys, xs]
+                        order = np.argsort(-resps)[:120]
+                        self._vo_python_features = [
+                            {"x": float(xs[i]+1), "y": float(ys[i]+1), "tracked": True, "response": int(resps[i])}
+                            for i in order
+                        ]
                 except Exception:
                     pass
             
@@ -442,21 +473,86 @@ class NativeRuntime:
         sys.stderr.write("[VO Fallback] Injection loop stopped\n")
         sys.stderr.flush()
 
-    def _decode_jpeg_to_gray(self, jpeg_data: bytes) -> bytes:
-        """Decode JPEG to grayscale bytes at VO resolution (320x240)."""
+    def _decode_jpeg_to_gray(self, jpeg_data: bytes):
+        """Decode JPEG to grayscale at VO resolution (320x240).
+        Returns (bytes, PIL.Image) — Image for Python feature detection.
+        """
         if PIL_AVAILABLE:
             try:
                 img = Image.open(io.BytesIO(jpeg_data))
                 img = img.convert('L')  # grayscale
                 img = img.resize((self._VO_INJECT_W, self._VO_INJECT_H), Image.NEAREST)
-                return img.tobytes()
+                return img.tobytes(), img
             except Exception:
-                return b''
+                return b'', None
         else:
-            return b''
+            return b'', None
 
     @staticmethod
-    def _detect_features_python(gray_bytes, width, height, max_features=120):
+    def _detect_features_pillow(gray_img, max_features=120):
+        """Corner detection using Pillow only (no numpy/scipy dependency).
+        
+        Uses Sobel filters → min(|Ix|, |Iy|) corner response → threshold.
+        Returns features at VO resolution coordinates (320x240).
+        ~20-40ms on Pi 4 for 320x240 frame.
+        """
+        w, h = gray_img.size  # 320x240
+        border = 12  # skip frame border (capture card artifacts)
+        
+        # Horizontal Sobel → gradient in X direction (centered at 128)
+        Ix = gray_img.filter(ImageFilter.Kernel(
+            (3, 3), [-1, 0, 1, -2, 0, 2, -1, 0, 1], scale=1, offset=128))
+        # Vertical Sobel → gradient in Y direction
+        Iy = gray_img.filter(ImageFilter.Kernel(
+            (3, 3), [-1, -2, -1, 0, 0, 0, 1, 2, 1], scale=1, offset=128))
+        
+        # |Ix| and |Iy| — distance from center (128)
+        Ix_abs = Ix.point(lambda p: abs(p - 128))
+        Iy_abs = Iy.point(lambda p: abs(p - 128))
+        
+        # Corner response = min(|Ix|, |Iy|) — strong in BOTH directions = corner
+        corner = ImageChops.darker(Ix_abs, Iy_abs)
+        
+        # Get raw pixel bytes for fast iteration
+        corner_data = corner.tobytes()
+        
+        # Collect candidates above threshold, excluding border
+        threshold = 10
+        candidates = []
+        for y in range(border, h - border):
+            row_start = y * w + border
+            row_end = y * w + w - border
+            for i in range(row_start, row_end):
+                val = corner_data[i]
+                if val > threshold:
+                    candidates.append((i % w, y, val))
+        
+        if not candidates:
+            return []
+        
+        # Sort by response strength (strongest first)
+        candidates.sort(key=lambda c: -c[2])
+        
+        # Sparse subsampling — enforce minimum distance between features
+        # This prevents clusters of dots at the same corner
+        min_dist_sq = 6 * 6  # 6px minimum distance
+        selected = []
+        for c in candidates:
+            too_close = False
+            for s in selected:
+                dx = c[0] - s[0]
+                dy = c[1] - s[1]
+                if dx * dx + dy * dy < min_dist_sq:
+                    too_close = True
+                    break
+            if not too_close:
+                selected.append(c)
+                if len(selected) >= max_features:
+                    break
+        
+        return [{"x": float(c[0]), "y": float(c[1]),
+                 "tracked": True, "response": c[2]}
+                for c in selected]
         """Fast corner detection on grayscale frame using numpy.
         
         Simplified Shi-Tomasi: R = min(|Ix|, |Iy|) with non-max suppression.
