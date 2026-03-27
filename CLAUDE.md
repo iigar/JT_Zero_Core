@@ -162,11 +162,16 @@ The VO Fallback uses a **hybrid** approach because the USB thermal camera hardwa
 
 ### Feature Overlay on Thermal Panel
 
-During VO Fallback, the React `ThermalPanel.js` displays:
-- VO feature points (orange tracked squares, yellow detected circles) scaled from 320x240 VO resolution to 640x480 canvas
+During VO Fallback, the React `ThermalPanel.js` displays **real** VO feature positions:
+- Orange tracked squares + yellow detected circles, scaled from 320x240 VO resolution to 640x480 canvas
 - VO displacement vector (orange arrow from center)
-- VO stats bar: DET, TRK, CONF, PTS (feature count from WebSocket), FALLBACK indicator
-- Features are redrawn both on JPEG frame load AND when WebSocket features update (dual trigger for responsiveness)
+- VO stats bar: DET, TRK, CONF, PTS (real feature count), FALLBACK indicator
+- Features redraw on JPEG frame load AND when WebSocket data updates (dual trigger)
+
+**Thread-safe feature snapshot** (`features_snapshot_` in CameraPipeline):
+- After each `vo_.process()` in `tick()`, features are copied to `features_snapshot_[]` with `std::memory_order_release`
+- Python `get_features()` reads via `features_snapshot_count()` with `std::memory_order_acquire`
+- This guarantees cross-thread visibility on ARM64 (the original `vo_.features()` had no memory barrier, causing empty reads from the Python thread)
 
 ### Hardware Constraints (Pi Zero 2 W)
 

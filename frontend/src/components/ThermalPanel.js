@@ -143,28 +143,6 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
       }
 
       ctx.restore();
-    } else if (vo_features_detected > 0) {
-      // Fallback: C++ get_features() returned empty but VO IS detecting features
-      // (ARM64 thread visibility issue — vo_result_ visible, features_ not yet)
-      // Generate pseudo-deterministic positions like CameraPanel does
-      const phi = 1.618033988;
-      const n_tracked = Math.min(vo_features_tracked, 80);
-      const n_total = Math.min(vo_features_detected, 120);
-      
-      for (let i = 0; i < n_total; i++) {
-        const fx = ((i * phi * 97.3) % 320) * scale_x;
-        const fy = ((i * phi * 61.7) % 240) * scale_y;
-        
-        if (i < n_tracked) {
-          ctx.fillStyle = 'rgba(255, 160, 40, 0.8)';
-          ctx.fillRect(fx - 3, fy - 3, 6, 6);
-        } else {
-          ctx.fillStyle = 'rgba(255, 220, 80, 0.6)';
-          ctx.beginPath();
-          ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
     }
 
     // VO displacement vector (draw outside the if/else so it always shows)

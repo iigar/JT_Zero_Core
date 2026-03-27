@@ -726,6 +726,12 @@ public:
     // Get fallback config
     const VOFallbackConfig& fallback_config() const { return fallback_config_; }
     
+    // Thread-safe feature snapshot access (Python reads, T6 writes)
+    const Feature* features_snapshot() const { return features_snapshot_; }
+    uint32_t features_snapshot_count() const { 
+        return features_snapshot_count_.load(std::memory_order_acquire); 
+    }
+    
     // External fallback control (called from Python via pybind11)
     void activate_fallback(const char* reason);
     void deactivate_fallback();
@@ -781,6 +787,10 @@ private:
     uint16_t         inject_h_{0};
     std::atomic<bool> external_fallback_{false};
     float frame_brightness_{0};  // average pixel brightness 0-255
+    
+    // ── Thread-safe feature snapshot (T6 writes with release, Python reads with acquire) ──
+    Feature          features_snapshot_[MAX_FEATURES];
+    std::atomic<uint32_t> features_snapshot_count_{0};
 };
 
 } // namespace jtzero

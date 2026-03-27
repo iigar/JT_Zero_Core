@@ -941,6 +941,13 @@ bool CameraPipeline::tick(float ground_distance) {
             // Run VO on injected thermal frame
             vo_result_ = vo_.process(current_frame_, ground_distance);
             frame_count_++;
+            
+            // Copy features to thread-safe snapshot (release barrier ensures
+            // features_snapshot_ data is visible when count is read with acquire)
+            size_t fc = vo_.feature_count();
+            if (fc > MAX_FEATURES) fc = MAX_FEATURES;
+            std::memcpy(features_snapshot_, vo_.features(), fc * sizeof(Feature));
+            features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
         }
         
         // Periodic CSI probe for recovery (use primary camera)
@@ -987,6 +994,14 @@ bool CameraPipeline::tick(float ground_distance) {
     vo_result_ = vo_.process(current_frame_, ground_distance);
     frame_count_++;
     
+    // Copy features to thread-safe snapshot
+    {
+        size_t fc = vo_.feature_count();
+        if (fc > MAX_FEATURES) fc = MAX_FEATURES;
+        std::memcpy(features_snapshot_, vo_.features(), fc * sizeof(Feature));
+        features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
+    }
+    
     // Compute frame brightness (for fallback trigger — dark camera detection)
     uint32_t brightness_sum = 0;
     int pixel_count = current_frame_.info.width * current_frame_.info.height;
@@ -1017,6 +1032,7 @@ void CameraPipeline::activate_fallback(const char* reason) {
     
     // Reset VO for thermal focal length
     vo_.reset();
+    features_snapshot_count_.store(0, std::memory_order_release);  // clear snapshot
     PlatformConfig thermal_platform = vo_.platform();
     thermal_platform.focal_length_px = fallback_config_.thermal_focal_px;
     vo_.set_platform(thermal_platform);
@@ -1048,6 +1064,7 @@ void CameraPipeline::deactivate_fallback() {
     
     // Reset VO for CSI focal length
     vo_.reset();
+    features_snapshot_count_.store(0, std::memory_order_release);  // clear snapshot
     PlatformType current_platform = active_platform();
     set_platform(current_platform);
     set_vo_mode(active_vo_mode());

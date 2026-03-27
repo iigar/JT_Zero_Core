@@ -411,11 +411,12 @@ PYBIND11_MODULE(jtzero_native, m) {
         }, "Get latest camera frame as raw grayscale bytes")
         
         .def("get_features", [](const jtzero::Runtime& self) {
-            const auto& vo = self.camera().vo();
-            const auto& feats = vo.features();
-            size_t count = vo.feature_count();
+            // Read from thread-safe snapshot (acquire pairs with release in tick())
+            const auto& cam = self.camera();
+            uint32_t count = cam.features_snapshot_count();
+            const auto* feats = cam.features_snapshot();
             py::list result;
-            for (size_t i = 0; i < count && i < jtzero::MAX_FEATURES; ++i) {
+            for (uint32_t i = 0; i < count && i < jtzero::MAX_FEATURES; ++i) {
                 result.append(py::dict(
                     "x"_a = feats[i].x,
                     "y"_a = feats[i].y,
@@ -424,7 +425,7 @@ PYBIND11_MODULE(jtzero_native, m) {
                 ));
             }
             return result;
-        }, "Get current VO feature positions as list of dicts")
+        }, "Get current VO feature positions as list of dicts (thread-safe snapshot)")
         
         .def("get_mavlink", [](const jtzero::Runtime& self) {
             return mavlink_stats_to_dict(self);
