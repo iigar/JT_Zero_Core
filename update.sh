@@ -85,7 +85,29 @@ fi
 echo -e "${CYAN}[4/5]${NC} Фронтенд..."
 
 # Python deps (Pillow needed for VO Fallback JPEG→grayscale)
-pip3 install --quiet pillow 2>/dev/null || echo -e "  ${YELLOW}Pillow вже встановлений${NC}"
+PILLOW_OK=false
+python3 -c "from PIL import Image; print('ok')" 2>/dev/null && PILLOW_OK=true
+
+if [ "$PILLOW_OK" = false ]; then
+    echo -e "  ${YELLOW}Встановлення Pillow...${NC}"
+    # Method 1: apt (most reliable on Pi OS Bookworm)
+    sudo apt-get install -y python3-pil 2>/dev/null && PILLOW_OK=true
+    # Method 2: pip with --break-system-packages (fallback)
+    if [ "$PILLOW_OK" = false ]; then
+        pip3 install --break-system-packages pillow 2>/dev/null && PILLOW_OK=true
+    fi
+    # Method 3: pip --user
+    if [ "$PILLOW_OK" = false ]; then
+        pip3 install --user pillow 2>/dev/null && PILLOW_OK=true
+    fi
+    if [ "$PILLOW_OK" = true ]; then
+        echo -e "  ${GREEN}Pillow встановлено${NC}"
+    else
+        echo -e "  ${RED}Pillow не вдалося встановити — VO Fallback injection буде через djpeg${NC}"
+    fi
+else
+    echo -e "  ${GREEN}Pillow OK${NC}"
+fi
 
 # Стратегія: pre-built (з git) > локальний білд (якщо є npm)
 if [ -f "$BACKEND_DIR/static/index.html" ]; then

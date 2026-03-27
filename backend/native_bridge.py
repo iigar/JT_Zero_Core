@@ -10,6 +10,7 @@ import sys
 import os
 import io
 import threading
+import subprocess
 
 # Try to import native module
 try:
@@ -459,6 +460,17 @@ class NativeRuntime:
                         ]
                 except Exception:
                     pass
+            elif gray_bytes and len(gray_bytes) == self._VO_INJECT_W * self._VO_INJECT_H:
+                # Pure Python fallback (no Pillow, no numpy) — slower but works
+                try:
+                    py_feats = self._detect_features_raw(gray_bytes, self._VO_INJECT_W, self._VO_INJECT_H)
+                    self._vo_python_features = py_feats
+                    if not getattr(self, '_rawfeat_logged', False):
+                        sys.stderr.write(f"[VO PyDetect] Raw detector: {len(py_feats)} features\n")
+                        sys.stderr.flush()
+                        self._rawfeat_logged = True
+                except Exception:
+                    pass
             
             # Inject into C++ VO pipeline
             try:
@@ -475,18 +487,61 @@ class NativeRuntime:
 
     def _decode_jpeg_to_gray(self, jpeg_data: bytes):
         """Decode JPEG to grayscale at VO resolution (320x240).
-        Returns (bytes, PIL.Image) — Image for Python feature detection.
+        Returns (bytes, PIL.Image|None). Uses Pillow if available, else djpeg subprocess.
         """
+        w, h = self._VO_INJECT_W, self._VO_INJECT_H
+        
+        # Method 1: Pillow (fast, returns Image for feature detection)
         if PIL_AVAILABLE:
             try:
                 img = Image.open(io.BytesIO(jpeg_data))
-                img = img.convert('L')  # grayscale
-                img = img.resize((self._VO_INJECT_W, self._VO_INJECT_H), Image.NEAREST)
+                img = img.convert('L')
+                img = img.resize((w, h), Image.NEAREST)
                 return img.tobytes(), img
             except Exception:
                 return b'', None
-        else:
-            return b'', None
+        
+        # Method 2: djpeg subprocess (libjpeg-turbo, available on Pi OS)
+        try:
+            proc = subprocess.run(
+                ['djpeg', '-grayscale', '-pnm'],
+                input=jpeg_data, capture_output=True, timeout=2
+            )
+            if proc.returncode == 0 and proc.stdout:
+                pgm = proc.stdout
+                # Parse PGM P5 header: "P5\nW H\nMAXVAL\n<pixels>"
+                idx = 0
+                lines_found = 0
+                while lines_found < 3 and idx < min(len(pgm), 100):
+                    if pgm[idx:idx+1] == b'\n':
+                        lines_found += 1
+                    idx += 1
+                header = pgm[:idx].decode('ascii', errors='ignore').split()
+                raw = pgm[idx:]
+                if len(header) >= 3:
+                    ow, oh = int(header[1]), int(header[2])
+                    if len(raw) >= ow * oh:
+                        # Nearest-neighbor resize to VO resolution
+                        resized = bytearray(w * h)
+                        xr, yr = ow / w, oh / h
+                        for yo in range(h):
+                            yi = int(yo * yr)
+                            for xo in range(w):
+                                resized[yo * w + xo] = raw[yi * ow + int(xo * xr)]
+                        if not getattr(self, '_djpeg_ok_logged', False):
+                            sys.stderr.write(f"[VO] djpeg decode OK: {ow}x{oh} -> {w}x{h}\n")
+                            sys.stderr.flush()
+                            self._djpeg_ok_logged = True
+                        return bytes(resized), None
+        except FileNotFoundError:
+            if not getattr(self, '_djpeg_warn', False):
+                sys.stderr.write("[VO] WARNING: Neither Pillow nor djpeg — "
+                                "install: sudo apt install python3-pil\n")
+                sys.stderr.flush()
+                self._djpeg_warn = True
+        except Exception:
+            pass
+        return b'', None
 
     @staticmethod
     def _detect_features_pillow(gray_img, max_features=120):
@@ -553,61 +608,56 @@ class NativeRuntime:
         return [{"x": float(c[0]), "y": float(c[1]),
                  "tracked": True, "response": c[2]}
                 for c in selected]
-        """Fast corner detection on grayscale frame using numpy.
+
+    @staticmethod
+    def _detect_features_raw(gray_bytes, width, height, max_features=80):
+        """Pure Python corner detector — no Pillow, no numpy.
         
-        Simplified Shi-Tomasi: R = min(|Ix|, |Iy|) with non-max suppression.
-        Returns features at VO resolution coordinates (320x240).
-        ~3-5ms on Pi 4 for 320x240 frame.
+        Slower (~100ms on Pi 4) but works when no libraries available.
+        Uses simple gradient-based corner detection on raw bytes.
         """
-        frame = np.frombuffer(gray_bytes, dtype=np.uint8).reshape(height, width).astype(np.int16)
+        border = 12
+        threshold = 8
+        min_dist = 8
         
-        # Sobel-like gradients (central difference)
-        Ix = frame[:, 2:] - frame[:, :-2]  # horizontal
-        Iy = frame[2:, :] - frame[:-2, :]  # vertical
+        # Compute corner response at sampled points (skip every 2px for speed)
+        candidates = []
+        step = 2
+        for y in range(border, height - border, step):
+            for x in range(border, width - border, step):
+                idx = y * width + x
+                # Horizontal gradient: |pixel(x+2) - pixel(x-2)| (wider for robustness)
+                gx = abs(gray_bytes[idx + 2] - gray_bytes[idx - 2])
+                # Vertical gradient: |pixel(y+2) - pixel(y-2)|
+                gy = abs(gray_bytes[idx + 2*width] - gray_bytes[idx - 2*width])
+                # Corner = strong in BOTH directions
+                resp = min(gx, gy)
+                if resp > threshold:
+                    candidates.append((x, y, resp))
         
-        # Crop to matching size (lose 1px border on each side)
-        h, w = min(Ix.shape[0], Iy.shape[0]), min(Ix.shape[1], Iy.shape[1])
-        Ix = Ix[:h, :w]
-        Iy = Iy[:, :w][:h, :]
-        
-        # Corner response = min(|Ix|, |Iy|) — strong in both directions = corner
-        response = np.minimum(np.abs(Ix), np.abs(Iy)).astype(np.float32)
-        
-        # Non-maximum suppression (3x3 window — fast)
-        pad = 1
-        padded = np.pad(response, pad, mode='constant', constant_values=0)
-        is_max = np.ones(response.shape, dtype=bool)
-        for dy in range(-1, 2):
-            for dx in range(-1, 2):
-                if dy == 0 and dx == 0:
-                    continue
-                shifted = padded[pad + dy:pad + dy + h, pad + dx:pad + dx + w]
-                is_max &= response >= shifted
-        
-        # Threshold: reject weak corners
-        thresh = max(8.0, float(np.percentile(response, 92)))
-        valid = is_max & (response > thresh)
-        
-        ys, xs = np.where(valid)
-        if len(ys) == 0:
+        if not candidates:
             return []
         
-        resps = response[ys, xs]
+        # Sort by response, sparse subsample
+        candidates.sort(key=lambda c: -c[2])
+        min_dist_sq = min_dist * min_dist
+        selected = []
+        for c in candidates:
+            too_close = False
+            for s in selected:
+                dx = c[0] - s[0]
+                dy = c[1] - s[1]
+                if dx * dx + dy * dy < min_dist_sq:
+                    too_close = True
+                    break
+            if not too_close:
+                selected.append(c)
+                if len(selected) >= max_features:
+                    break
         
-        # Sort by response strength, take top N
-        if len(ys) > max_features:
-            order = np.argsort(-resps)[:max_features]
-            ys, xs, resps = ys[order], xs[order], resps[order]
-        
-        features = []
-        for i in range(len(ys)):
-            features.append({
-                "x": float(xs[i] + 1),   # +1 compensates for gradient crop
-                "y": float(ys[i] + 1),
-                "tracked": True,
-                "response": int(resps[i]),
-            })
-        return features
+        return [{"x": float(c[0]), "y": float(c[1]),
+                 "tracked": True, "response": c[2]}
+                for c in selected]
 
     # ── Multi-Camera Support ──
     # Until C++ bindings are recompiled on the Pi with multi-camera,
