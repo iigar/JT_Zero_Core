@@ -81,10 +81,16 @@ class NativeRuntime:
         self._vo_conf_history = []  # rolling window of confidence values
         self._vo_fallback_thread = None
         self._vo_fallback_stop = threading.Event()
+        self._vo_fallback_start_time = 0
+        self._vo_fallback_cooldown_until = 0  # anti-oscillation cooldown
+        self._vo_csi_good_probes = 0          # consecutive good CSI probes needed for recovery
         self._VO_CONF_DROP = 0.30       # trigger fallback when rolling avg below this
-        self._VO_CONF_RECOVER = 0.35    # recover when CSI probe quality above this
+        self._VO_CONF_RECOVER = 0.50    # recover when CSI probe quality above this (raised from 0.35)
         self._VO_WINDOW_SIZE = 15       # 1.5 seconds at 10Hz
         self._VO_MIN_SAMPLES = 10       # need at least 1s of data before triggering
+        self._VO_MIN_FALLBACK_S = 10    # minimum seconds in fallback before checking recovery
+        self._VO_COOLDOWN_S = 15        # seconds after recovery before allowing new fallback
+        self._VO_PROBES_TO_RECOVER = 2  # consecutive good CSI probes needed (each 3s apart)
         self._VO_INJECT_W = 320
         self._VO_INJECT_H = 240
     
@@ -272,6 +278,11 @@ class NativeRuntime:
         
         if not self._vo_fallback_active:
             # ── Normal mode: monitor confidence with rolling average ──
+            
+            # Anti-oscillation cooldown: don't trigger fallback right after recovery
+            if time.time() < self._vo_fallback_cooldown_until:
+                return
+            
             try:
                 cam = dict(self._rt.get_camera())
                 conf = cam.get('vo_confidence', 0.5)
@@ -310,8 +321,8 @@ class NativeRuntime:
                     self._vo_fallback_thread.start()
         else:
             # ── Fallback mode: check CSI recovery via probe ──
-            # Minimum 5 seconds in fallback before checking recovery
-            if time.time() - self._vo_fallback_start_time < 5.0:
+            # Minimum time in fallback before checking recovery
+            if time.time() - self._vo_fallback_start_time < self._VO_MIN_FALLBACK_S:
                 return
             
             try:
@@ -321,22 +332,33 @@ class NativeRuntime:
                 return
             
             if probe_conf >= self._VO_CONF_RECOVER:
-                # ── RECOVER TO CSI ──
-                sys.stderr.write(f"[VO Fallback] CSI recovered (probe={probe_conf:.2f}) → deactivating\n")
+                self._vo_csi_good_probes += 1
+                sys.stderr.write(f"[VO Fallback] CSI probe good ({probe_conf:.2f}), "
+                               f"count={self._vo_csi_good_probes}/{self._VO_PROBES_TO_RECOVER}\n")
                 sys.stderr.flush()
                 
-                self._vo_fallback_stop.set()
-                if self._vo_fallback_thread:
-                    self._vo_fallback_thread.join(timeout=2)
-                
-                try:
-                    self._rt.deactivate_fallback()
-                except Exception as e:
-                    sys.stderr.write(f"[VO Fallback] deactivate error: {e}\n")
+                if self._vo_csi_good_probes >= self._VO_PROBES_TO_RECOVER:
+                    # ── RECOVER TO CSI ──
+                    sys.stderr.write(f"[VO Fallback] CSI recovered ({self._vo_csi_good_probes} good probes) → deactivating\n")
                     sys.stderr.flush()
-                
-                self._vo_fallback_active = False
-                self._vo_low_conf_count = 0
+                    
+                    self._vo_fallback_stop.set()
+                    if self._vo_fallback_thread:
+                        self._vo_fallback_thread.join(timeout=2)
+                    
+                    try:
+                        self._rt.deactivate_fallback()
+                    except Exception as e:
+                        sys.stderr.write(f"[VO Fallback] deactivate error: {e}\n")
+                        sys.stderr.flush()
+                    
+                    self._vo_fallback_active = False
+                    self._vo_conf_history = []
+                    self._vo_csi_good_probes = 0
+                    self._vo_fallback_cooldown_until = time.time() + self._VO_COOLDOWN_S
+            else:
+                # Bad probe — reset good probe counter
+                self._vo_csi_good_probes = 0
 
     def _vo_inject_loop(self):
         """Background thread: captures thermal JPEG → grayscale → injects to C++ VO."""
