@@ -78,21 +78,19 @@ class NativeRuntime:
         
         # ── VO Fallback monitoring state ──
         self._vo_fallback_active = False
-        self._vo_conf_history = []  # rolling window of confidence values
-        self._vo_bright_history = []  # rolling window of brightness values
+        self._vo_bright_history = []  # rolling window of brightness values (ONLY indicator)
         self._vo_fallback_thread = None
         self._vo_fallback_stop = threading.Event()
         self._vo_fallback_start_time = 0
-        self._vo_fallback_cooldown_until = 0  # anti-oscillation cooldown
+        self._vo_fallback_cooldown_until = 0
         self._vo_csi_good_probes = 0
-        self._VO_CONF_DROP = 0.30       # trigger fallback when rolling avg below this
-        self._VO_BRIGHT_DROP = 40       # trigger only when avg brightness also below this
-        self._VO_CONF_RECOVER = 0.40    # recover when CSI brightness-based quality above this
-        self._VO_WINDOW_SIZE = 10       # 1 second at 10Hz — fast trigger
-        self._VO_MIN_SAMPLES = 8        # need 0.8s of data before triggering
-        self._VO_MIN_FALLBACK_S = 3     # 3s minimum in fallback (fast for drone)
-        self._VO_COOLDOWN_S = 5         # 5s after recovery before allowing new fallback
-        self._VO_PROBES_TO_RECOVER = 1  # single good brightness probe enough
+        self._VO_BRIGHT_DROP = 20       # trigger when avg brightness below this (camera dark)
+        self._VO_CONF_RECOVER = 0.40    # recovery: brightness-based quality > this
+        self._VO_WINDOW_SIZE = 10       # 1 second at 10Hz
+        self._VO_MIN_SAMPLES = 8        # need 0.8s of data
+        self._VO_MIN_FALLBACK_S = 3     # 3s minimum in fallback
+        self._VO_COOLDOWN_S = 5         # 5s cooldown after recovery
+        self._VO_PROBES_TO_RECOVER = 1
         self._VO_INJECT_W = 320
         self._VO_INJECT_H = 240
     
@@ -280,53 +278,43 @@ class NativeRuntime:
             return
         
         if not self._vo_fallback_active:
-            # ── Normal mode: monitor confidence with rolling average ──
+            # ── Normal mode: monitor brightness ONLY ──
+            # Confidence is USELESS: VO tracks noise at high conf on dark frames!
+            # Brightness is the reliable indicator: dark = camera blocked
             
-            # Anti-oscillation cooldown: don't trigger fallback right after recovery
             if time.time() < self._vo_fallback_cooldown_until:
                 return
             
             try:
                 cam = dict(self._rt.get_camera())
-                conf = cam.get('vo_confidence', 0.5)
                 brightness = cam.get('frame_brightness', 128)
             except Exception:
                 return
             
-            # Rolling windows: keep last N values
-            self._vo_conf_history.append(conf)
             self._vo_bright_history.append(brightness)
-            if len(self._vo_conf_history) > self._VO_WINDOW_SIZE:
-                self._vo_conf_history = self._vo_conf_history[-self._VO_WINDOW_SIZE:]
             if len(self._vo_bright_history) > self._VO_WINDOW_SIZE:
                 self._vo_bright_history = self._vo_bright_history[-self._VO_WINDOW_SIZE:]
             
-            if len(self._vo_conf_history) >= self._VO_MIN_SAMPLES:
-                avg_conf = sum(self._vo_conf_history) / len(self._vo_conf_history)
+            if len(self._vo_bright_history) >= self._VO_MIN_SAMPLES:
                 avg_bright = sum(self._vo_bright_history) / len(self._vo_bright_history)
                 
-                # Trigger ONLY if BOTH rolling averages are low:
-                # Low avg_conf + low avg_bright = camera covered/dark (trigger!)
-                # Low avg_conf + high avg_bright = scene transition (skip!)
-                if avg_conf < self._VO_CONF_DROP and avg_bright < self._VO_BRIGHT_DROP:
-                    # ── TRIGGER FALLBACK ──
-                    reason = f"CSI dark avg_bright={avg_bright:.0f} avg_conf={avg_conf:.0%}"
+                if avg_bright < self._VO_BRIGHT_DROP:
+                    # ── TRIGGER: camera is dark ──
+                    reason = f"CSI dark avg_bright={avg_bright:.0f}<{self._VO_BRIGHT_DROP}"
                     sys.stderr.write(f"[VO Fallback] TRIGGERING: {reason}\n")
                     sys.stderr.flush()
                     
                     try:
                         self._rt.activate_fallback(reason)
                     except Exception as e:
-                        sys.stderr.write(f"[VO Fallback] activate_fallback error: {e}\n")
+                        sys.stderr.write(f"[VO Fallback] activate error: {e}\n")
                         sys.stderr.flush()
                         return
                     
                     self._vo_fallback_active = True
                     self._vo_fallback_start_time = time.time()
-                    self._vo_conf_history = []
                     self._vo_bright_history = []
                     
-                    # Start injection thread
                     self._vo_fallback_stop.clear()
                     self._vo_fallback_thread = threading.Thread(
                         target=self._vo_inject_loop, daemon=True)
@@ -365,7 +353,6 @@ class NativeRuntime:
                         sys.stderr.flush()
                     
                     self._vo_fallback_active = False
-                    self._vo_conf_history = []
                     self._vo_bright_history = []
                     self._vo_csi_good_probes = 0
                     self._vo_fallback_cooldown_until = time.time() + self._VO_COOLDOWN_S
