@@ -64,12 +64,22 @@ async def _vo_fallback_monitor():
     """Background task: monitors CSI confidence and manages VO fallback to thermal.
     Runs independently of WebSocket connections at ~10Hz."""
     await asyncio.sleep(5)  # Let runtime stabilize
+    tick_count = 0
     while True:
         try:
             if hasattr(runtime, 'vo_fallback_tick'):
                 runtime.vo_fallback_tick()
-        except Exception:
-            pass
+            tick_count += 1
+            if tick_count % 50 == 0:  # Every 5 seconds
+                try:
+                    cam = runtime.get_camera_stats()
+                    conf = cam.get('vo_confidence', -1)
+                    src = cam.get('vo_source', '?')
+                    print(f"[VO Monitor] conf={conf:.2f} src={src} tick={tick_count}", flush=True)
+                except Exception as e2:
+                    print(f"[VO Monitor] stats error: {e2}", flush=True)
+        except Exception as e:
+            print(f"[VO Monitor] tick error: {e}", flush=True)
         await asyncio.sleep(0.1)  # 10Hz
 
 app = FastAPI(

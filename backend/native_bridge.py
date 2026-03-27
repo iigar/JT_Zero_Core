@@ -267,7 +267,6 @@ class NativeRuntime:
         # Check if C++ has new fallback bindings
         has_bindings = hasattr(self._rt, 'inject_frame')
         if not has_bindings:
-            # Old C++ binary without inject_frame — fall back to stats-only monitoring
             return
         
         if not self._vo_fallback_active:
@@ -280,10 +279,13 @@ class NativeRuntime:
             
             if conf < self._VO_CONF_DROP:
                 self._vo_low_conf_count += 1
+                if self._vo_low_conf_count % 5 == 1:
+                    sys.stderr.write(f"[VO Fallback] LOW conf={conf:.3f} count={self._vo_low_conf_count}/{self._VO_FRAMES_TO_SWITCH}\n")
+                    sys.stderr.flush()
                 if self._vo_low_conf_count >= self._VO_FRAMES_TO_SWITCH:
                     # ── TRIGGER FALLBACK ──
                     reason = f"CSI conf {conf:.0%} < {self._VO_CONF_DROP:.0%} for {self._vo_low_conf_count} samples"
-                    sys.stderr.write(f"[VO Fallback] {reason}\n")
+                    sys.stderr.write(f"[VO Fallback] TRIGGERING: {reason}\n")
                     sys.stderr.flush()
                     
                     try:
@@ -302,7 +304,8 @@ class NativeRuntime:
                         target=self._vo_inject_loop, daemon=True)
                     self._vo_fallback_thread.start()
             else:
-                self._vo_low_conf_count = 0
+                if self._vo_low_conf_count > 0:
+                    self._vo_low_conf_count = 0
         else:
             # ── Fallback mode: check CSI recovery via probe ──
             try:
