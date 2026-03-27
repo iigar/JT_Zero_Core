@@ -1,113 +1,55 @@
-# JT-Zero Runtime - Product Requirements Document
+# JT-Zero Runtime — Product Requirements Document
 
-## Original Problem Statement
-Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
-- High-performance C++ core for event processing and real-time control
-- Python bindings via pybind11
-- FastAPI backend + React monitoring dashboard
-- Camera integration (CSI + USB/thermal) with Visual Odometry
-- MAVLink flight controller integration
-- Visual Odometry as navigation source for ArduPilot EKF
-
-## Target Hardware
-- Primary: Raspberry Pi Zero 2 W (ARM Cortex-A53, 512MB RAM)
-- Extended: Raspberry Pi 4 (4GB), Raspberry Pi 5
-- Cameras: Pi CSI Camera Module v2/v3 (Forward VO), USB thermal cameras Caddx 256x192 (Downward thermal)
-- USB Capture Card: MacroSilicon MS210x (AV TO USB2.0) — MJPEG only, YUYV returns zeros
-- Analog FPV camera (direct to VTX, not processed by Pi)
+## Problem Statement
+Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi (Zero 2 W and Pi 4). The system features a high-performance C++ core for Visual Odometry (VO), a FastAPI backend, and a React monitoring dashboard. The drone needs to maintain position using visual features from a CSI camera, with automatic fallback to a USB thermal camera in darkness/fog.
 
 ## Architecture
-```
-/app
-├── .github/workflows/     # CI/CD
-│   └── build-frontend.yml # Auto-build frontend on push
-├── backend/               # FastAPI server, simulator, native bridge
-│   ├── server.py          # FastAPI + WebSocket, frame caching
-│   ├── native_bridge.py   # C++ bridge + multi-camera init
-│   ├── simulator.py       # Python simulator
-│   ├── usb_camera.py      # V4L2 subprocess wrapper (MJPEG batch capture)
-│   └── static/            # Pre-built React frontend (served by FastAPI)
-├── frontend/              # React dashboard (Tailwind CSS)
-│   └── src/components/
-│       ├── CameraPanel.js     # Primary VO camera
-│       ├── ThermalPanel.js    # Secondary thermal camera (live MJPEG)
-│       └── ...
-├── jt-zero/               # C++ core
-│   ├── core/              # runtime.cpp
-│   ├── camera/            # camera_pipeline.cpp, camera_drivers.cpp
-│   ├── mavlink/           # mavlink_interface.cpp
-│   ├── api/               # python_bindings.cpp
-│   └── include/           # Header files (camera.h with multi-cam)
-├── update.sh              # Smart update script (pre-built priority)
-└── memory/                # PRD, changelog, roadmap
-```
+- **C++ Core**: Multi-threaded (8 threads), lock-free SPSC ring buffers, FAST corner detection + Lucas-Kanade optical flow
+- **Python Backend**: FastAPI with WebSocket telemetry at 10Hz, native bridge via pybind11
+- **React Frontend**: Pre-built to `backend/static/` (no Node.js on Pi), served by FastAPI
+- **Hardware**: Raspberry Pi Zero 2W / Pi 4, Pi Camera v2 (CSI), USB thermal camera (Caddx via MS210x capture card)
 
-## Key Technical Details
+## Key Technical Decisions
+- **Brightness-only fallback trigger**: FAST detector tracks sensor noise in darkness → confidence unreliable. Rolling average brightness < 20 is the reliable trigger
+- **Hybrid VO Fallback**: Python reads MJPEG from USB → decodes → injects into C++ pipeline (because C++ USBCamera YUYV returns zeros on MS210x hardware)
+- **Pre-built frontend**: REACT_APP_BACKEND_URL="" for Pi builds (relative URLs), preview URL for Emergent testing
+- **One camera at a time**: USB bus shared with WiFi, simultaneous VO overloads Pi Zero 2W CPU
 
-### USB Thermal Camera (MS210x Capture Card)
-- **Detection**: `v4l2-ctl --list-devices` (Python ioctl fails on aarch64)
-- **Format**: MJPEG only (YUYV returns all-zero data on this hardware)
-- **Capture**: Batch mode (`v4l2-ctl --stream-count=2`) — each call reopens device
-- **Why batch, not persistent**: MS210x repeats same frame when device stays open. Reopening forces fresh analog capture.
-- **Resolution**: 640x480 (card supports 480x320, 640x480, 720x480)
-- **Frame caching bug (FIXED)**: `get_secondary_frame_data()` must update `frame_count` in camera state dict, otherwise server cache never invalidates
-- **FPS**: ~5fps with batch capture (0.2s per grab)
-
-### Pre-built Frontend
-- Pi Zero 2W lacks RAM to compile React
-- Frontend built with `REACT_APP_BACKEND_URL=''` (empty!) so Pi connects to itself
-- Committed to `backend/static/` in git
-- **CRITICAL**: Never build with Emergent Preview URL — causes Pi to connect to wrong server
-
-### Dual Camera VO Strategy
-- **Current**: CSI for VO (high-res visual features), USB thermal for situational awareness
-- **Implemented**: VO Fallback (Hybrid) — Python monitors confidence, captures MJPEG from USB thermal via usb_camera.py, decodes JPEG→grayscale via Pillow, injects into C++ VO pipeline via thread-safe SPSC inject_frame()
-- **Recovery**: CSI probed every 3s via FAST detector in C++ T6 thread, auto-returns when feature quality > 25%
-- **Why hybrid**: C++ USBCamera uses YUYV (returns zeros on MS210x). Python usb_camera.py uses MJPEG v4l2-ctl (works)
-- **Future**: Sensor fusion — use both simultaneously with confidence weighting
-
-## Deployment Strategy
-- **Frontend build**: GitHub Actions auto-builds on push, commits `backend/static/` to git
-- **Pi update**: `git pull && ./update.sh` — no Node.js needed on Pi
-- **Fallback**: Local npm build with swap (for Pi 4+ only)
-
-## Implementation Status
-
-### Completed
-- C++ Runtime core (event loop, thread management, sensor fusion)
-- Visual Odometry: FAST + Shi-Tomasi detection, LK tracking with bilinear interpolation, Sobel gradients
-- Kalman filter velocity smoothing + IMU cross-validation
-- Confidence-based covariance reporting to ArduPilot EKF
-- MAVLink interface (ODOMETRY messages)
-- FastAPI backend with REST + WebSocket telemetry
-- React dashboard (7 tabs)
-- Python simulator, documentation, offline installation
-- Multi-Camera Architecture (CSI + USB Thermal)
-- USB Thermal Camera live streaming (MJPEG batch capture, ~5fps)
-- ThermalPanel with live JPEG rendering (CameraPanel pattern)
-- CSI Priority + USB Fallback with 8 CSI sensor auto-detection + GENERIC fallback
+## What's Been Implemented
+- Full VO pipeline (FAST/Shi-Tomasi + LK + Kalman filter)
+- 8 CSI sensor profiles + GENERIC fallback
+- Adaptive altitude zones (LOW/MEDIUM/HIGH/CRUISE)
+- Hover yaw correction
+- VO mode profiles (Light/Balanced/Performance)
+- MAVLink v2 integration (VISION_POSITION_ESTIMATE at 25Hz)
+- EKF3 ExternalNav integration with ArduPilot
+- Multi-camera architecture (CSI PRIMARY + USB SECONDARY)
+- USB thermal camera live streaming (MJPEG batch capture ~5fps)
+- VO Fallback: brightness-only trigger, hybrid Python/C++ injection, periodic CSI probe recovery
+- ThermalPanel feature overlay (dual-trigger rendering, PTS debug counter)
+- Dashboard VO source indicators (sidebar badge, alert, stats bars)
 - GitHub Actions CI/CD for frontend builds
-- Pre-built frontend in git (no Node.js on Pi)
-- IMX290 STARVIS added to known CSI sensors
-- VO Fallback (Hybrid Python/C++): Python monitors confidence + captures thermal JPEG + injects grayscale into C++ VO pipeline
-- inject_frame() thread-safe SPSC, activate/deactivate_fallback(), periodic CSI probe for recovery
-- Dashboard VO source indicators (badge + alert + sidebar)
+- Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md)
+- Confidence-based covariance reporting to ArduPilot EKF
+- Python simulator with simulated features for dev/preview testing
 
 ### API Endpoints
 - `GET /api/cameras` — List all camera slots (PRIMARY, SECONDARY)
 - `GET /api/camera` — Primary (VO) camera stats
 - `GET /api/camera/frame` — Primary camera frame (PNG)
+- `GET /api/camera/features` — Current VO feature positions
 - `GET /api/camera/secondary/stats` — Thermal camera stats
 - `POST /api/camera/secondary/capture` — Trigger on-demand thermal capture
 - `GET /api/camera/secondary/frame` — Thermal camera frame (JPEG or PNG)
+- `WS /api/ws/telemetry` — WebSocket streaming (10Hz) with state, camera, features, mavlink
 
 ## Backlog
 
 ### P1 - Next
-- VO Fallback hardware testing (Pi + CSI + USB thermal)
-- Thermal camera FPS optimization (target: 10-15fps)
+- Verify ThermalPanel feature overlay on Pi hardware (user hardware test)
 
 ### P2 - Planned
+- C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)
 - IP camera (RTSP) support
 - ARM NEON optimization for C++ core
 - Autonomous Mission Planning UI
@@ -116,4 +58,4 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 ### P3 - Future
 - MAVLink diagnostics page in React Dashboard
 - Sensor fusion (dual-camera VO simultaneously)
-- CSI camera testing with new Sobel/bilinear improvements
+- CSI camera testing with Sobel/bilinear improvements

@@ -1,5 +1,25 @@
 # JT-Zero Changelog
 
+## 2026-03-27 — VO Fallback Stabilization + Feature Overlay Fix
+
+### Brightness-Only Trigger (CRITICAL FIX)
+- **Removed confidence-based trigger**: FAST detector tracks sensor noise in pitch darkness, causing confidence ~70% when camera is blocked
+- **New trigger**: Rolling average brightness < 20 (10-sample window, min 5 samples)
+- **Recovery**: Uses CSI brightness probes (3 consecutive good probes needed), with 3s minimum fallback time and 5s cooldown
+
+### ThermalPanel Feature Overlay Fix
+- **Dual-trigger rendering**: Features now redraw BOTH on JPEG frame load AND when WebSocket features update (eliminates timing gaps)
+- **`lastImageRef`**: Stores reference to last drawn image, enabling instant overlay redraws without waiting for next frame
+- **`renderCanvas()`**: Unified render function for image + features + crosshair
+- **Canvas state management**: Added `ctx.save()/ctx.restore()` to prevent shadow state leakage
+- **PTS debug counter**: Added 5th column (PTS) to VO stats bar showing live `features.length` count from WebSocket
+
+### CLAUDE.md Updated
+- Documented brightness-only trigger with reasoning
+- Updated configuration table with new parameters
+- Added Feature Overlay section
+
+
 ## 2026-03-27 — VO Fallback to USB Thermal Camera (P1)
 
 ### C++ Core: Hybrid VO Fallback (Python → C++ injection)

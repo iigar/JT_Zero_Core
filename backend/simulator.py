@@ -637,6 +637,26 @@ class JTZeroSimulator:
         """VO fallback monitoring — no-op in simulator."""
         pass
 
+    def get_features(self) -> list:
+        """Return simulated VO features for frontend testing."""
+        with self._lock:
+            cam = self.camera_stats
+            n_detected = cam.vo_features_detected
+            n_tracked = cam.vo_features_tracked
+            features = []
+            t = time.time() - self._start_time
+            for i in range(min(n_detected, 120)):
+                # Spread features across 320x240 VO resolution
+                fx = (hash((i * 7 + 13)) % 300) + 10 + 3 * math.sin(t * 0.2 + i)
+                fy = (hash((i * 11 + 7)) % 220) + 10 + 3 * math.cos(t * 0.15 + i)
+                features.append({
+                    "x": float(fx),
+                    "y": float(fy),
+                    "tracked": i < n_tracked,
+                    "response": 50 + (hash(i * 3) % 150),
+                })
+            return features
+
     def capture_secondary(self) -> bool:
         """Trigger capture from secondary camera (continuous stream)."""
         with self._lock:

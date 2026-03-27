@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl subprocess (architecture-independent). **USB thermal live streaming** — MJPEG batch capture (~5fps), frame cache invalidation fixed. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **VO Fallback** — automatic switch to USB thermal camera when CSI loses tracking (confidence < 10% for ~1s). Auto-recovery when CSI regains tracking.
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl subprocess (architecture-independent). **USB thermal live streaming** — MJPEG batch capture (~5fps), frame cache invalidation fixed. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **VO Fallback** — automatic switch to USB thermal camera when CSI goes dark (brightness < 20). Uses brightness-only trigger (NOT confidence — FAST detector tracks noise in darkness). Feature overlay on ThermalPanel during fallback. Auto-recovery when CSI brightness returns.
 
 ---
 
@@ -116,39 +116,57 @@ When the CSI camera loses tracking (darkness, fog, featureless surface), the sys
 ### State Machine
 
 ```
-CSI_PRIMARY (normal) ──[low confidence N frames]──> THERMAL_FALLBACK
+CSI_PRIMARY (normal) ──[rolling avg brightness < 20]──> THERMAL_FALLBACK
                                                         │
-THERMAL_FALLBACK ──[CSI probe OK, high confidence]──> CSI_PRIMARY
+THERMAL_FALLBACK ──[CSI probe brightness OK]──────────> CSI_PRIMARY
 ```
 
 ### Configuration
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `CONF_DROP_THRESH` | 0.10 | Switch to fallback below this confidence |
-| `CONF_RECOVER_THRESH` | 0.25 | Return to CSI above this confidence |
-| `FRAMES_TO_SWITCH` | 15 (~1s) | Consecutive low-confidence frames before switch |
+| `BRIGHT_DROP` | 20 | Switch to fallback when rolling avg brightness drops below this |
+| `CONF_RECOVER_THRESH` | 0.25 | Return to CSI above this CSI probe quality |
+| `WINDOW_SIZE` | 10 | Rolling average window for brightness samples |
+| `MIN_SAMPLES` | 5 | Minimum brightness samples before switching |
+| `MIN_FALLBACK_S` | 3.0 | Minimum seconds in fallback before checking recovery |
+| `PROBES_TO_RECOVER` | 3 | Consecutive good CSI probes needed to recover |
+| `COOLDOWN_S` | 5.0 | Cooldown after recovery before re-triggering |
 | `CSI_PROBE_INTERVAL_S` | 3.0 | Seconds between CSI recovery probes |
 | `THERMAL_FOCAL_PX` | 180.0 | Default focal length for USB thermal at 640x480 |
+
+### CRITICAL: Brightness-Only Trigger
+
+**DO NOT use confidence for the fallback trigger.** On the Pi Camera v2, the FAST detector tracks sensor noise in pitch darkness — causing confidence to read as HIGH (~70%) when the camera is completely blocked, but LOW during normal scene transitions. Only brightness is reliable:
+- `avg_brightness < 20` → camera is dark/blocked → trigger fallback
+- Confidence is only used for CSI recovery probes (scene quality, not darkness detection)
 
 ### Switch Logic (Hybrid Python/C++ Architecture)
 
 The VO Fallback uses a **hybrid** approach because the USB thermal camera hardware (MS210x capture card) only works with MJPEG via v4l2-ctl subprocess (managed by Python `usb_camera.py`), while the C++ `USBCamera` class uses YUYV which returns all-zero frames on this hardware.
 
 **Python side** (`native_bridge.py`):
-1. `vo_fallback_tick()` called at 10Hz from WebSocket telemetry loop
-2. Monitors `vo_confidence` from C++ camera stats
-3. Counts consecutive low-confidence readings (threshold: 15 samples, ~1.5s)
-4. When triggered: calls `activate_fallback()` + starts injection thread
+1. `vo_fallback_tick()` called at 10Hz from background asyncio task (independent of WebSocket)
+2. Monitors `frame_brightness` (NOT confidence!) from C++ camera stats
+3. Maintains rolling average brightness over 10 samples
+4. When avg brightness < 20: calls `activate_fallback()` + starts injection thread
 5. Injection thread: captures JPEG from `usb_camera.py` → decodes to grayscale via Pillow → calls `inject_frame()` at ~5fps
-6. Monitors CSI recovery probes from C++ → calls `deactivate_fallback()` when CSI feature quality recovers
+6. Monitors CSI recovery probes from C++ → calls `deactivate_fallback()` when 3 consecutive probes show good quality
 
 **C++ side** (`camera_pipeline.cpp`):
 1. `activate_fallback(reason)` — sets fallback state, resets VO with thermal focal length (180px)
 2. `tick()` in fallback mode: reads injected frame via atomic SPSC buffer → runs full VO pipeline (FAST/Shi-Tomasi + LK + Kalman)
-3. Periodic CSI probe (every 3s): captures one CSI frame, runs FAST detector, reports feature count
+3. Periodic CSI probe (every 3s): captures one CSI frame, calculates avg brightness, reports probe quality (brightness-normalized)
 4. `deactivate_fallback()` — restores CSI camera, resets VO with CSI focal length
 5. `inject_frame(data, w, h)` — thread-safe SPSC: Python writes when state=0, T6 reads when state=2
+
+### Feature Overlay on Thermal Panel
+
+During VO Fallback, the React `ThermalPanel.js` displays:
+- VO feature points (orange tracked squares, yellow detected circles) scaled from 320x240 VO resolution to 640x480 canvas
+- VO displacement vector (orange arrow from center)
+- VO stats bar: DET, TRK, CONF, PTS (feature count from WebSocket), FALLBACK indicator
+- Features are redrawn both on JPEG frame load AND when WebSocket features update (dual trigger for responsiveness)
 
 ### Hardware Constraints (Pi Zero 2 W)
 

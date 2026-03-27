@@ -194,9 +194,26 @@ class NativeRuntime:
     def get_features(self) -> list:
         """Get current VO feature positions [{x, y, tracked, response}, ...]."""
         try:
-            return [dict(f) for f in self._rt.get_features()]
+            feats = [dict(f) for f in self._rt.get_features()]
+            if feats:
+                return feats
         except Exception:
-            return []
+            pass
+        # Simulated features when C++ has no real camera (Emergent preview)
+        if self._rt.is_simulator_mode():
+            t = time.time()
+            n = 80 + int(20 * math.sin(t * 0.1))
+            result = []
+            for i in range(n):
+                fx = (hash((i * 7 + 13)) % 300) + 10 + 3 * math.sin(t * 0.2 + i)
+                fy = (hash((i * 11 + 7)) % 220) + 10 + 3 * math.cos(t * 0.15 + i)
+                result.append({
+                    "x": float(fx), "y": float(fy),
+                    "tracked": i < int(n * 0.7),
+                    "response": 50 + (hash(i * 3) % 150),
+                })
+            return result
+        return []
     
     def get_mavlink_stats(self) -> dict:
         return dict(self._rt.get_mavlink())

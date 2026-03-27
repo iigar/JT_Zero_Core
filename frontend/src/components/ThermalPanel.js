@@ -12,6 +12,8 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
   const [streaming, setStreaming] = useState(false);
   const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
   const featuresRef = useRef([]);
+  const lastImageRef = useRef(null);
+  const voStateRef = useRef({ vo_valid: false, vo_dx: 0, vo_dy: 0 });
 
   const {
     camera_open = false,
@@ -27,15 +29,26 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
   const vo_features_detected = camera?.vo_features_detected || 0;
   const vo_features_tracked = camera?.vo_features_tracked || 0;
   const vo_confidence = camera?.vo_confidence || 0;
-  const vo_dx = camera?.vo_dx || 0;
-  const vo_dy = camera?.vo_dy || 0;
-  const vo_valid = camera?.vo_valid || false;
 
   const isRealCamera = camera_open && device !== 'none';
   const frameUrl = `${API}/api/camera/secondary/frame`;
 
-  // Keep features ref in sync for use inside draw callback
-  useEffect(() => { featuresRef.current = features; }, [features]);
+  // Sync VO state to ref for use inside draw functions (no dependency chain)
+  useEffect(() => {
+    voStateRef.current = {
+      vo_valid: camera?.vo_valid || false,
+      vo_dx: camera?.vo_dx || 0,
+      vo_dy: camera?.vo_dy || 0,
+    };
+  }, [camera]);
+
+  // When features change, update ref AND redraw overlay on existing image
+  useEffect(() => {
+    featuresRef.current = features;
+    if (lastImageRef.current && canvasRef.current) {
+      renderCanvas(canvasRef.current, lastImageRef.current, features);
+    }
+  }, [features]);
 
   // Auto-start streaming when real camera is connected
   useEffect(() => {
@@ -59,7 +72,8 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
           if (blob.size > 0) {
             const url = URL.createObjectURL(blob);
             imgRef.current.onload = () => {
-              drawFrame(imgRef.current);
+              lastImageRef.current = imgRef.current;
+              renderCanvas(canvasRef.current, imgRef.current, featuresRef.current);
               URL.revokeObjectURL(url);
               setStreamActive(true);
               setFrameId(prev => prev + 1);
@@ -83,28 +97,29 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
     return () => { active = false; };
   }, [streaming, frameUrl]);
 
-  // Draw thermal frame on canvas + VO feature overlay when active
-  const drawFrame = (img) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Core render: image + features + crosshair — called on frame load AND feature updates
+  function renderCanvas(canvas, img, feats) {
+    if (!canvas || !img) return;
     const ctx = canvas.getContext('2d');
     const cw = canvas.width;
     const ch = canvas.height;
 
+    // 1. Draw thermal image
     ctx.drawImage(img, 0, 0, cw, ch);
 
-    // VO Feature overlay (when thermal is active VO source)
-    const feats = featuresRef.current;
+    // 2. VO Feature overlay (when thermal is active VO source)
     if (feats && feats.length > 0) {
       // Scale features from VO resolution (320x240) to canvas (640x480)
       const scale_x = cw / 320;
       const scale_y = ch / 240;
-      
+
+      ctx.save();
+
       for (let i = 0; i < feats.length; i++) {
         const f = feats[i];
         const fx = f.x * scale_x;
         const fy = f.y * scale_y;
-        
+
         if (f.tracked) {
           // Tracked: orange squares with glow (thermal color scheme)
           ctx.shadowColor = 'rgba(255, 160, 40, 0.6)';
@@ -112,21 +127,27 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
           ctx.fillStyle = 'rgba(255, 160, 40, 0.9)';
           ctx.fillRect(fx - 3, fy - 3, 6, 6);
           ctx.shadowBlur = 0;
+          ctx.shadowColor = 'transparent';
         } else {
           // Detected (not tracked): yellow circles
+          ctx.shadowBlur = 0;
+          ctx.shadowColor = 'transparent';
           ctx.fillStyle = 'rgba(255, 220, 80, 0.7)';
           ctx.beginPath();
           ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
-      
+
+      ctx.restore();
+
       // VO displacement vector
-      if (vo_valid) {
+      const vs = voStateRef.current;
+      if (vs.vo_valid) {
         const cx = cw / 2;
         const cy = ch / 2;
-        const vx = vo_dx * 5000;
-        const vy = vo_dy * 5000;
+        const vx = vs.vo_dx * 5000;
+        const vy = vs.vo_dy * 5000;
         ctx.strokeStyle = '#FF6633';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -140,7 +161,7 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
       }
     }
 
-    // Crosshair overlay
+    // 3. Crosshair overlay
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
@@ -149,7 +170,7 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
     ctx.moveTo(0, ch / 2); ctx.lineTo(cw, ch / 2);
     ctx.stroke();
     ctx.setLineDash([]);
-  };
+  }
 
   // Placeholder when no frames
   useEffect(() => {
@@ -209,7 +230,7 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
 
       {/* VO Stats bar (visible when thermal is active VO source) */}
       {isVOActive && (
-        <div className="grid grid-cols-4 gap-px bg-[#3D1E1E]/30 shrink-0" data-testid="thermal-vo-stats">
+        <div className="grid grid-cols-5 gap-px bg-[#3D1E1E]/30 shrink-0" data-testid="thermal-vo-stats">
           <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
             <span className="text-[8px] text-slate-600">DET</span>
             <span className="text-[10px] font-bold text-orange-400 ml-auto">{vo_features_detected}</span>
@@ -222,6 +243,12 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
             <span className="text-[8px] text-slate-600">CONF</span>
             <span className={`text-[10px] font-bold ml-auto ${vo_confidence > 0.3 ? 'text-emerald-400' : vo_confidence > 0.15 ? 'text-amber-400' : 'text-red-400'}`}>
               {(vo_confidence * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
+            <span className="text-[8px] text-slate-600">PTS</span>
+            <span className={`text-[10px] font-bold ml-auto ${features.length > 0 ? 'text-cyan-400' : 'text-red-400'}`} data-testid="thermal-feature-count">
+              {features.length}
             </span>
           </div>
           <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
@@ -255,7 +282,8 @@ export default function ThermalPanel({ secondary, features = [], camera = null, 
               .then(blob => {
                 const url = URL.createObjectURL(blob);
                 imgRef.current.onload = () => {
-                  drawFrame(imgRef.current);
+                  lastImageRef.current = imgRef.current;
+                  renderCanvas(canvasRef.current, imgRef.current, featuresRef.current);
                   URL.revokeObjectURL(url);
                 };
                 imgRef.current.src = url;
