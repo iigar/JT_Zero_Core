@@ -110,3 +110,5 @@ cd jt-zero && chmod +x setup.sh && ./setup.sh
 - MAVLink підключений до ArduPilot (Matek H743)
 - EKF3 ExternalNav підтверджено
 - 15 fps VO, 25Hz MAVLink, 0 CRC помилок
+- 
+Обидві камери з детектом, usb камера вмикає детектор коли csi  не спрацьовує
