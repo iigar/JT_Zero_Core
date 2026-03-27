@@ -83,14 +83,14 @@ class NativeRuntime:
         self._vo_fallback_stop = threading.Event()
         self._vo_fallback_start_time = 0
         self._vo_fallback_cooldown_until = 0  # anti-oscillation cooldown
-        self._vo_csi_good_probes = 0          # consecutive good CSI probes needed for recovery
+        self._vo_csi_good_probes = 0
         self._VO_CONF_DROP = 0.30       # trigger fallback when rolling avg below this
-        self._VO_CONF_RECOVER = 0.50    # recover when CSI probe quality above this (raised from 0.35)
-        self._VO_WINDOW_SIZE = 15       # 1.5 seconds at 10Hz
-        self._VO_MIN_SAMPLES = 10       # need at least 1s of data before triggering
-        self._VO_MIN_FALLBACK_S = 10    # minimum seconds in fallback before checking recovery
-        self._VO_COOLDOWN_S = 15        # seconds after recovery before allowing new fallback
-        self._VO_PROBES_TO_RECOVER = 2  # consecutive good CSI probes needed (each 3s apart)
+        self._VO_CONF_RECOVER = 0.40    # recover when CSI brightness-based quality above this
+        self._VO_WINDOW_SIZE = 10       # 1 second at 10Hz — fast trigger
+        self._VO_MIN_SAMPLES = 8        # need 0.8s of data before triggering
+        self._VO_MIN_FALLBACK_S = 3     # 3s minimum in fallback (fast for drone)
+        self._VO_COOLDOWN_S = 5         # 5s after recovery before allowing new fallback
+        self._VO_PROBES_TO_RECOVER = 1  # single good brightness probe enough
         self._VO_INJECT_W = 320
         self._VO_INJECT_H = 240
     

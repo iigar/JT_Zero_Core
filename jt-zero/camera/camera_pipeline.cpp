@@ -951,7 +951,8 @@ bool CameraPipeline::tick(float ground_distance) {
             
             FrameBuffer probe_frame;
             if (primary_camera_->capture(probe_frame)) {
-                // 1. Check average brightness — dark = camera covered
+                // Brightness-only probe: reliable indicator of camera usability
+                // FAST detector removed — gives false positives on sensor noise
                 uint32_t brightness_sum = 0;
                 int pixel_count = probe_frame.info.width * probe_frame.info.height;
                 for (int i = 0; i < pixel_count; i++) {
@@ -959,27 +960,16 @@ bool CameraPipeline::tick(float ground_distance) {
                 }
                 float avg_brightness = static_cast<float>(brightness_sum) / pixel_count;
                 
-                // If too dark (< 20 out of 255), camera is covered — don't recover
-                if (avg_brightness < 20.0f) {
-                    fallback_state_.last_csi_probe_conf = 0;
-                    std::printf("[VO Fallback] CSI probe: brightness=%.1f (dark) — staying in fallback\n",
-                               avg_brightness);
-                } else {
-                    // 2. Run FAST detector only if brightness is sufficient
-                    FASTDetector probe_detector;
-                    FeaturePoint probe_features[100];
-                    int found = probe_detector.detect(probe_frame.data,
-                                                       probe_frame.info.width,
-                                                       probe_frame.info.height,
-                                                       probe_features, 100, 25);
-                    
-                    float probe_quality = static_cast<float>(found) / 30.0f;
+                // Normalize: brightness 150 = quality 1.0, brightness < 20 = quality 0
+                float probe_quality = 0;
+                if (avg_brightness >= 20.0f) {
+                    probe_quality = avg_brightness / 150.0f;
                     if (probe_quality > 1.0f) probe_quality = 1.0f;
-                    fallback_state_.last_csi_probe_conf = probe_quality;
-                    
-                    std::printf("[VO Fallback] CSI probe: brightness=%.1f features=%d quality=%.2f (need %.2f)\n",
-                               avg_brightness, found, probe_quality, fallback_config_.conf_recover_thresh);
                 }
+                fallback_state_.last_csi_probe_conf = probe_quality;
+                
+                std::printf("[VO Fallback] CSI probe: brightness=%.1f quality=%.2f (need %.2f)\n",
+                           avg_brightness, probe_quality, fallback_config_.conf_recover_thresh);
             }
         }
         

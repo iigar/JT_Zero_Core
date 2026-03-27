@@ -541,9 +541,9 @@ inline const char* vo_source_str(VOSource s) {
 // VO Fallback configuration thresholds
 struct VOFallbackConfig {
     float    conf_drop_thresh{0.30f};      // switch to fallback below this (rolling avg)
-    float    conf_recover_thresh{0.50f};   // return to CSI above this (probe quality, raised for hysteresis)
+    float    conf_recover_thresh{0.40f};   // return to CSI above this (brightness-based quality)
     uint16_t frames_to_switch{15};         // unused — Python uses rolling average now
-    float    csi_probe_interval_s{3.0f};   // seconds between CSI recovery probes
+    float    csi_probe_interval_s{2.0f};   // seconds between CSI recovery probes (fast for drone)
     float    thermal_focal_px{180.0f};     // default focal length for USB thermal at 640x480
 };
 
