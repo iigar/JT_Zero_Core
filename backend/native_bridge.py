@@ -197,8 +197,17 @@ class NativeRuntime:
             feats = [dict(f) for f in self._rt.get_features()]
             if feats:
                 return feats
-        except Exception:
-            pass
+            # Log empty features during fallback for diagnostics
+            if self._vo_fallback_active and not getattr(self, '_feat_warn_logged', False):
+                sys.stderr.write(f"[VO Features] C++ get_features() returned empty during fallback "
+                                f"(feature_count may be stale on ARM64)\n")
+                sys.stderr.flush()
+                self._feat_warn_logged = True
+        except Exception as e:
+            if not getattr(self, '_feat_err_logged', False):
+                sys.stderr.write(f"[VO Features] get_features() error: {e}\n")
+                sys.stderr.flush()
+                self._feat_err_logged = True
         # Simulated features when C++ has no real camera (Emergent preview)
         if self._rt.is_simulator_mode():
             t = time.time()

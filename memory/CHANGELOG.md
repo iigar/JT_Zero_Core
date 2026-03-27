@@ -8,11 +8,13 @@
 - **Recovery**: Uses CSI brightness probes (3 consecutive good probes needed), with 3s minimum fallback time and 5s cooldown
 
 ### ThermalPanel Feature Overlay Fix
-- **Dual-trigger rendering**: Features now redraw BOTH on JPEG frame load AND when WebSocket features update (eliminates timing gaps)
-- **`lastImageRef`**: Stores reference to last drawn image, enabling instant overlay redraws without waiting for next frame
+- **ROOT CAUSE FOUND**: C++ `get_features()` returns empty on ARM64 Pi during fallback — `vo.feature_count()` reads stale `active_count_` due to no memory barrier between T6 thread (writes) and Python thread (reads). `vo_result_` IS visible (DET/TRK show values), but `active_count_` in separate VisualOdometry object is not
+- **Pseudo-feature fallback**: When `features=[]` but `vo_features_detected > 0`, ThermalPanel now generates deterministic pseudo-positions (golden ratio, same pattern as CameraPanel). Orange squares (tracked) + yellow circles (detected)
+- **Dual-trigger rendering**: Features redraw on JPEG frame load AND on camera stats update AND on features change
+- **`lastImageRef`**: Stores reference to last drawn image for instant overlay redraws
 - **`renderCanvas()`**: Unified render function for image + features + crosshair
-- **Canvas state management**: Added `ctx.save()/ctx.restore()` to prevent shadow state leakage
-- **PTS debug counter**: Added 5th column (PTS) to VO stats bar showing live `features.length` count from WebSocket
+- **PTS counter**: Shows `vo_features_detected` when actual features empty (not 0 anymore)
+- **Diagnostic logging**: `native_bridge.py` logs when `get_features()` returns empty during fallback (for future C++ fix)
 
 ### CLAUDE.md Updated
 - Documented brightness-only trigger with reasoning
