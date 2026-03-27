@@ -457,6 +457,14 @@ async def websocket_telemetry(ws: WebSocket):
                 payload["performance"] = perf
             
             await ws.send_json(payload)
+            
+            # ── VO Fallback monitoring (10Hz) ──
+            if hasattr(runtime, 'vo_fallback_tick'):
+                try:
+                    runtime.vo_fallback_tick()
+                except Exception:
+                    pass
+            
             await asyncio.sleep(0.1)  # 10 Hz
     except WebSocketDisconnect:
         manager.disconnect(ws)

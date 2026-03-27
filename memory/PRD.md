@@ -61,8 +61,9 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 
 ### Dual Camera VO Strategy
 - **Current**: CSI for VO (high-res visual features), USB thermal for situational awareness
-- **Implemented**: VO Fallback — auto-switch to USB thermal when CSI confidence < 10% for ~1s
-- **Recovery**: CSI probed every 3s during fallback, auto-returns when feature quality > 25%
+- **Implemented**: VO Fallback (Hybrid) — Python monitors confidence, captures MJPEG from USB thermal via usb_camera.py, decodes JPEG→grayscale via Pillow, injects into C++ VO pipeline via thread-safe SPSC inject_frame()
+- **Recovery**: CSI probed every 3s via FAST detector in C++ T6 thread, auto-returns when feature quality > 25%
+- **Why hybrid**: C++ USBCamera uses YUYV (returns zeros on MS210x). Python usb_camera.py uses MJPEG v4l2-ctl (works)
 - **Future**: Sensor fusion — use both simultaneously with confidence weighting
 
 ## Deployment Strategy
@@ -88,8 +89,8 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 - GitHub Actions CI/CD for frontend builds
 - Pre-built frontend in git (no Node.js on Pi)
 - IMX290 STARVIS added to known CSI sensors
-- VO Fallback: automatic switch to USB thermal when CSI loses tracking (CONF<10% for ~1s)
-- VO Recovery: periodic CSI probe every 3s, auto-switch back when CSI feature quality > 25%
+- VO Fallback (Hybrid Python/C++): Python monitors confidence + captures thermal JPEG + injects grayscale into C++ VO pipeline
+- inject_frame() thread-safe SPSC, activate/deactivate_fallback(), periodic CSI probe for recovery
 - Dashboard VO source indicators (badge + alert + sidebar)
 
 ### API Endpoints

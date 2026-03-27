@@ -2,29 +2,33 @@
 
 ## 2026-03-27 — VO Fallback to USB Thermal Camera (P1)
 
-### C++ Core: Automatic Camera Switching
+### C++ Core: Hybrid VO Fallback (Python → C++ injection)
 - **VOSource enum** (CSI_PRIMARY, THERMAL_FALLBACK): identifies current VO camera source
-- **VOFallbackConfig**: configurable thresholds — CONF_DROP_THRESH=0.10, CONF_RECOVER_THRESH=0.25, FRAMES_TO_SWITCH=15 (~1s), CSI_PROBE_INTERVAL=3s
+- **VOFallbackConfig**: configurable thresholds — CONF_DROP_THRESH=0.10, CONF_RECOVER_THRESH=0.25, FRAMES_TO_SWITCH=15 (~1.5s), CSI_PROBE_INTERVAL=3s
 - **VOFallbackState**: runtime state tracking — source, reason, low_conf_count, fallback_duration, total_switches
-- **CameraPipeline::tick()** modified: monitors running_confidence_, counts consecutive low-confidence frames, auto-switches to thermal when threshold exceeded
-- **CSI Recovery Probe**: every 3s during fallback, captures one CSI frame, runs FAST detector, switches back if feature quality >= 25%
-- **vo_.reset()** on each switch (different focal length between CSI and thermal)
-- **THERMAL_FOCAL_PX=180.0**: default focal length for USB thermal camera at 640x480
+- **inject_frame()**: Thread-safe SPSC (atomic state machine 0→1→2→0) for Python→C++ frame injection
+- **activate_fallback() / deactivate_fallback()**: External control from Python, resets VO with thermal/CSI focal lengths
+- **tick() modified**: In fallback mode, processes injected thermal frames instead of CSI capture. Periodic CSI probe (every 3s) using FAST detector for recovery check
+- **Why hybrid?**: C++ USBCamera uses YUYV which returns all-zero frames on MS210x capture card. Working USB capture is Python usb_camera.py with MJPEG via v4l2-ctl subprocess
 
-### Backend: Telemetry Extension
-- `native_bridge.py`: Added vo_source, vo_fallback_reason, vo_fallback_duration, vo_fallback_switches to camera stats
-- `simulator.py`: CameraStats dataclass extended with fallback fields
-- `/api/camera` endpoint now returns VO fallback state
+### Python: VO Fallback Monitor (`native_bridge.py`)
+- **vo_fallback_tick()**: Called at 10Hz from WebSocket telemetry loop
+- Monitors vo_confidence → counts consecutive low readings → triggers activate_fallback()
+- **Injection thread**: Captures JPEG from usb_camera.py → decodes to grayscale via Pillow → injects at ~5fps via inject_frame()
+- **Recovery monitor**: Reads CSI probe results from C++ fallback state → calls deactivate_fallback() when CSI recovers
 
-### Frontend: Dashboard Indicators
-- **VO Source badge** in Camera tab header: green "VO: CSI" or amber "VO: THERMAL"
-- **VO Fallback alert** banner: shows when thermal is active with reason and duration
-- **Sidebar VO indicator**: dot + label showing current VO source with pulse animation during fallback
+### pybind11 Bindings (`python_bindings.cpp`)
+- **inject_frame(data, w, h)**: Injects grayscale frame for VO
+- **activate_fallback(reason)** / **deactivate_fallback()**: External fallback control
+- **is_confidence_low()**: Check if CSI below threshold for N frames
+- **get_fallback_state()**: Get detailed fallback state dict
+- **camera_stats_to_dict**: Now includes vo_source, vo_fallback_reason, vo_fallback_duration, vo_fallback_switches
 
-### CLAUDE.md Updated
-- Added VO Fallback documentation section (state machine, config, switch logic, hardware constraints)
-- Updated USB Camera Implementation section (batch capture, frame cache bug fix)
-- Updated session history
+### Backend & Frontend
+- **server.py**: Calls vo_fallback_tick() in WebSocket telemetry loop (10Hz)
+- **simulator.py**: vo_fallback_tick() no-op stub + fallback fields in CameraStats
+- **Frontend**: VO Source badge, fallback alert banner, sidebar indicator (unchanged from initial implementation)
+- **update.sh**: Added `pip3 install pillow` + VO Source status in health check
 
 ## 2026-03-26 — USB Thermal Camera Live Streaming (P0 Fix)
 

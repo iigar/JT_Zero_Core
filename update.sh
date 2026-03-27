@@ -84,6 +84,9 @@ fi
 # ─── [4/5] Фронтенд ──────────────────────────────────────────
 echo -e "${CYAN}[4/5]${NC} Фронтенд..."
 
+# Python deps (Pillow needed for VO Fallback JPEG→grayscale)
+pip3 install --quiet pillow 2>/dev/null || echo -e "  ${YELLOW}Pillow вже встановлений${NC}"
+
 # Стратегія: pre-built (з git) > локальний білд (якщо є npm)
 if [ -f "$BACKEND_DIR/static/index.html" ]; then
     # ── Pre-built фронтенд вже є в git (GitHub Actions або ручний білд) ──
@@ -175,6 +178,20 @@ try:
     for c in cams:
         status = 'ACTIVE' if c.get('active') else 'OFF'
         print(f\"    {c['slot']}: {c.get('label','?')} [{status}]\")
+except: pass
+" 2>/dev/null
+
+    # Перевірити VO Fallback
+    curl -s http://localhost:8001/api/camera | python3 -c "
+import sys,json
+try:
+    d=json.load(sys.stdin)
+    src = d.get('vo_source', 'CSI_PRIMARY')
+    conf = d.get('vo_confidence', 0)
+    print(f'  VO Source: {src} (conf={conf:.0%})')
+    if src == 'THERMAL_FALLBACK':
+        print(f'    Reason: {d.get(\"vo_fallback_reason\",\"\")}')
+        print(f'    Duration: {d.get(\"vo_fallback_duration\",0):.1f}s')
 except: pass
 " 2>/dev/null
 

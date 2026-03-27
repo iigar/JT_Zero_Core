@@ -8,6 +8,8 @@ import time
 import math
 import sys
 import os
+import io
+import threading
 
 # Try to import native module
 try:
@@ -18,6 +20,13 @@ try:
 except ImportError:
     NATIVE_AVAILABLE = False
     BUILD_INFO = None
+
+# For JPEG → grayscale decoding in VO Fallback
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 
 class NativeRuntime:
@@ -66,6 +75,17 @@ class NativeRuntime:
         
         self._start_time = time.time()
         self.running = False
+        
+        # ── VO Fallback monitoring state ──
+        self._vo_fallback_active = False
+        self._vo_low_conf_count = 0
+        self._vo_fallback_thread = None
+        self._vo_fallback_stop = threading.Event()
+        self._VO_CONF_DROP = 0.10
+        self._VO_CONF_RECOVER = 0.25
+        self._VO_FRAMES_TO_SWITCH = 15  # consecutive low-conf samples (~1.5s at 10Hz)
+        self._VO_INJECT_W = 320
+        self._VO_INJECT_H = 240
     
     def start(self):
         if self.running:
@@ -137,10 +157,23 @@ class NativeRuntime:
         d.setdefault("yaw_drift_rate", 0.0)
         d.setdefault("corrected_yaw", 0.0)
         # VO Fallback state
-        d.setdefault("vo_source", "CSI_PRIMARY")
-        d.setdefault("vo_fallback_reason", "")
-        d.setdefault("vo_fallback_duration", 0.0)
-        d.setdefault("vo_fallback_switches", 0)
+        if hasattr(self._rt, 'get_fallback_state'):
+            try:
+                fs = dict(self._rt.get_fallback_state())
+                d["vo_source"] = fs.get("source", "CSI_PRIMARY")
+                d["vo_fallback_reason"] = fs.get("reason", "")
+                d["vo_fallback_duration"] = fs.get("fallback_duration", 0.0)
+                d["vo_fallback_switches"] = fs.get("total_switches", 0)
+            except Exception:
+                d.setdefault("vo_source", "CSI_PRIMARY")
+                d.setdefault("vo_fallback_reason", "")
+                d.setdefault("vo_fallback_duration", 0.0)
+                d.setdefault("vo_fallback_switches", 0)
+        else:
+            d.setdefault("vo_source", "CSI_PRIMARY")
+            d.setdefault("vo_fallback_reason", "")
+            d.setdefault("vo_fallback_duration", 0.0)
+            d.setdefault("vo_fallback_switches", 0)
         return d
     
     def get_frame_data(self) -> bytes:
@@ -215,6 +248,136 @@ class NativeRuntime:
             self._active_vo_mode = mode_id
             return True
         return False
+
+    # ── VO Fallback: Python-side monitoring + injection ──
+
+    def vo_fallback_tick(self):
+        """Called periodically (~10Hz from WebSocket/background).
+        Monitors CSI confidence and manages thermal frame injection."""
+        if not self.running:
+            return
+        
+        # Check if USB thermal camera is available
+        self.__init_multicam()
+        has_thermal = (self._usb_capture is not None and self._usb_capture.streaming)
+        
+        if not has_thermal:
+            return
+        
+        # Check if C++ has new fallback bindings
+        has_bindings = hasattr(self._rt, 'inject_frame')
+        if not has_bindings:
+            # Old C++ binary without inject_frame — fall back to stats-only monitoring
+            return
+        
+        if not self._vo_fallback_active:
+            # ── Normal mode: monitor confidence ──
+            try:
+                cam = dict(self._rt.get_camera())
+                conf = cam.get('vo_confidence', 0.5)
+            except Exception:
+                return
+            
+            if conf < self._VO_CONF_DROP:
+                self._vo_low_conf_count += 1
+                if self._vo_low_conf_count >= self._VO_FRAMES_TO_SWITCH:
+                    # ── TRIGGER FALLBACK ──
+                    reason = f"CSI conf {conf:.0%} < {self._VO_CONF_DROP:.0%} for {self._vo_low_conf_count} samples"
+                    sys.stderr.write(f"[VO Fallback] {reason}\n")
+                    sys.stderr.flush()
+                    
+                    try:
+                        self._rt.activate_fallback(reason)
+                    except Exception as e:
+                        sys.stderr.write(f"[VO Fallback] activate_fallback error: {e}\n")
+                        sys.stderr.flush()
+                        return
+                    
+                    self._vo_fallback_active = True
+                    self._vo_low_conf_count = 0
+                    
+                    # Start injection thread
+                    self._vo_fallback_stop.clear()
+                    self._vo_fallback_thread = threading.Thread(
+                        target=self._vo_inject_loop, daemon=True)
+                    self._vo_fallback_thread.start()
+            else:
+                self._vo_low_conf_count = 0
+        else:
+            # ── Fallback mode: check CSI recovery via probe ──
+            try:
+                fs = dict(self._rt.get_fallback_state())
+                probe_conf = fs.get('last_csi_probe_conf', 0)
+            except Exception:
+                return
+            
+            if probe_conf >= self._VO_CONF_RECOVER:
+                # ── RECOVER TO CSI ──
+                sys.stderr.write(f"[VO Fallback] CSI recovered (probe={probe_conf:.2f}) → deactivating\n")
+                sys.stderr.flush()
+                
+                self._vo_fallback_stop.set()
+                if self._vo_fallback_thread:
+                    self._vo_fallback_thread.join(timeout=2)
+                
+                try:
+                    self._rt.deactivate_fallback()
+                except Exception as e:
+                    sys.stderr.write(f"[VO Fallback] deactivate error: {e}\n")
+                    sys.stderr.flush()
+                
+                self._vo_fallback_active = False
+                self._vo_low_conf_count = 0
+
+    def _vo_inject_loop(self):
+        """Background thread: captures thermal JPEG → grayscale → injects to C++ VO."""
+        sys.stderr.write("[VO Fallback] Injection loop started\n")
+        sys.stderr.flush()
+        
+        while not self._vo_fallback_stop.is_set():
+            if not self._usb_capture or not self._usb_capture.streaming:
+                time.sleep(0.2)
+                continue
+            
+            # Get latest thermal JPEG
+            jpeg_data = self._usb_capture.capture_frame()
+            if not jpeg_data:
+                time.sleep(0.05)
+                continue
+            
+            # Decode JPEG → grayscale → resize to VO resolution
+            gray_bytes = self._decode_jpeg_to_gray(jpeg_data)
+            if not gray_bytes:
+                time.sleep(0.05)
+                continue
+            
+            # Inject into C++ VO pipeline
+            try:
+                self._rt.inject_frame(gray_bytes, self._VO_INJECT_W, self._VO_INJECT_H)
+            except Exception as e:
+                sys.stderr.write(f"[VO Fallback] inject error: {e}\n")
+                sys.stderr.flush()
+            
+            # Match thermal camera capture rate (~5fps → sleep 0.15s between injects)
+            self._vo_fallback_stop.wait(0.15)
+        
+        sys.stderr.write("[VO Fallback] Injection loop stopped\n")
+        sys.stderr.flush()
+
+    def _decode_jpeg_to_gray(self, jpeg_data: bytes) -> bytes:
+        """Decode JPEG to grayscale bytes at VO resolution (320x240)."""
+        if PIL_AVAILABLE:
+            try:
+                img = Image.open(io.BytesIO(jpeg_data))
+                img = img.convert('L')  # grayscale
+                img = img.resize((self._VO_INJECT_W, self._VO_INJECT_H), Image.NEAREST)
+                return img.tobytes()
+            except Exception:
+                return b''
+        else:
+            # Fallback: try to extract Y channel from raw JPEG
+            # (not reliable — Pillow should always be available)
+            return b''
 
     # ── Multi-Camera Support ──
     # Until C++ bindings are recompiled on the Pi with multi-camera,

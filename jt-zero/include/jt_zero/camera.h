@@ -723,6 +723,20 @@ public:
     
     // Get fallback config
     const VOFallbackConfig& fallback_config() const { return fallback_config_; }
+    
+    // External fallback control (called from Python via pybind11)
+    void activate_fallback(const char* reason);
+    void deactivate_fallback();
+    
+    // Inject external frame for VO (Python-captured thermal frame)
+    // Thread-safe: Python writes, T6 reads via atomic state machine
+    // Data must be grayscale, size = width * height bytes
+    bool inject_frame(const uint8_t* data, uint16_t width, uint16_t height);
+    
+    // True if CSI confidence has been below threshold for N frames
+    bool is_confidence_low() const { 
+        return fallback_state_.low_conf_count >= fallback_config_.frames_to_switch; 
+    }
 
 private:
     SimulatedCamera sim_camera_;
@@ -756,6 +770,14 @@ private:
     VOFallbackState  fallback_state_;
     CameraSource*    primary_camera_{nullptr};  // saved CSI ref during fallback
     float            runtime_seconds_{0};       // elapsed time for fallback tracking
+    
+    // ── External frame injection (Python → C++ thread-safe) ──
+    // State machine: 0=idle (Python can write), 1=writing, 2=ready (T6 can read)
+    std::atomic<int> inject_state_{0};
+    uint8_t          inject_buf_[FRAME_SIZE];
+    uint16_t         inject_w_{0};
+    uint16_t         inject_h_{0};
+    std::atomic<bool> external_fallback_{false};
 };
 
 } // namespace jtzero

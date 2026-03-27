@@ -177,7 +177,12 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "corrected_yaw"_a = cs.corrected_yaw,
         // CSI sensor info
         "csi_sensor_type"_a = static_cast<int>(cs.csi_sensor_type),
-        "csi_sensor_name"_a = std::string(cs.csi_sensor_name)
+        "csi_sensor_name"_a = std::string(cs.csi_sensor_name),
+        // VO Fallback state
+        "vo_source"_a = jtzero::vo_source_str(static_cast<jtzero::VOSource>(cs.vo_source)),
+        "vo_fallback_reason"_a = std::string(cs.vo_fallback_reason),
+        "vo_fallback_duration"_a = cs.vo_fallback_duration,
+        "vo_fallback_switches"_a = cs.vo_fallback_switches
     );
 }
 
@@ -448,6 +453,41 @@ PYBIND11_MODULE(jtzero_native, m) {
             }
             return modes;
         }, "Get available VO modes")
+        
+        // ── VO Fallback Control ──
+        
+        .def("activate_fallback", [](jtzero::Runtime& self, const std::string& reason) {
+            self.camera().activate_fallback(reason.c_str());
+        }, py::arg("reason"), "Activate VO fallback to thermal camera")
+        
+        .def("deactivate_fallback", [](jtzero::Runtime& self) {
+            self.camera().deactivate_fallback();
+        }, "Deactivate VO fallback, return to CSI")
+        
+        .def("inject_frame", [](jtzero::Runtime& self, py::bytes data, int width, int height) {
+            std::string buf = data;
+            return self.camera().inject_frame(
+                reinterpret_cast<const uint8_t*>(buf.data()),
+                static_cast<uint16_t>(width),
+                static_cast<uint16_t>(height));
+        }, py::arg("data"), py::arg("width"), py::arg("height"),
+        "Inject external grayscale frame for VO processing (thread-safe)")
+        
+        .def("is_confidence_low", [](const jtzero::Runtime& self) {
+            return self.camera().is_confidence_low();
+        }, "Check if CSI confidence is below fallback threshold for N frames")
+        
+        .def("get_fallback_state", [](const jtzero::Runtime& self) {
+            const auto& fs = self.camera().fallback_state();
+            return py::dict(
+                "source"_a = jtzero::vo_source_str(fs.source),
+                "reason"_a = std::string(fs.reason),
+                "low_conf_count"_a = static_cast<int>(fs.low_conf_count),
+                "fallback_duration"_a = fs.fallback_duration,
+                "last_csi_probe_conf"_a = fs.last_csi_probe_conf,
+                "total_switches"_a = fs.total_switches
+            );
+        }, "Get VO fallback state details")
         
         .def("get_sensor_modes", [](const jtzero::Runtime& self) {
             const auto& hw = self.hw_info();

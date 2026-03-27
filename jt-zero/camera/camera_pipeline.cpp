@@ -916,87 +916,42 @@ bool CameraPipeline::tick(float ground_distance) {
     uint64_t elapsed_us = now_us() - start_time_us_;
     runtime_seconds_ = static_cast<float>(elapsed_us) / 1'000'000.0f;
     
-    if (!active_camera_->capture(current_frame_)) {
-        return false;
-    }
-    
-    // No normalization — raw pixel values are noise-consistent between frames.
-    // LK tracker needs consistent frame-to-frame values more than large gradients.
-    // The Shi-Tomasi fallback detector handles low-contrast thermal images.
-    
-    vo_result_ = vo_.process(current_frame_, ground_distance);
-    
-    frame_count_++;
-    
     // ═══════════════════════════════════════════════════════
-    // VO Fallback Logic: CSI_PRIMARY ↔ THERMAL_FALLBACK
+    // VO Fallback: External injection mode (Python → C++)
     // ═══════════════════════════════════════════════════════
     
-    if (fallback_state_.source == VOSource::CSI_PRIMARY) {
-        // ── Normal mode: monitor CSI confidence ──
-        if (has_secondary() && primary_camera_ == nullptr) {
-            // Save primary camera reference for later recovery
-            primary_camera_ = active_camera_;
-        }
-        
-        if (has_secondary() && vo_result_.confidence < fallback_config_.conf_drop_thresh) {
-            fallback_state_.low_conf_count++;
-            if (fallback_state_.low_conf_count >= fallback_config_.frames_to_switch) {
-                // ── SWITCH TO THERMAL FALLBACK ──
-                std::printf("[VO Fallback] CSI confidence %.2f < %.2f for %u frames → switching to THERMAL\n",
-                           vo_result_.confidence, fallback_config_.conf_drop_thresh,
-                           fallback_state_.low_conf_count);
-                
-                // Save CSI camera reference if not already saved
-                if (primary_camera_ == nullptr) {
-                    primary_camera_ = active_camera_;
-                }
-                
-                // Switch VO to thermal camera
-                active_camera_ = secondary_camera_;
-                
-                // Reset VO (different focal length/resolution)
-                vo_.reset();
-                
-                // Set thermal camera focal length
-                PlatformConfig thermal_platform = vo_.platform();
-                thermal_platform.focal_length_px = fallback_config_.thermal_focal_px;
-                vo_.set_platform(thermal_platform);
-                // Restore VO mode after platform reset
-                set_vo_mode(active_vo_mode());
-                
-                // Update state
-                fallback_state_.source = VOSource::THERMAL_FALLBACK;
-                std::snprintf(fallback_state_.reason, sizeof(fallback_state_.reason),
-                             "CSI conf %.0f%% < %.0f%% for %us",
-                             vo_result_.confidence * 100,
-                             fallback_config_.conf_drop_thresh * 100,
-                             fallback_state_.low_conf_count / 15);
-                fallback_state_.fallback_start_time = runtime_seconds_;
-                fallback_state_.last_csi_probe_time = runtime_seconds_;
-                fallback_state_.total_switches++;
-                fallback_state_.low_conf_count = 0;
-            }
-        } else {
-            // Confidence OK — reset counter
-            fallback_state_.low_conf_count = 0;
-        }
-    } else {
-        // ── Fallback mode: update duration, probe CSI periodically ──
+    if (external_fallback_.load(std::memory_order_acquire)) {
+        // Fallback active: process injected thermal frame if available
         fallback_state_.fallback_duration = runtime_seconds_ - fallback_state_.fallback_start_time;
         
-        // Periodic CSI probe: capture one CSI frame and check confidence
-        if (primary_camera_ != nullptr &&
+        if (inject_state_.load(std::memory_order_acquire) == 2) {
+            // Copy injected frame into current_frame_
+            size_t sz = static_cast<size_t>(inject_w_) * inject_h_;
+            if (sz > 0 && sz <= FRAME_SIZE) {
+                std::memcpy(current_frame_.data, inject_buf_, sz);
+                current_frame_.info.width = inject_w_;
+                current_frame_.info.height = inject_h_;
+                current_frame_.info.channels = 1;
+                current_frame_.info.timestamp_us = now_us();
+                current_frame_.info.frame_id = frame_count_;
+                current_frame_.info.valid = true;
+            }
+            inject_state_.store(0, std::memory_order_release);  // free for Python to write
+            
+            // Run VO on injected thermal frame
+            vo_result_ = vo_.process(current_frame_, ground_distance);
+            frame_count_++;
+        }
+        
+        // Periodic CSI probe for recovery (use primary camera)
+        if (primary_camera_ &&
             (runtime_seconds_ - fallback_state_.last_csi_probe_time) >= fallback_config_.csi_probe_interval_s) {
             
             fallback_state_.last_csi_probe_time = runtime_seconds_;
             
-            // Try to capture a frame from CSI
             FrameBuffer probe_frame;
             if (primary_camera_->capture(probe_frame)) {
-                // Create a temporary VO instance to test CSI quality
-                // We use the main VO running_confidence as proxy after a quick process
-                // Instead of full VO, just check if FAST finds enough features
+                // Run FAST detector to check feature density
                 FASTDetector probe_detector;
                 FeaturePoint probe_features[100];
                 int found = probe_detector.detect(probe_frame.data,
@@ -1010,31 +965,103 @@ bool CameraPipeline::tick(float ground_distance) {
                 
                 std::printf("[VO Fallback] CSI probe: %d features, quality=%.2f (need %.2f)\n",
                            found, probe_quality, fallback_config_.conf_recover_thresh);
-                
-                if (probe_quality >= fallback_config_.conf_recover_thresh) {
-                    // ── RECOVER TO CSI ──
-                    std::printf("[VO Fallback] CSI recovered (quality=%.2f) → switching back to CSI_PRIMARY\n",
-                               probe_quality);
-                    
-                    active_camera_ = primary_camera_;
-                    
-                    // Reset VO (restore CSI focal length/resolution)
-                    vo_.reset();
-                    // Platform auto-detection already set CSI focal — just restore it
-                    PlatformType current_platform = active_platform();
-                    set_platform(current_platform);
-                    set_vo_mode(active_vo_mode());
-                    
-                    // Update state
-                    fallback_state_.source = VOSource::CSI_PRIMARY;
-                    std::memset(fallback_state_.reason, 0, sizeof(fallback_state_.reason));
-                    fallback_state_.fallback_duration = 0;
-                    fallback_state_.low_conf_count = 0;
-                }
             }
         }
+        
+        return true;
     }
     
+    // ═══════════════════════════════════════════════════════
+    // Normal mode: CSI capture + confidence monitoring
+    // ═══════════════════════════════════════════════════════
+    
+    if (!active_camera_->capture(current_frame_)) {
+        return false;
+    }
+    
+    vo_result_ = vo_.process(current_frame_, ground_distance);
+    frame_count_++;
+    
+    // Monitor confidence for fallback trigger
+    if (vo_result_.confidence < fallback_config_.conf_drop_thresh) {
+        fallback_state_.low_conf_count++;
+    } else {
+        fallback_state_.low_conf_count = 0;
+    }
+    
+    return true;
+}
+
+// ── External Fallback Control ──
+
+void CameraPipeline::activate_fallback(const char* reason) {
+    if (external_fallback_.load()) return;  // already active
+    
+    std::printf("[VO Fallback] ACTIVATED: %s\n", reason);
+    
+    // Save primary camera reference
+    if (!primary_camera_) primary_camera_ = active_camera_;
+    
+    // Reset VO for thermal focal length
+    vo_.reset();
+    PlatformConfig thermal_platform = vo_.platform();
+    thermal_platform.focal_length_px = fallback_config_.thermal_focal_px;
+    vo_.set_platform(thermal_platform);
+    set_vo_mode(active_vo_mode());
+    
+    // Update state
+    fallback_state_.source = VOSource::THERMAL_FALLBACK;
+    std::snprintf(fallback_state_.reason, sizeof(fallback_state_.reason), "%s", reason);
+    fallback_state_.fallback_start_time = runtime_seconds_;
+    fallback_state_.fallback_duration = 0;
+    fallback_state_.last_csi_probe_time = runtime_seconds_;
+    fallback_state_.total_switches++;
+    
+    external_fallback_.store(true, std::memory_order_release);
+}
+
+void CameraPipeline::deactivate_fallback() {
+    if (!external_fallback_.load()) return;  // not active
+    
+    std::printf("[VO Fallback] DEACTIVATED — returning to CSI\n");
+    
+    external_fallback_.store(false, std::memory_order_release);
+    
+    // Restore CSI camera
+    if (primary_camera_) {
+        active_camera_ = primary_camera_;
+    }
+    
+    // Reset VO for CSI focal length
+    vo_.reset();
+    PlatformType current_platform = active_platform();
+    set_platform(current_platform);
+    set_vo_mode(active_vo_mode());
+    
+    // Clear state
+    fallback_state_.source = VOSource::CSI_PRIMARY;
+    std::memset(fallback_state_.reason, 0, sizeof(fallback_state_.reason));
+    fallback_state_.fallback_duration = 0;
+    fallback_state_.low_conf_count = 0;
+}
+
+bool CameraPipeline::inject_frame(const uint8_t* data, uint16_t width, uint16_t height) {
+    // SPSC: Python → T6. Only write when state = 0 (idle)
+    int expected = 0;
+    if (!inject_state_.compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) {
+        return false;  // T6 is still reading previous frame, skip this one
+    }
+    
+    size_t sz = static_cast<size_t>(width) * height;
+    if (sz == 0 || sz > FRAME_SIZE) {
+        inject_state_.store(0, std::memory_order_release);
+        return false;
+    }
+    
+    std::memcpy(inject_buf_, data, sz);
+    inject_w_ = width;
+    inject_h_ = height;
+    inject_state_.store(2, std::memory_order_release);  // ready for T6
     return true;
 }
 

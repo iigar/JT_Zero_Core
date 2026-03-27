@@ -631,6 +631,10 @@ class JTZeroSimulator:
         with self._lock:
             return dict(self._secondary_camera)
 
+    def vo_fallback_tick(self):
+        """VO fallback monitoring — no-op in simulator."""
+        pass
+
     def capture_secondary(self) -> bool:
         """Trigger capture from secondary camera (continuous stream)."""
         with self._lock:

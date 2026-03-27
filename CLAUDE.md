@@ -131,19 +131,24 @@ THERMAL_FALLBACK ──[CSI probe OK, high confidence]──> CSI_PRIMARY
 | `CSI_PROBE_INTERVAL_S` | 3.0 | Seconds between CSI recovery probes |
 | `THERMAL_FOCAL_PX` | 180.0 | Default focal length for USB thermal at 640x480 |
 
-### Switch Logic (in `CameraPipeline::tick()`)
+### Switch Logic (Hybrid Python/C++ Architecture)
 
-1. **Monitor** `running_confidence_` from VO on every frame
-2. **Count** consecutive frames where confidence < `CONF_DROP_THRESH`
-3. After `FRAMES_TO_SWITCH` low-conf frames → switch to thermal:
-   - Save CSI camera reference, set `active_camera_` = secondary
-   - `vo_.reset()` (different focal length/resolution)
-   - Set thermal focal length for VO
-   - Record switch reason and timestamp
-4. **In fallback mode**: every `CSI_PROBE_INTERVAL_S`, capture one CSI frame and run VO:
-   - If CSI confidence > `CONF_RECOVER_THRESH` → switch back to CSI
-   - `vo_.reset()` again (restore CSI focal length)
-5. **Telemetry**: `vo_source`, `fallback_reason`, `fallback_duration` exposed via API
+The VO Fallback uses a **hybrid** approach because the USB thermal camera hardware (MS210x capture card) only works with MJPEG via v4l2-ctl subprocess (managed by Python `usb_camera.py`), while the C++ `USBCamera` class uses YUYV which returns all-zero frames on this hardware.
+
+**Python side** (`native_bridge.py`):
+1. `vo_fallback_tick()` called at 10Hz from WebSocket telemetry loop
+2. Monitors `vo_confidence` from C++ camera stats
+3. Counts consecutive low-confidence readings (threshold: 15 samples, ~1.5s)
+4. When triggered: calls `activate_fallback()` + starts injection thread
+5. Injection thread: captures JPEG from `usb_camera.py` → decodes to grayscale via Pillow → calls `inject_frame()` at ~5fps
+6. Monitors CSI recovery probes from C++ → calls `deactivate_fallback()` when CSI feature quality recovers
+
+**C++ side** (`camera_pipeline.cpp`):
+1. `activate_fallback(reason)` — sets fallback state, resets VO with thermal focal length (180px)
+2. `tick()` in fallback mode: reads injected frame via atomic SPSC buffer → runs full VO pipeline (FAST/Shi-Tomasi + LK + Kalman)
+3. Periodic CSI probe (every 3s): captures one CSI frame, runs FAST detector, reports feature count
+4. `deactivate_fallback()` — restores CSI camera, resets VO with CSI focal length
+5. `inject_frame(data, w, h)` — thread-safe SPSC: Python writes when state=0, T6 reads when state=2
 
 ### Hardware Constraints (Pi Zero 2 W)
 
