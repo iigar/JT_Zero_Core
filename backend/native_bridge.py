@@ -300,6 +300,7 @@ class NativeRuntime:
                         return
                     
                     self._vo_fallback_active = True
+                    self._vo_fallback_start_time = time.time()
                     self._vo_conf_history = []
                     
                     # Start injection thread
@@ -309,6 +310,10 @@ class NativeRuntime:
                     self._vo_fallback_thread.start()
         else:
             # ── Fallback mode: check CSI recovery via probe ──
+            # Minimum 5 seconds in fallback before checking recovery
+            if time.time() - self._vo_fallback_start_time < 5.0:
+                return
+            
             try:
                 fs = dict(self._rt.get_fallback_state())
                 probe_conf = fs.get('last_csi_probe_conf', 0)
