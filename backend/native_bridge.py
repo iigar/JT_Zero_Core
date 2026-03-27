@@ -81,10 +81,10 @@ class NativeRuntime:
         self._vo_conf_history = []  # rolling window of confidence values
         self._vo_fallback_thread = None
         self._vo_fallback_stop = threading.Event()
-        self._VO_CONF_DROP = 0.28       # trigger fallback when rolling avg below this
+        self._VO_CONF_DROP = 0.30       # trigger fallback when rolling avg below this
         self._VO_CONF_RECOVER = 0.35    # recover when CSI probe quality above this
-        self._VO_WINDOW_SIZE = 30       # 3 seconds at 10Hz
-        self._VO_MIN_SAMPLES = 20       # need at least 2s of data before triggering
+        self._VO_WINDOW_SIZE = 15       # 1.5 seconds at 10Hz
+        self._VO_MIN_SAMPLES = 10       # need at least 1s of data before triggering
         self._VO_INJECT_W = 320
         self._VO_INJECT_H = 240
     
