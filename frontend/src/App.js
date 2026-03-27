@@ -361,9 +361,9 @@ function CameraTab({ camera, features, cameras }) {
       <div className="flex-1 min-h-0">
         {activeView === 'split' ? (
           <div className="grid grid-cols-2 gap-2 h-full">
-            <CameraPanel camera={camera} features={features} />
+            <CameraPanel camera={camera} features={isVOFallback ? [] : features} />
             {hasThermal ? (
-              <ThermalPanel secondary={secondaryCam} />
+              <ThermalPanel secondary={secondaryCam} features={isVOFallback ? features : []} camera={isVOFallback ? camera : null} isVOActive={isVOFallback} />
             ) : (
               <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
                 <div className="text-center">
@@ -374,10 +374,10 @@ function CameraTab({ camera, features, cameras }) {
             )}
           </div>
         ) : activeView === 'primary' ? (
-          <CameraPanel camera={camera} features={features} />
+          <CameraPanel camera={camera} features={isVOFallback ? [] : features} />
         ) : (
           hasThermal ? (
-            <ThermalPanel secondary={secondaryCam} />
+            <ThermalPanel secondary={secondaryCam} features={isVOFallback ? features : []} camera={isVOFallback ? camera : null} isVOActive={isVOFallback} />
           ) : (
             <div className="h-full flex items-center justify-center bg-[#080A0E] border border-[#1E293B] rounded-sm">
               <p className="text-[10px] text-slate-500">No USB camera for secondary slot</p>

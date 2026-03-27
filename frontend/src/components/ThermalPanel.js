@@ -3,7 +3,7 @@ import { Thermometer, RefreshCw, Power, Flame } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL || '';
 
-export default function ThermalPanel({ secondary }) {
+export default function ThermalPanel({ secondary, features = [], camera = null, isVOActive = false }) {
   const canvasRef = useRef(null);
   const imgRef = useRef(new Image());
   const [streamActive, setStreamActive] = useState(false);
@@ -11,6 +11,7 @@ export default function ThermalPanel({ secondary }) {
   const [fps, setFps] = useState(0);
   const [streaming, setStreaming] = useState(false);
   const fpsCounterRef = useRef({ count: 0, lastTime: Date.now() });
+  const featuresRef = useRef([]);
 
   const {
     camera_open = false,
@@ -22,8 +23,19 @@ export default function ThermalPanel({ secondary }) {
     frame_format = 'gray',
   } = secondary || {};
 
+  // VO stats when thermal is active VO source
+  const vo_features_detected = camera?.vo_features_detected || 0;
+  const vo_features_tracked = camera?.vo_features_tracked || 0;
+  const vo_confidence = camera?.vo_confidence || 0;
+  const vo_dx = camera?.vo_dx || 0;
+  const vo_dy = camera?.vo_dy || 0;
+  const vo_valid = camera?.vo_valid || false;
+
   const isRealCamera = camera_open && device !== 'none';
   const frameUrl = `${API}/api/camera/secondary/frame`;
+
+  // Keep features ref in sync for use inside draw callback
+  useEffect(() => { featuresRef.current = features; }, [features]);
 
   // Auto-start streaming when real camera is connected
   useEffect(() => {
@@ -71,7 +83,7 @@ export default function ThermalPanel({ secondary }) {
     return () => { active = false; };
   }, [streaming, frameUrl]);
 
-  // Draw thermal frame on canvas
+  // Draw thermal frame on canvas + VO feature overlay when active
   const drawFrame = (img) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -80,6 +92,53 @@ export default function ThermalPanel({ secondary }) {
     const ch = canvas.height;
 
     ctx.drawImage(img, 0, 0, cw, ch);
+
+    // VO Feature overlay (when thermal is active VO source)
+    const feats = featuresRef.current;
+    if (feats && feats.length > 0) {
+      // Scale features from VO resolution (320x240) to canvas (640x480)
+      const scale_x = cw / 320;
+      const scale_y = ch / 240;
+      
+      for (let i = 0; i < feats.length; i++) {
+        const f = feats[i];
+        const fx = f.x * scale_x;
+        const fy = f.y * scale_y;
+        
+        if (f.tracked) {
+          // Tracked: orange squares with glow (thermal color scheme)
+          ctx.shadowColor = 'rgba(255, 160, 40, 0.6)';
+          ctx.shadowBlur = 5;
+          ctx.fillStyle = 'rgba(255, 160, 40, 0.9)';
+          ctx.fillRect(fx - 3, fy - 3, 6, 6);
+          ctx.shadowBlur = 0;
+        } else {
+          // Detected (not tracked): yellow circles
+          ctx.fillStyle = 'rgba(255, 220, 80, 0.7)';
+          ctx.beginPath();
+          ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      
+      // VO displacement vector
+      if (vo_valid) {
+        const cx = cw / 2;
+        const cy = ch / 2;
+        const vx = vo_dx * 5000;
+        const vy = vo_dy * 5000;
+        ctx.strokeStyle = '#FF6633';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + vx, cy + vy);
+        ctx.stroke();
+        ctx.fillStyle = '#FF6633';
+        ctx.beginPath();
+        ctx.arc(cx + vx, cy + vy, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
     // Crosshair overlay
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
@@ -119,6 +178,11 @@ export default function ThermalPanel({ secondary }) {
           <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-orange-500/15 text-orange-400 border border-orange-500/25">
             THERMAL
           </span>
+          {isVOActive && (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-amber-400/20 text-amber-300 border border-amber-400/30 animate-pulse" data-testid="thermal-vo-active">
+              VO ACTIVE
+            </span>
+          )}
           <span className="text-[8px] text-slate-500">{width}x{height}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -142,6 +206,30 @@ export default function ThermalPanel({ secondary }) {
           data-testid="thermal-canvas"
         />
       </div>
+
+      {/* VO Stats bar (visible when thermal is active VO source) */}
+      {isVOActive && (
+        <div className="grid grid-cols-4 gap-px bg-[#3D1E1E]/30 shrink-0" data-testid="thermal-vo-stats">
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
+            <span className="text-[8px] text-slate-600">DET</span>
+            <span className="text-[10px] font-bold text-orange-400 ml-auto">{vo_features_detected}</span>
+          </div>
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
+            <span className="text-[8px] text-slate-600">TRK</span>
+            <span className="text-[10px] font-bold text-amber-400 ml-auto">{vo_features_tracked}</span>
+          </div>
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
+            <span className="text-[8px] text-slate-600">CONF</span>
+            <span className={`text-[10px] font-bold ml-auto ${vo_confidence > 0.3 ? 'text-emerald-400' : vo_confidence > 0.15 ? 'text-amber-400' : 'text-red-400'}`}>
+              {(vo_confidence * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div className="flex items-center gap-1 px-2 py-1 bg-[#0C0810]">
+            <span className="text-[8px] text-slate-600">VO</span>
+            <span className="text-[10px] font-bold text-amber-300 ml-auto animate-pulse">FALLBACK</span>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-[#0C0810] border-t border-[#3D1E1E]/50 shrink-0">

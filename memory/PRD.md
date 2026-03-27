@@ -104,8 +104,8 @@ Build a complex robotics runtime "JT-Zero" for a drone on Raspberry Pi with:
 ## Backlog
 
 ### P1 - Next
+- VO Fallback hardware testing (Pi + CSI + USB thermal)
 - Thermal camera FPS optimization (target: 10-15fps)
-- VO Fallback testing on real hardware (CSI + USB thermal)
 
 ### P2 - Planned
 - IP camera (RTSP) support

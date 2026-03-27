@@ -53,8 +53,24 @@ async def lifespan(app: FastAPI):
               f"({diag['scan_duration_ms']}ms)")
     except Exception as e:
         print(f"[JT-Zero API] Hardware scan failed: {e}")
+    
+    # Start VO Fallback background monitor (independent of WebSocket connections)
+    vo_fallback_task = asyncio.create_task(_vo_fallback_monitor())
     yield
+    vo_fallback_task.cancel()
     runtime.stop()
+
+async def _vo_fallback_monitor():
+    """Background task: monitors CSI confidence and manages VO fallback to thermal.
+    Runs independently of WebSocket connections at ~10Hz."""
+    await asyncio.sleep(5)  # Let runtime stabilize
+    while True:
+        try:
+            if hasattr(runtime, 'vo_fallback_tick'):
+                runtime.vo_fallback_tick()
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)  # 10Hz
 
 app = FastAPI(
     title="JT-Zero Ground Station",
@@ -457,14 +473,6 @@ async def websocket_telemetry(ws: WebSocket):
                 payload["performance"] = perf
             
             await ws.send_json(payload)
-            
-            # ── VO Fallback monitoring (10Hz) ──
-            if hasattr(runtime, 'vo_fallback_tick'):
-                try:
-                    runtime.vo_fallback_tick()
-                except Exception:
-                    pass
-            
             await asyncio.sleep(0.1)  # 10 Hz
     except WebSocketDisconnect:
         manager.disconnect(ws)
