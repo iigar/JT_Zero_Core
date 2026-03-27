@@ -78,12 +78,13 @@ class NativeRuntime:
         
         # ── VO Fallback monitoring state ──
         self._vo_fallback_active = False
-        self._vo_low_conf_count = 0
+        self._vo_conf_history = []  # rolling window of confidence values
         self._vo_fallback_thread = None
         self._vo_fallback_stop = threading.Event()
-        self._VO_CONF_DROP = 0.10
-        self._VO_CONF_RECOVER = 0.25
-        self._VO_FRAMES_TO_SWITCH = 15  # consecutive low-conf samples (~1.5s at 10Hz)
+        self._VO_CONF_DROP = 0.28       # trigger fallback when rolling avg below this
+        self._VO_CONF_RECOVER = 0.35    # recover when CSI probe quality above this
+        self._VO_WINDOW_SIZE = 30       # 3 seconds at 10Hz
+        self._VO_MIN_SAMPLES = 20       # need at least 2s of data before triggering
         self._VO_INJECT_W = 320
         self._VO_INJECT_H = 240
     
@@ -270,21 +271,24 @@ class NativeRuntime:
             return
         
         if not self._vo_fallback_active:
-            # ── Normal mode: monitor confidence ──
+            # ── Normal mode: monitor confidence with rolling average ──
             try:
                 cam = dict(self._rt.get_camera())
                 conf = cam.get('vo_confidence', 0.5)
             except Exception:
                 return
             
-            if conf < self._VO_CONF_DROP:
-                self._vo_low_conf_count += 1
-                if self._vo_low_conf_count % 5 == 1:
-                    sys.stderr.write(f"[VO Fallback] LOW conf={conf:.3f} count={self._vo_low_conf_count}/{self._VO_FRAMES_TO_SWITCH}\n")
-                    sys.stderr.flush()
-                if self._vo_low_conf_count >= self._VO_FRAMES_TO_SWITCH:
+            # Rolling window: keep last N confidence values
+            self._vo_conf_history.append(conf)
+            if len(self._vo_conf_history) > self._VO_WINDOW_SIZE:
+                self._vo_conf_history = self._vo_conf_history[-self._VO_WINDOW_SIZE:]
+            
+            if len(self._vo_conf_history) >= self._VO_MIN_SAMPLES:
+                avg_conf = sum(self._vo_conf_history) / len(self._vo_conf_history)
+                
+                if avg_conf < self._VO_CONF_DROP:
                     # ── TRIGGER FALLBACK ──
-                    reason = f"CSI conf {conf:.0%} < {self._VO_CONF_DROP:.0%} for {self._vo_low_conf_count} samples"
+                    reason = f"CSI avg_conf {avg_conf:.0%} < {self._VO_CONF_DROP:.0%} over {len(self._vo_conf_history)} samples"
                     sys.stderr.write(f"[VO Fallback] TRIGGERING: {reason}\n")
                     sys.stderr.flush()
                     
@@ -296,16 +300,13 @@ class NativeRuntime:
                         return
                     
                     self._vo_fallback_active = True
-                    self._vo_low_conf_count = 0
+                    self._vo_conf_history = []
                     
                     # Start injection thread
                     self._vo_fallback_stop.clear()
                     self._vo_fallback_thread = threading.Thread(
                         target=self._vo_inject_loop, daemon=True)
                     self._vo_fallback_thread.start()
-            else:
-                if self._vo_low_conf_count > 0:
-                    self._vo_low_conf_count = 0
         else:
             # ── Fallback mode: check CSI recovery via probe ──
             try:
