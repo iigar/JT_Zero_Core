@@ -178,6 +178,8 @@ class CameraStats:
     vo_fallback_reason: str = ""
     vo_fallback_duration: float = 0.0
     vo_fallback_switches: int = 0
+    # Frame brightness
+    frame_brightness: float = 128.0
 
 @dataclass
 class MAVLinkStats:

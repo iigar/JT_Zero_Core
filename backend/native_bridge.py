@@ -181,6 +181,7 @@ class NativeRuntime:
             d.setdefault("vo_fallback_reason", "")
             d.setdefault("vo_fallback_duration", 0.0)
             d.setdefault("vo_fallback_switches", 0)
+        d.setdefault("frame_brightness", 128.0)
         return d
     
     def get_frame_data(self) -> bytes:
@@ -286,6 +287,7 @@ class NativeRuntime:
             try:
                 cam = dict(self._rt.get_camera())
                 conf = cam.get('vo_confidence', 0.5)
+                brightness = cam.get('frame_brightness', 128)
             except Exception:
                 return
             
@@ -297,9 +299,12 @@ class NativeRuntime:
             if len(self._vo_conf_history) >= self._VO_MIN_SAMPLES:
                 avg_conf = sum(self._vo_conf_history) / len(self._vo_conf_history)
                 
-                if avg_conf < self._VO_CONF_DROP:
+                # Trigger ONLY if BOTH: low confidence AND dark frame
+                # Low confidence + bright frame = scene transition (don't trigger!)
+                # Low confidence + dark frame = camera covered/blocked (trigger!)
+                if avg_conf < self._VO_CONF_DROP and brightness < 40:
                     # ── TRIGGER FALLBACK ──
-                    reason = f"CSI avg_conf {avg_conf:.0%} < {self._VO_CONF_DROP:.0%} over {len(self._vo_conf_history)} samples"
+                    reason = f"CSI dark (bright={brightness:.0f}) conf={avg_conf:.0%}"
                     sys.stderr.write(f"[VO Fallback] TRIGGERING: {reason}\n")
                     sys.stderr.flush()
                     

@@ -987,6 +987,14 @@ bool CameraPipeline::tick(float ground_distance) {
     vo_result_ = vo_.process(current_frame_, ground_distance);
     frame_count_++;
     
+    // Compute frame brightness (for fallback trigger — dark camera detection)
+    uint32_t brightness_sum = 0;
+    int pixel_count = current_frame_.info.width * current_frame_.info.height;
+    for (int i = 0; i < pixel_count; i++) {
+        brightness_sum += current_frame_.data[i];
+    }
+    frame_brightness_ = static_cast<float>(brightness_sum) / pixel_count;
+    
     // Monitor confidence for fallback trigger
     if (vo_result_.confidence < fallback_config_.conf_drop_thresh) {
         fallback_state_.low_conf_count++;
@@ -1269,6 +1277,7 @@ CameraPipelineStats CameraPipeline::get_stats() const {
     stats.vo_fallback_reason[63] = '\0';
     stats.vo_fallback_duration = fallback_state_.fallback_duration;
     stats.vo_fallback_switches = fallback_state_.total_switches;
+    stats.frame_brightness = frame_brightness_;
     
     return stats;
 }

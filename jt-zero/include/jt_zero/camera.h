@@ -638,6 +638,8 @@ struct CameraPipelineStats {
     char       vo_fallback_reason[64]{};
     float      vo_fallback_duration{0};
     uint32_t   vo_fallback_switches{0};
+    // Frame brightness (for fallback trigger — dark camera detection)
+    float      frame_brightness{0};    // average pixel value 0-255
 };
 
 class CameraPipeline {
@@ -778,6 +780,7 @@ private:
     uint16_t         inject_w_{0};
     uint16_t         inject_h_{0};
     std::atomic<bool> external_fallback_{false};
+    float frame_brightness_{0};  // average pixel brightness 0-255
 };
 
 } // namespace jtzero
