@@ -80,7 +80,8 @@ async def _vo_fallback_monitor():
                     if hasattr(runtime, '_vo_conf_history') and runtime._vo_conf_history:
                         avg = sum(runtime._vo_conf_history) / len(runtime._vo_conf_history)
                         n = len(runtime._vo_conf_history)
-                        print(f"[VO Monitor] conf={conf:.2f} avg={avg:.2f}({n}) bright={bright:.0f} src={src} t={tick_count}", flush=True)
+                        avg_b = sum(runtime._vo_bright_history) / len(runtime._vo_bright_history) if runtime._vo_bright_history else -1
+                        print(f"[VO Monitor] conf={conf:.2f} avg={avg:.2f}({n}) bright={bright:.0f} avg_b={avg_b:.0f} src={src} t={tick_count}", flush=True)
                     else:
                         print(f"[VO Monitor] conf={conf:.2f} bright={bright:.0f} src={src} t={tick_count}", flush=True)
                 except Exception as e2:
