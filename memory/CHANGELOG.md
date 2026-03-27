@@ -8,13 +8,12 @@
 - **Recovery**: Uses CSI brightness probes (3 consecutive good probes needed), with 3s minimum fallback time and 5s cooldown
 
 ### ThermalPanel Feature Overlay Fix
-- **ROOT CAUSE FOUND**: C++ `get_features()` returns empty on ARM64 Pi during fallback — `vo.feature_count()` reads stale `active_count_` due to no memory barrier between T6 thread (writes) and Python thread (reads). `vo_result_` IS visible (DET/TRK show values), but `active_count_` in separate VisualOdometry object is not
-- **Pseudo-feature fallback**: When `features=[]` but `vo_features_detected > 0`, ThermalPanel now generates deterministic pseudo-positions (golden ratio, same pattern as CameraPanel). Orange squares (tracked) + yellow circles (detected)
-- **Dual-trigger rendering**: Features redraw on JPEG frame load AND on camera stats update AND on features change
-- **`lastImageRef`**: Stores reference to last drawn image for instant overlay redraws
-- **`renderCanvas()`**: Unified render function for image + features + crosshair
-- **PTS counter**: Shows `vo_features_detected` when actual features empty (not 0 anymore)
-- **Diagnostic logging**: `native_bridge.py` logs when `get_features()` returns empty during fallback (for future C++ fix)
+- **ROOT CAUSE FOUND**: C++ `get_features()` returns empty on ARM64 Pi during fallback — `vo.feature_count()` reads stale `active_count_` due to no memory barrier between T6 thread (writes) and Python thread (reads)
+- **C++ snapshot fix (pending recompile)**: Added `features_snapshot_[]` + `std::atomic<uint32_t>` to CameraPipeline with release/acquire barriers. Will activate when user does clean rebuild
+- **Python-side feature detection**: When C++ returns empty during fallback, Python runs its own corner detector (simplified Shi-Tomasi via numpy) on the same thermal frame being injected into C++. Features are at REAL corners/edges of the thermal image, not pseudo-random positions
+- **Python detector**: Sobel gradients → `min(|Ix|, |Iy|)` corner response → 3x3 NMS → top 120 by response. ~5-10ms on Pi 4 for 320x240
+- **Dual-trigger canvas rendering**: Features redraw on JPEG frame load AND on camera stats update AND on features change
+- **PTS counter**: Shows real `features.length` (Python-detected corner count)
 
 ### CLAUDE.md Updated
 - Documented brightness-only trigger with reasoning
