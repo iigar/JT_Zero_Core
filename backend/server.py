@@ -288,8 +288,11 @@ async def capture_secondary():
 @app.get("/api/camera/features")
 async def get_camera_features():
     """Get current VO feature positions."""
-    if hasattr(runtime, 'get_features'):
-        return runtime.get_features()
+    try:
+        if hasattr(runtime, 'get_features'):
+            return runtime.get_features()
+    except Exception as e:
+        print(f"[API] /camera/features error: {e}", flush=True)
     return []
 
 @app.get("/api/vo/profiles")

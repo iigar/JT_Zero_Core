@@ -46,7 +46,8 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Verify ThermalPanel feature overlay on Pi hardware (user hardware test)
+- Deploy to Pi and check stderr logs — Pillow decode error will now be visible
+- Fix the specific Pillow error (likely `Image.Resampling.NEAREST` compat or corrupt JPEG data)
 
 ### P2 - Planned
 - C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)

@@ -1,5 +1,23 @@
 # JT-Zero Changelog
 
+## 2026-03-28 — Silent Feature Detection Crash Fix (P0)
+
+### Root Cause Analysis
+- **3 silent exception handlers** in `native_bridge.py` swallowed all errors during VO fallback feature detection
+- `_decode_jpeg_to_gray()`: `except Exception: return b'', None` — if Pillow fails to decode JPEG, the entire inject loop skips silently (no features, no injection)
+- numpy fallback: `except Exception: pass` — completely hidden failures
+- raw detector fallback: same pattern
+
+### Fixes Applied
+- **Error logging everywhere**: All `except` blocks now log to stderr with one-time dedup (e.g. `[VO Decode] PIL error: ...`, `[VO PyDetect] numpy error: ...`)
+- **Diagnostic startup log**: Inject loop now prints `PIL=True/False FILTERS=True/False NUMPY=True/False` on start
+- **Empty gray_bytes diagnostic**: When decode returns empty, logs `jpeg_len`, `PIL`, `FILTERS` state
+- **"No detection method" branch**: New else clause logs when no detector (Pillow/numpy/raw) is available
+- **Pillow version compat**: `Image.Resampling.NEAREST` with fallback to `Image.NEAREST` for older apt versions
+- **API endpoint hardened**: `/api/camera/features` wrapped in try/except → always returns `[]` on error (prevents HTML 500 → JSONDecodeError)
+
+
+
 ## 2026-03-27 — VO Fallback Stabilization + Feature Overlay Fix
 
 ### Brightness-Only Trigger (CRITICAL FIX)

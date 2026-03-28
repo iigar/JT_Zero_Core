@@ -401,7 +401,7 @@ class NativeRuntime:
 
     def _vo_inject_loop(self):
         """Background thread: captures thermal JPEG → grayscale → injects to C++ VO."""
-        sys.stderr.write("[VO Fallback] Injection loop started\n")
+        sys.stderr.write(f"[VO Fallback] Injection loop started — PIL={PIL_AVAILABLE} FILTERS={PILLOW_FILTERS} NUMPY={NUMPY_AVAILABLE}\n")
         sys.stderr.flush()
         
         while not self._vo_fallback_stop.is_set():
@@ -418,6 +418,10 @@ class NativeRuntime:
             # Decode JPEG → grayscale → resize to VO resolution
             gray_bytes, gray_img = self._decode_jpeg_to_gray(jpeg_data)
             if not gray_bytes:
+                if not getattr(self, '_decode_skip_logged', False):
+                    sys.stderr.write(f"[VO Fallback] gray_bytes empty — PIL={PIL_AVAILABLE} jpeg_len={len(jpeg_data)} FILTERS={PILLOW_FILTERS}\n")
+                    sys.stderr.flush()
+                    self._decode_skip_logged = True
                 time.sleep(0.05)
                 continue
             
@@ -458,8 +462,11 @@ class NativeRuntime:
                             {"x": float(xs[i]+1), "y": float(ys[i]+1), "tracked": True, "response": int(resps[i])}
                             for i in order
                         ]
-                except Exception:
-                    pass
+                except Exception as e:
+                    if not getattr(self, '_np_err_logged', False):
+                        sys.stderr.write(f"[VO PyDetect] numpy error: {e}\n")
+                        sys.stderr.flush()
+                        self._np_err_logged = True
             elif gray_bytes and len(gray_bytes) == self._VO_INJECT_W * self._VO_INJECT_H:
                 # Pure Python fallback (no Pillow, no numpy) — slower but works
                 try:
@@ -469,8 +476,16 @@ class NativeRuntime:
                         sys.stderr.write(f"[VO PyDetect] Raw detector: {len(py_feats)} features\n")
                         sys.stderr.flush()
                         self._rawfeat_logged = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    if not getattr(self, '_rawfeat_err_logged', False):
+                        sys.stderr.write(f"[VO PyDetect] raw detector error: {e}\n")
+                        sys.stderr.flush()
+                        self._rawfeat_err_logged = True
+            else:
+                if not getattr(self, '_no_detect_logged', False):
+                    sys.stderr.write(f"[VO PyDetect] No detection method available! gray_img={gray_img is not None} FILTERS={PILLOW_FILTERS} NUMPY={NUMPY_AVAILABLE} gray_len={len(gray_bytes)} expected={self._VO_INJECT_W * self._VO_INJECT_H}\n")
+                    sys.stderr.flush()
+                    self._no_detect_logged = True
             
             # Inject into C++ VO pipeline
             try:
@@ -496,9 +511,18 @@ class NativeRuntime:
             try:
                 img = Image.open(io.BytesIO(jpeg_data))
                 img = img.convert('L')
-                img = img.resize((w, h), Image.NEAREST)
+                # Pillow version compatibility: NEAREST may be in Resampling enum
+                try:
+                    resample = Image.Resampling.NEAREST
+                except AttributeError:
+                    resample = Image.NEAREST
+                img = img.resize((w, h), resample)
                 return img.tobytes(), img
-            except Exception:
+            except Exception as e:
+                if not getattr(self, '_decode_err_logged', False):
+                    sys.stderr.write(f"[VO Decode] PIL error: {e}\n")
+                    sys.stderr.flush()
+                    self._decode_err_logged = True
                 return b'', None
         
         # Method 2: djpeg subprocess (libjpeg-turbo, available on Pi OS)
