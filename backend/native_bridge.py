@@ -112,6 +112,20 @@ class NativeRuntime:
         
         # ── Python-side feature detection for visualization ──
         self._vo_python_features = []  # cached Python-detected features
+        
+        # ── RC-based VO Reset ──
+        self._rc_reset_channel = 7      # RC channel index (0-based, ch8 on transmitter)
+        self._rc_reset_threshold = 1700  # PWM threshold to trigger reset
+        self._rc_reset_armed = False     # edge detection: only trigger once per switch flip
+        
+        # ── VO Position Trail (3D visualization) ──
+        self._vo_trail = []              # list of {x, y, z, t} positions
+        self._vo_trail_max = 500         # max trail points
+        self._vo_trail_interval = 0.5    # seconds between trail samples
+        self._vo_trail_last_t = 0
+        self._vo_pos_x = 0.0            # accumulated VO position
+        self._vo_pos_y = 0.0
+        self._vo_pos_z = 0.0
     
     def start(self):
         if self.running:
@@ -130,6 +144,11 @@ class NativeRuntime:
         self.running = False
     
     def send_command(self, cmd: str, param1: float = 0, param2: float = 0) -> bool:
+        if cmd == "vo_reset":
+            self._vo_trail = []
+            self._vo_pos_x = 0.0
+            self._vo_pos_y = 0.0
+            self._vo_pos_z = 0.0
         return self._rt.send_command(cmd, param1, param2)
     
     def get_state(self) -> dict:
@@ -298,11 +317,67 @@ class NativeRuntime:
 
     # ── VO Fallback: Python-side monitoring + injection ──
 
+    def _check_rc_vo_reset(self):
+        """Check RC channel for SET HOMEPOINT trigger (edge-detected)."""
+        try:
+            mavlink = dict(self._rt.get_mavlink())
+            rc = mavlink.get('rc_channels')
+            if not rc or len(rc) <= self._rc_reset_channel:
+                return
+            pwm = rc[self._rc_reset_channel]
+            if pwm >= self._rc_reset_threshold:
+                if not self._rc_reset_armed:
+                    self._rc_reset_armed = True
+                    # Trigger vo_reset
+                    self._rt.send_command("vo_reset", 0, 0)
+                    self._vo_trail = []  # clear trail on reset
+                    sys.stderr.write(f"[VO Reset] RC ch{self._rc_reset_channel + 1} = {pwm} >= {self._rc_reset_threshold} → HOMEPOINT SET\n")
+                    sys.stderr.flush()
+            else:
+                self._rc_reset_armed = False
+        except Exception:
+            pass
+
+    def _record_vo_trail(self):
+        """Record VO position for 3D trail visualization."""
+        now = time.time()
+        try:
+            cam = dict(self._rt.get_camera())
+            # Accumulate deltas into absolute position
+            self._vo_pos_x += cam.get('vo_dx', 0)
+            self._vo_pos_y += cam.get('vo_dy', 0)
+            self._vo_pos_z += cam.get('vo_dz', 0)
+        except Exception:
+            return
+        # Sample at interval
+        if now - self._vo_trail_last_t < self._vo_trail_interval:
+            return
+        self._vo_trail_last_t = now
+        self._vo_trail.append({
+            'x': round(self._vo_pos_x, 4),
+            'y': round(self._vo_pos_y, 4),
+            'z': round(self._vo_pos_z, 4),
+            't': round(now - self._start_time, 1),
+        })
+        if len(self._vo_trail) > self._vo_trail_max:
+            self._vo_trail = self._vo_trail[-self._vo_trail_max:]
+
+    def get_vo_trail(self) -> list:
+        """Return VO position trail for 3D visualization."""
+        return list(self._vo_trail)
+
     def vo_fallback_tick(self):
         """Called periodically (~10Hz from WebSocket/background).
-        Monitors CSI confidence and manages thermal frame injection."""
+        Monitors CSI confidence and manages thermal frame injection.
+        Also checks RC channel for vo_reset and records VO trail."""
         if not self.running:
             return
+        
+        # ── RC-based VO Reset (always active, not just during fallback) ──
+        self._check_rc_vo_reset()
+        
+        # ── VO Trail recording ──
+        self._record_vo_trail()
         
         # Check if USB thermal camera is available
         self.__init_multicam()

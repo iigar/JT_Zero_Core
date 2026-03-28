@@ -681,6 +681,22 @@ class JTZeroSimulator:
             self._secondary_camera["fps_actual"] = 1.0
             return True
 
+    def get_vo_trail(self) -> list:
+        """Simulated VO trail for 3D visualization."""
+        trail = []
+        t = time.time() - self._start_time
+        # Generate a simple circular path
+        count = min(int(t / 0.5), 100)
+        for i in range(count):
+            tt = i * 0.5
+            trail.append({
+                'x': round(0.05 * math.sin(tt * 0.3), 4),
+                'y': round(0.05 * math.cos(tt * 0.3), 4),
+                'z': round(0.001 * tt, 4),
+                't': round(tt, 1),
+            })
+        return trail
+
     def get_secondary_frame_data(self) -> bytes:
         """Return latest frame from USB continuous stream or simulated."""
         if self._usb_capture and self._usb_capture.streaming:

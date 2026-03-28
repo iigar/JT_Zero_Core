@@ -254,7 +254,40 @@ function AltitudeBar({ altitude, target }) {
   );
 }
 
-export default function Drone3DPanel({ state }) {
+function TrailLine({ trail }) {
+  const lineRef = useRef();
+  const geometry = useMemo(() => {
+    if (!trail || trail.length < 2) return null;
+    const points = trail.map(p => new THREE.Vector3(p.x * 10, p.z * 10, p.y * 10));
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    return geo;
+  }, [trail]);
+
+  if (!geometry) return null;
+
+  return (
+    <line ref={lineRef} geometry={geometry}>
+      <lineBasicMaterial color="#00F0FF" linewidth={2} transparent opacity={0.6} />
+    </line>
+  );
+}
+
+function HomeMarker() {
+  return (
+    <group position={[0, -0.01, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.08, 0.12, 16]} />
+        <meshStandardMaterial color="#F59E0B" emissive="#F59E0B" emissiveIntensity={0.5} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.04, 8]} />
+        <meshStandardMaterial color="#F59E0B" emissive="#F59E0B" emissiveIntensity={0.8} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+export default function Drone3DPanel({ state, voTrail }) {
   const roll = state?.roll || 0;
   const pitch = state?.pitch || 0;
   const yaw = state?.yaw || 0;
@@ -312,6 +345,8 @@ export default function Drone3DPanel({ state }) {
         <DroneModel roll={roll} pitch={pitch} yaw={yaw} motors={motors} altitude={altitude} />
         <Ground altitude={altitude} />
         <AltitudeBar altitude={altitude} target={target} />
+        <HomeMarker />
+        <TrailLine trail={voTrail} />
 
         <OrbitControls
           enableZoom={false}

@@ -1095,6 +1095,19 @@ void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t
         break;
     }
     
+    case 65: {  // RC_CHANNELS — 18 channels + rssi
+        if (len < 6) break;
+        // time_boot_ms at offset 0 (4 bytes)
+        // chan1_raw..chan18_raw at offsets 4,6,8,...38 (uint16_t each)
+        for (int i = 0; i < 18; i++) {
+            fc_telem_.rc_channels[i] = safe_u16(4 + i * 2);
+        }
+        fc_telem_.rc_chancount = safe_u8(40);
+        fc_telem_.rc_rssi = safe_u8(41);
+        fc_telem_.rc_valid = true;
+        break;
+    }
+    
     default:
         break;
     }

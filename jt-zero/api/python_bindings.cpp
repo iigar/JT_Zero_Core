@@ -273,6 +273,17 @@ static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
         );
     }
     
+    // Add RC channels if available
+    if (fc.rc_valid) {
+        py::list rc_list;
+        for (int i = 0; i < 18; i++) {
+            rc_list.append(static_cast<int>(fc.rc_channels[i]));
+        }
+        result["rc_channels"] = rc_list;
+        result["rc_chancount"] = static_cast<int>(fc.rc_chancount);
+        result["rc_rssi"] = static_cast<int>(fc.rc_rssi);
+    }
+    
     return result;
 }
 

@@ -1,6 +1,18 @@
 # JT-Zero Changelog
 
-## 2026-03-28 — SET HOMEPOINT + DOCS Update
+## 2026-03-28 — RC VO Reset + 3D Trail
+
+### RC-based SET HOMEPOINT
+- C++ RC_CHANNELS (msg 65) parsing added to `mavlink_interface.cpp` — 18 channels + rssi
+- Python RC monitor with edge detection: RC ch8 PWM >= 1700 → `vo_reset`
+- RC channels exposed in `get_mavlink()` API
+
+### 3D Trail Visualization
+- Backend: accumulates VO dx/dy/dz into absolute positions, sampled every 0.5s (max 500 points)
+- API: `GET /api/vo/trail` returns `[{x, y, z, t}, ...]`, cleared on `vo_reset`
+- Frontend: cyan TrailLine + amber HomeMarker in Drone3DPanel 3D View
+
+## 2026-03-28 — SET HOMEPOINT + DOCS + Recovery Fix
 
 ### SET HOMEPOINT (VO Reset)
 - **C++ `camera.h`**: Added `reset_vo()` method on `CameraPipeline` (calls `vo_.reset()`)

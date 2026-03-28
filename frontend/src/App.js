@@ -42,6 +42,7 @@ function App() {
   const [cameras, setCameras] = useState([]);
   const historyRef = useRef([]);
   const [history, setHistory] = useState([]);
+  const [voTrail, setVoTrail] = useState([]);
 
   // Throttled update: accumulate data in refs, flush to state at ~5Hz
   const pendingRef = useRef(null);
@@ -122,6 +123,22 @@ function App() {
 
   const { connected } = useWebSocket('/api/ws/telemetry', handleMessage);
 
+  // Periodic fetch of VO trail for 3D visualization (every 2s)
+  useEffect(() => {
+    const fetchTrail = async () => {
+      try {
+        const res = await fetch((process.env.REACT_APP_BACKEND_URL || '') + '/api/vo/trail');
+        if (res.ok) {
+          const data = await res.json();
+          setVoTrail(data);
+        }
+      } catch {}
+    };
+    fetchTrail();
+    const interval = setInterval(fetchTrail, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-[#050505] overflow-hidden" data-testid="app-root">
       <Header state={state} connected={connected} runtimeMode={runtimeMode} />
@@ -155,7 +172,7 @@ function App() {
       {/* Tab Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} cameras={cameras} />
+          <DashboardTab state={state} history={history} threads={threads} engines={engines} camera={camera} mavlink={mavlink} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} events={events} features={features} sensorModes={sensorModes} cameras={cameras} voTrail={voTrail} />
         )}
         {activeTab === 'telemetry' && (
           <TelemetryTab state={state} history={history} performance={performance} systemMetrics={systemMetrics} runtimeMode={runtimeMode} threads={threads} sensorModes={sensorModes} />
@@ -191,7 +208,7 @@ function App() {
 /* Dashboard Tab                                              */
 /* ═══════════════════════════════════════════════════════════ */
 
-function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes, cameras }) {
+function DashboardTab({ state, history, threads, engines, camera, mavlink, performance, systemMetrics, runtimeMode, events, features, sensorModes, cameras, voTrail }) {
   const secondaryCam = cameras?.find(c => c.slot === 'SECONDARY');
   return (
     <div className="h-full flex overflow-hidden">
@@ -259,7 +276,7 @@ function DashboardTab({ state, history, threads, engines, camera, mavlink, perfo
       <div className="flex-1 flex flex-col gap-2 p-2 overflow-y-auto">
         {/* Row 1: 3D + Telemetry + Sensors */}
         <div className="grid grid-cols-12 gap-2 shrink-0" style={{ height: '240px' }}>
-          <div className="col-span-3 overflow-hidden"><Drone3DPanel state={state} /></div>
+          <div className="col-span-3 overflow-hidden"><Drone3DPanel state={state} voTrail={voTrail} /></div>
           <div className="col-span-3 overflow-hidden"><DronePanel state={state} history={history} /></div>
           <div className="col-span-6 overflow-hidden"><SensorPanels state={state} history={history} sensorModes={sensorModes} /></div>
         </div>

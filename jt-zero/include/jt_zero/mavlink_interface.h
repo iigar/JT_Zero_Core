@@ -208,6 +208,12 @@ struct FCTelemetry {
     // Counters
     uint32_t msg_count{0};
     uint64_t last_update_us{0};
+    
+    // RC_CHANNELS (msg 65)
+    uint16_t rc_channels[18]{};
+    uint8_t  rc_chancount{0};
+    uint8_t  rc_rssi{0};
+    bool     rc_valid{false};
 };
 
 // ─── MAVLink Interface ──────────────────────────────────

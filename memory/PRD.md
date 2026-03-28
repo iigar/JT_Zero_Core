@@ -46,12 +46,12 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi (`git pull && ./update.sh`) — Pillow installs into venv, SET HOMEPOINT available
-- Verify VO Fallback features + SET HOMEPOINT on hardware
-- VO Reset via MAVLink RC channel (COMMAND_LONG from ArduPilot/RC switch)
+- Deploy to Pi: `git pull && ./update.sh` — RC VO Reset + 3D Trail + Pillow venv fix + Recovery fix
+- Test RC channel 8 switch for SET HOMEPOINT on transmitter
+- Verify 3D trail renders real VO movement on hardware
 
 ### P2 - Planned
-- 3D Trail visualization (store VO position history, render path in 3D View)
+- 3D Trail: make trail scale configurable, add color gradient by time
 - C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)
 - IP camera (RTSP) support
 - ARM NEON optimization for C++ core
