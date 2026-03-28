@@ -2,19 +2,17 @@
 
 ## 2026-03-28 — Silent Feature Detection Crash Fix (P0)
 
-### Root Cause Analysis
-- **3 silent exception handlers** in `native_bridge.py` swallowed all errors during VO fallback feature detection
-- `_decode_jpeg_to_gray()`: `except Exception: return b'', None` — if Pillow fails to decode JPEG, the entire inject loop skips silently (no features, no injection)
-- numpy fallback: `except Exception: pass` — completely hidden failures
-- raw detector fallback: same pattern
+### Root Cause: Pillow installed in SYSTEM Python, service runs in VENV
+- `update.sh` ran `apt install python3-pil` → installed into `/usr/lib/python3.13/`
+- Service uses `/home/pi/jt-zero/backend/venv/bin/uvicorn` → venv can't see system packages
+- Result: `PIL=False FILTERS=False NUMPY=False` — ALL feature detectors disabled
+- **Fix**: `update.sh` now detects venv and installs Pillow via `venv/bin/pip install Pillow`
 
-### Fixes Applied
-- **Error logging everywhere**: All `except` blocks now log to stderr with one-time dedup (e.g. `[VO Decode] PIL error: ...`, `[VO PyDetect] numpy error: ...`)
-- **Diagnostic startup log**: Inject loop now prints `PIL=True/False FILTERS=True/False NUMPY=True/False` on start
-- **Empty gray_bytes diagnostic**: When decode returns empty, logs `jpeg_len`, `PIL`, `FILTERS` state
-- **"No detection method" branch**: New else clause logs when no detector (Pillow/numpy/raw) is available
-- **Pillow version compat**: `Image.Resampling.NEAREST` with fallback to `Image.NEAREST` for older apt versions
-- **API endpoint hardened**: `/api/camera/features` wrapped in try/except → always returns `[]` on error (prevents HTML 500 → JSONDecodeError)
+### Additional Fixes
+- Error logging in `_decode_jpeg_to_gray`, numpy fallback, raw detector (replaced silent `except: pass`)
+- Diagnostic startup log: `PIL=T/F FILTERS=T/F NUMPY=T/F`
+- `Image.Resampling.NEAREST` compat fallback
+- `/api/camera/features` hardened with try/except → always returns `[]`
 
 
 

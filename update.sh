@@ -85,20 +85,31 @@ fi
 echo -e "${CYAN}[4/5]${NC} Фронтенд..."
 
 # Python deps (Pillow needed for VO Fallback JPEG→grayscale)
+# IMPORTANT: Service runs inside venv — must install there, not system Python!
+VENV_DIR="$BACKEND_DIR/venv"
+VENV_PIP="$VENV_DIR/bin/pip"
+VENV_PYTHON="$VENV_DIR/bin/python3"
+
 PILLOW_OK=false
-python3 -c "from PIL import Image; print('ok')" 2>/dev/null && PILLOW_OK=true
+if [ -x "$VENV_PYTHON" ]; then
+    "$VENV_PYTHON" -c "from PIL import Image; print('ok')" 2>/dev/null && PILLOW_OK=true
+else
+    python3 -c "from PIL import Image; print('ok')" 2>/dev/null && PILLOW_OK=true
+fi
 
 if [ "$PILLOW_OK" = false ]; then
     echo -e "  ${YELLOW}Встановлення Pillow...${NC}"
-    # Method 1: apt (most reliable on Pi OS Bookworm)
-    sudo apt-get install -y python3-pil 2>/dev/null && PILLOW_OK=true
-    # Method 2: pip with --break-system-packages (fallback)
+    # Method 1: venv pip (PEP 668 does NOT block pip inside venv)
+    if [ -x "$VENV_PIP" ]; then
+        "$VENV_PIP" install Pillow 2>&1 | tail -3 && PILLOW_OK=true
+    fi
+    # Method 2: apt (for non-venv setups)
+    if [ "$PILLOW_OK" = false ]; then
+        sudo apt-get install -y python3-pil 2>/dev/null && PILLOW_OK=true
+    fi
+    # Method 3: pip --break-system-packages (last resort)
     if [ "$PILLOW_OK" = false ]; then
         pip3 install --break-system-packages pillow 2>/dev/null && PILLOW_OK=true
-    fi
-    # Method 3: pip --user
-    if [ "$PILLOW_OK" = false ]; then
-        pip3 install --user pillow 2>/dev/null && PILLOW_OK=true
     fi
     if [ "$PILLOW_OK" = true ]; then
         echo -e "  ${GREEN}Pillow встановлено${NC}"
@@ -106,7 +117,7 @@ if [ "$PILLOW_OK" = false ]; then
         echo -e "  ${RED}Pillow не вдалося встановити — VO Fallback injection буде через djpeg${NC}"
     fi
 else
-    echo -e "  ${GREEN}Pillow OK${NC}"
+    echo -e "  ${GREEN}Pillow OK (venv)${NC}"
 fi
 
 # Стратегія: pre-built (з git) > локальний білд (якщо є npm)
