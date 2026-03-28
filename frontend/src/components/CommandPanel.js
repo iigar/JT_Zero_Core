@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { apiCall } from '../hooks/useApi';
-import { Play, Square, ArrowUp, ArrowDown, RotateCcw, Shield, AlertTriangle, Crosshair } from 'lucide-react';
+import { Play, Square, ArrowUp, ArrowDown, RotateCcw, Shield, AlertTriangle, Crosshair, Home } from 'lucide-react';
 
 const COMMANDS = [
   { cmd: 'arm', label: 'ARM', icon: Shield, color: 'border-amber-500/30 hover:bg-amber-500/10 text-amber-400' },
@@ -10,6 +10,7 @@ const COMMANDS = [
   { cmd: 'hold', label: 'HOLD', icon: Crosshair, color: 'border-blue-500/30 hover:bg-blue-500/10 text-blue-400' },
   { cmd: 'rtl', label: 'RTL', icon: RotateCcw, color: 'border-orange-500/30 hover:bg-orange-500/10 text-orange-400' },
   { cmd: 'emergency', label: 'E-STOP', icon: AlertTriangle, color: 'border-red-500/30 hover:bg-red-500/10 text-red-500' },
+  { cmd: 'vo_reset', label: 'SET HOMEPOINT', icon: Home, color: 'border-amber-500/30 hover:bg-amber-500/10 text-amber-300' },
 ];
 
 export default function CommandPanel() {

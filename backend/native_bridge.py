@@ -100,7 +100,8 @@ class NativeRuntime:
         self._vo_fallback_cooldown_until = 0
         self._vo_csi_good_probes = 0
         self._VO_BRIGHT_DROP = 20       # trigger when avg brightness below this (camera dark)
-        self._VO_CONF_RECOVER = 0.40    # recovery: brightness-based quality > this
+        self._VO_BRIGHT_RECOVER = 30    # recovery: brightness above this = CSI OK
+        self._VO_CONF_RECOVER = 0.20    # recovery: confidence > this (lowered for dim environments)
         self._VO_WINDOW_SIZE = 10       # 1 second at 10Hz
         self._VO_MIN_SAMPLES = 8        # need 0.8s of data
         self._VO_MIN_FALLBACK_S = 3     # 3s minimum in fallback
@@ -358,26 +359,43 @@ class NativeRuntime:
                         target=self._vo_inject_loop, daemon=True)
                     self._vo_fallback_thread.start()
         else:
-            # ── Fallback mode: check CSI recovery via probe ──
+            # ── Fallback mode: check CSI recovery via brightness + probe ──
             # Minimum time in fallback before checking recovery
             if time.time() - self._vo_fallback_start_time < self._VO_MIN_FALLBACK_S:
                 return
             
+            # Get CSI brightness from camera stats (updated during CSI probes)
+            try:
+                cam = dict(self._rt.get_camera())
+                csi_brightness = cam.get('frame_brightness', 0)
+            except Exception:
+                csi_brightness = 0
+            
+            # Get probe confidence from C++ fallback state
             try:
                 fs = dict(self._rt.get_fallback_state())
                 probe_conf = fs.get('last_csi_probe_conf', 0)
             except Exception:
-                return
+                probe_conf = 0
             
-            if probe_conf >= self._VO_CONF_RECOVER:
+            # Recovery condition: brightness recovered OR confidence good enough
+            # Primary: brightness > BRIGHT_RECOVER (symmetric with trigger)
+            # Secondary: probe confidence > CONF_RECOVER (for cases where brightness is unreliable)
+            recovery_reason = None
+            if csi_brightness >= self._VO_BRIGHT_RECOVER:
+                recovery_reason = f"brightness={csi_brightness:.0f}>={self._VO_BRIGHT_RECOVER}"
+            elif probe_conf >= self._VO_CONF_RECOVER:
+                recovery_reason = f"probe_conf={probe_conf:.2f}>={self._VO_CONF_RECOVER}"
+            
+            if recovery_reason:
                 self._vo_csi_good_probes += 1
-                sys.stderr.write(f"[VO Fallback] CSI probe good ({probe_conf:.2f}), "
+                sys.stderr.write(f"[VO Fallback] CSI probe good ({recovery_reason}), "
                                f"count={self._vo_csi_good_probes}/{self._VO_PROBES_TO_RECOVER}\n")
                 sys.stderr.flush()
                 
                 if self._vo_csi_good_probes >= self._VO_PROBES_TO_RECOVER:
                     # ── RECOVER TO CSI ──
-                    sys.stderr.write(f"[VO Fallback] CSI recovered ({self._vo_csi_good_probes} good probes) → deactivating\n")
+                    sys.stderr.write(f"[VO Fallback] CSI recovered ({recovery_reason}) → deactivating\n")
                     sys.stderr.flush()
                     
                     self._vo_fallback_stop.set()

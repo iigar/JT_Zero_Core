@@ -5,9 +5,15 @@
 ### SET HOMEPOINT (VO Reset)
 - **C++ `camera.h`**: Added `reset_vo()` method on `CameraPipeline` (calls `vo_.reset()`)
 - **C++ `runtime.cpp`**: Added `"vo_reset"` command handling in `send_command()` — resets position to (0,0,0), clears distance, Kalman state, hover state
-- **Python `simulator.py`**: Added `"vo_reset"` command handling — resets `vo_total_distance`, `vo_position_uncertainty`, `vo_dx/dy/dz`
-- **MAVLinkPanel.js**: Added "SET HOMEPOINT" button with success/error visual feedback (green "HOMEPOINT SET" for 3s)
+- **Python `simulator.py`**: Added `"vo_reset"` command handling
+- **CommandPanel.js**: Added "SET HOMEPOINT" button alongside ARM/DISARM/TAKEOFF/etc.
 - **API**: `POST /api/command {"command":"vo_reset"}` → resets VO origin
+
+### VO Fallback Recovery Fix (brightness-based)
+- **Problem**: Recovery used confidence threshold (0.40), but in dim environments (brightness ~41) confidence hovers at the threshold → CSI never recovers
+- **Fix**: Added brightness-based recovery path: if `frame_brightness >= 30` (BRIGHT_RECOVER), switch back to CSI immediately
+- Lowered confidence recovery threshold from 0.40 to 0.20 as secondary path
+- Recovery now logs the exact reason: `brightness=41>=30` or `probe_conf=0.25>=0.20`
 
 ### DOCS Tab Updated
 - Added **VO Fallback** section: architecture diagram, trigger logic, parameters, USB thermal setup, venv dependency note
