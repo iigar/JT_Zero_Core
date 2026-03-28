@@ -326,6 +326,13 @@ class JTZeroSimulator:
                 self.state.armed = False
                 self.state.flight_mode = "EMERGENCY"
                 self._emit_event(EventType.SYSTEM_ERROR, 255, "EMERGENCY STOP")
+            elif cmd == "vo_reset":
+                self.camera.vo_total_distance = 0.0
+                self.camera.vo_position_uncertainty = 0.0
+                self.camera.vo_dx = 0.0
+                self.camera.vo_dy = 0.0
+                self.camera.vo_dz = 0.0
+                self._emit_event(EventType.CMD_USER, 200, "VO origin reset (SET HOMEPOINT)")
             else:
                 self._emit_event(EventType.CMD_USER, 100, f"Custom: {cmd}")
             return True

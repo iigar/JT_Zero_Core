@@ -680,6 +680,9 @@ public:
     // Get current VO feature positions
     const VisualOdometry& vo() const { return vo_; }
     
+    // Reset VO origin to (0,0,0) — "Set Homepoint"
+    void reset_vo() { vo_.reset(); }
+    
     // Platform (auto-detected at startup, sets camera resolution)
     void set_platform(PlatformType type);
     PlatformType active_platform() const;

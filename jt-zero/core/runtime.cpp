@@ -203,6 +203,9 @@ bool Runtime::send_command(const char* cmd, float param1, float param2) {
     } else if (std::strcmp(cmd, "hold") == 0) {
         e.type = EventType::FLIGHT_HOLD;
         state_.flight_mode = FlightMode::HOVER;
+    } else if (std::strcmp(cmd, "vo_reset") == 0) {
+        camera_.reset_vo();
+        e.set_message("VO origin reset (SET HOMEPOINT)");
     }
     
     return event_engine_.emit(e);

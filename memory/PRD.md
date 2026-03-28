@@ -46,10 +46,12 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi (`git pull && ./update.sh`) — Pillow will now install into venv
-- Verify `[VO PyDetect] Pillow corner detector: N features` appears in logs during fallback
+- Deploy to Pi (`git pull && ./update.sh`) — Pillow installs into venv, SET HOMEPOINT available
+- Verify VO Fallback features + SET HOMEPOINT on hardware
+- VO Reset via MAVLink RC channel (COMMAND_LONG from ArduPilot/RC switch)
 
 ### P2 - Planned
+- 3D Trail visualization (store VO position history, render path in 3D View)
 - C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)
 - IP camera (RTSP) support
 - ARM NEON optimization for C++ core

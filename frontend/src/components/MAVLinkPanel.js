@@ -1,7 +1,25 @@
-import React from 'react';
-import { Radio, Send, Download, Link2, AlertCircle, Activity, Wifi, Cpu } from 'lucide-react';
+import React, { useState } from 'react';
+import { Radio, Send, Download, Link2, AlertCircle, Activity, Wifi, Cpu, Home } from 'lucide-react';
+import { apiCall } from '../hooks/useApi';
 
 function MAVLinkPanelInner({ mavlink }) {
+  const [homeResult, setHomeResult] = useState(null);
+  const [settingHome, setSettingHome] = useState(false);
+
+  async function handleSetHome() {
+    setSettingHome(true);
+    try {
+      const res = await apiCall('POST', '/api/command', {
+        command: 'vo_reset', param1: 0, param2: 0,
+      });
+      setHomeResult(res?.success ? 'ok' : 'fail');
+    } catch {
+      setHomeResult('fail');
+    }
+    setSettingHome(false);
+    setTimeout(() => setHomeResult(null), 3000);
+  }
+
   const stateColor = {
     CONNECTED: 'text-emerald-300',
     CONNECTING: 'text-amber-300 animate-pulse',
@@ -141,6 +159,28 @@ function MAVLinkPanelInner({ mavlink }) {
           </div>
         </div>
       )}
+
+      {/* SET HOMEPOINT */}
+      <div className="mt-3 border-t border-[#2D3A4E]/50 pt-3">
+        <button
+          onClick={handleSetHome}
+          disabled={settingHome}
+          data-testid="set-homepoint-btn"
+          className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-wider transition-all ${
+            homeResult === 'ok'
+              ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
+              : homeResult === 'fail'
+              ? 'bg-red-500/15 border border-red-500/40 text-red-400'
+              : 'bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+          } disabled:opacity-50`}
+        >
+          <Home className={`w-4 h-4 ${settingHome ? 'animate-pulse' : ''}`} />
+          {homeResult === 'ok' ? 'HOMEPOINT SET' : homeResult === 'fail' ? 'ERROR' : settingHome ? 'SETTING...' : 'SET HOMEPOINT'}
+        </button>
+        <p className="text-[8px] text-slate-600 mt-1 text-center">
+          Reset VO origin to (0,0,0) — current position becomes home
+        </p>
+      </div>
     </div>
   );
 }

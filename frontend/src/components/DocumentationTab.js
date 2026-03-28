@@ -9,14 +9,24 @@ const API_ENDPOINTS = [
   { method: 'GET', path: '/api/telemetry/history', desc: 'Telemetry history ring buffer' },
   { method: 'GET', path: '/api/threads', desc: 'Thread statistics (8 threads)' },
   { method: 'GET', path: '/api/engines', desc: 'Engine statistics (event, reflex, rule, memory, output)' },
-  { method: 'GET', path: '/api/camera', desc: 'Camera pipeline + Visual Odometry' },
-  { method: 'GET', path: '/api/camera/frame', desc: 'Latest camera frame as PNG image' },
-  { method: 'GET', path: '/api/mavlink', desc: 'MAVLink connection state' },
+  { method: 'GET', path: '/api/camera', desc: 'Camera pipeline + Visual Odometry stats' },
+  { method: 'GET', path: '/api/camera/frame', desc: 'Latest primary camera frame as PNG' },
+  { method: 'GET', path: '/api/camera/features', desc: 'Current VO feature positions [{x,y,tracked,response}]' },
+  { method: 'GET', path: '/api/cameras', desc: 'All camera slots (PRIMARY CSI + SECONDARY USB Thermal)' },
+  { method: 'GET', path: '/api/camera/secondary/stats', desc: 'USB thermal camera stats' },
+  { method: 'GET', path: '/api/camera/secondary/frame', desc: 'Thermal camera frame (JPEG/PNG)' },
+  { method: 'POST', path: '/api/camera/secondary/capture', desc: 'Trigger thermal camera capture' },
+  { method: 'GET', path: '/api/vo/profiles', desc: 'Available VO mode profiles (Light/Balanced/Performance)' },
+  { method: 'POST', path: '/api/vo/profile/{id}', desc: 'Switch VO mode at runtime' },
+  { method: 'GET', path: '/api/mavlink', desc: 'MAVLink connection state + FC telemetry' },
   { method: 'GET', path: '/api/performance', desc: 'CPU, memory, latency metrics' },
+  { method: 'GET', path: '/api/diagnostics', desc: 'Hardware diagnostics (camera, I2C, MAVLink)' },
+  { method: 'POST', path: '/api/diagnostics/scan', desc: 'Run fresh hardware diagnostics scan' },
+  { method: 'GET', path: '/api/sensors', desc: 'Sensor modes (hardware/mavlink/simulation)' },
   { method: 'GET', path: '/api/simulator/config', desc: 'Current simulator parameters' },
   { method: 'POST', path: '/api/simulator/config', desc: 'Update simulator parameters' },
-  { method: 'POST', path: '/api/command', desc: 'Send command (arm, disarm, takeoff, land, rtl, emergency)' },
-  { method: 'WS', path: '/api/ws/telemetry', desc: 'Real-time telemetry stream (10Hz)' },
+  { method: 'POST', path: '/api/command', desc: 'Send command (arm, disarm, takeoff, land, rtl, hold, vo_reset)' },
+  { method: 'WS', path: '/api/ws/telemetry', desc: 'Real-time telemetry stream (10Hz) with camera, features, mavlink' },
   { method: 'WS', path: '/api/ws/events', desc: 'Event stream' },
 ];
 
@@ -33,28 +43,30 @@ const THREAD_MODEL = [
 
 const FILE_TREE = [
   { path: 'jt-zero/', type: 'dir', children: [
-    { path: 'include/jt_zero/', type: 'dir', desc: 'C++ headers' },
-    { path: 'core/', type: 'dir', desc: '5 engine implementations' },
-    { path: 'sensors/', type: 'dir', desc: 'Sensor modules' },
-    { path: 'camera/', type: 'dir', desc: 'Camera + VO pipeline' },
-    { path: 'mavlink/', type: 'dir', desc: 'MAVLink interface' },
+    { path: 'include/jt_zero/', type: 'dir', desc: 'C++ headers (camera.h, runtime.h)' },
+    { path: 'core/', type: 'dir', desc: '5 engine implementations + runtime' },
+    { path: 'sensors/', type: 'dir', desc: 'Sensor modules (IMU, baro, GPS)' },
+    { path: 'camera/', type: 'dir', desc: 'Camera pipeline + VO + VO Fallback' },
+    { path: 'mavlink/', type: 'dir', desc: 'MAVLink v2 interface + EKF3 integration' },
     { path: 'drivers/', type: 'dir', desc: 'I2C/SPI/UART + MPU6050/BMP280/GPS' },
-    { path: 'api/', type: 'dir', desc: 'pybind11 bindings' },
-    { path: 'simulator/', type: 'dir', desc: 'Python fallback' },
+    { path: 'api/', type: 'dir', desc: 'pybind11 bindings (python_bindings.cpp)' },
     { path: 'CMakeLists.txt', type: 'file', desc: 'Build system' },
-    { path: 'toolchain-pi-zero.cmake', type: 'file', desc: 'Cross-compilation' },
-    { path: 'DEPLOYMENT.md', type: 'file', desc: 'Deployment guide' },
-    { path: 'SESSION_LOG.txt', type: 'file', desc: 'Session log' },
   ]},
   { path: 'backend/', type: 'dir', children: [
-    { path: 'server.py', type: 'file', desc: 'FastAPI + WebSocket' },
-    { path: 'native_bridge.py', type: 'file', desc: 'pybind11 bridge' },
+    { path: 'server.py', type: 'file', desc: 'FastAPI + WebSocket + static frontend' },
+    { path: 'native_bridge.py', type: 'file', desc: 'C++ bridge + VO Fallback monitor + Pillow feature detector' },
     { path: 'simulator.py', type: 'file', desc: 'Python fallback simulator' },
+    { path: 'usb_camera.py', type: 'file', desc: 'V4L2 subprocess wrapper for USB thermal cam' },
+    { path: 'venv/', type: 'dir', desc: 'Python venv (Pillow, FastAPI, uvicorn)' },
+    { path: 'static/', type: 'dir', desc: 'Pre-built React frontend (served by FastAPI)' },
   ]},
   { path: 'frontend/src/', type: 'dir', children: [
-    { path: 'App.js', type: 'file', desc: 'Tab navigation' },
-    { path: 'components/', type: 'dir', desc: '14 React panels' },
+    { path: 'App.js', type: 'file', desc: 'Tab navigation + layout' },
+    { path: 'components/', type: 'dir', desc: '15 React panels (Camera, Thermal, MAVLink, etc.)' },
     { path: 'hooks/useApi.js', type: 'file', desc: 'WebSocket + REST hooks' },
+  ]},
+  { path: 'update.sh', type: 'file', children: [
+    { path: '', type: 'file', desc: 'Auto-update script (git pull, build C++, install deps, restart)' },
   ]},
 ];
 
@@ -81,8 +93,8 @@ const PI_INSTALL_STEPS = [
     content: 'Збірка на Pi займає 5-10 хв. Жовті warning — нормально, головне немає error.',
     cmd: 'cd ~/jt-zero/jt-zero && rm -rf build && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4' },
   { step: 8, title: 'Копіювання модуля + Python',
-    content: 'Скопіюйте .so в backend, створіть venv та встановіть FastAPI.',
-    cmd: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/ && cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets' },
+    content: 'Скопіюйте .so в backend, створіть venv та встановіть FastAPI + Pillow (для VO Fallback).',
+    cmd: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/ && cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets Pillow' },
   { step: 9, title: 'Перевірка модуля',
     content: 'Якщо бачите OK — C++ рантайм працює. Якщо помилка — система використає Python-симулятор.',
     cmd: 'python3 -c "import jtzero_native; print(\'OK\')"' },
@@ -96,12 +108,13 @@ const PI_INSTALL_STEPS = [
 
 const HARDWARE_REQS = [
   { item: 'Raspberry Pi Zero 2 W', status: 'required', note: 'Also compatible: Pi 3B+, Pi 4, Pi 5' },
-  { item: 'MPU6050 IMU', status: 'optional', note: 'I2C address 0x68. Falls back to simulation.' },
-  { item: 'BMP280 Barometer', status: 'optional', note: 'I2C address 0x76. Falls back to simulation.' },
-  { item: 'GPS Module (NMEA)', status: 'optional', note: 'UART /dev/ttyS0 @ 9600 baud' },
-  { item: 'Rangefinder (TFmini)', status: 'optional', note: 'I2C or UART' },
-  { item: 'Optical Flow (PMW3901)', status: 'optional', note: 'SPI' },
-  { item: 'Pi Camera v2/v3', status: 'optional', note: 'CSI. Falls back to simulated camera.' },
+  { item: 'Pi Camera v2/v3 (CSI)', status: 'required', note: 'Primary VO camera. Auto-detected (8 known sensors + GENERIC fallback)' },
+  { item: 'USB Thermal Camera', status: 'optional', note: 'Secondary camera for VO Fallback in darkness. Via AV-to-USB converter (MS210x)' },
+  { item: 'Flight Controller (FC)', status: 'required', note: 'ArduPilot-compatible. Matek H743 recommended. MAVLink2 via UART' },
+  { item: 'MPU6050 IMU', status: 'optional', note: 'I2C 0x68. Falls back to MAVLink IMU from FC' },
+  { item: 'BMP280 Barometer', status: 'optional', note: 'I2C 0x76. Falls back to MAVLink baro from FC' },
+  { item: 'GPS Module (NMEA)', status: 'optional', note: 'UART /dev/ttyS0 @ 9600 baud. FC GPS used if not connected' },
+  { item: 'RC Transmitter', status: 'required', note: 'Safety: manual override via STABILIZE mode switch' },
 ];
 
 export default function DocumentationTab() {
@@ -111,6 +124,7 @@ export default function DocumentationTab() {
     { id: 'quickstart', label: 'Quick Start', icon: Zap },
     { id: 'install', label: 'Pi Zero Install', icon: Download },
     { id: 'camera', label: 'Camera Setup', icon: Camera },
+    { id: 'vo_fallback', label: 'VO Fallback', icon: RefreshCw },
     { id: 'fc', label: 'Flight Controller', icon: ExternalLink },
     { id: 'wiring', label: 'Wiring / GPIO', icon: Terminal },
     { id: 'api', label: 'API Reference', icon: Server },
@@ -145,6 +159,7 @@ export default function DocumentationTab() {
         {section === 'quickstart' && <QuickStartSection />}
         {section === 'install' && <InstallSection />}
         {section === 'camera' && <CameraSetupSection />}
+        {section === 'vo_fallback' && <VOFallbackSection />}
         {section === 'fc' && <FCSection />}
         {section === 'wiring' && <WiringSection />}
         {section === 'api' && <APISection />}
@@ -525,6 +540,133 @@ v4l2-ctl --list-devices # Детальна інформація
   );
 }
 
+
+
+function VOFallbackSection() {
+  return (
+    <div className="max-w-3xl space-y-4" data-testid="vo-fallback-section">
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
+        VO Fallback — USB Thermal Camera
+      </h2>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        Коли основна CSI камера втрачає можливість трекінгу (повна темрява, туман, закрита лінза),
+        JT-Zero автоматично перемикається на USB термальну камеру для Visual Odometry.
+      </p>
+
+      {/* How it works */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-3">
+        <h4 className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Як працює</h4>
+        <div className="space-y-2">
+          {[
+            { step: '1', title: 'Моніторинг яскравості', desc: 'Кожні 0.1с система перевіряє середню яскравість кадру CSI камери (rolling average, 10 samples).' },
+            { step: '2', title: 'Тригер: темрява', desc: 'Якщо avg_brightness < 20 протягом 0.8с — CSI камера вважається "сліпою". Confidence НЕ використовується (FAST детектор трекає шум у темряві).' },
+            { step: '3', title: 'Перемикання на USB', desc: 'Python захоплює MJPEG з USB камери → Pillow конвертує в grayscale 320x240 → inject_frame() передає в C++ VO pipeline.' },
+            { step: '4', title: 'Детекція фіч', desc: 'Pillow Sobel corner detector знаходить реальні кути/краї на термальному зображенні для візуалізації на Dashboard.' },
+            { step: '5', title: 'Відновлення CSI', desc: 'Кожні 3с система перевіряє CSI зондом. Якщо яскравість повернулась — автоматичне перемикання назад (з 5с cooldown).' },
+          ].map(({ step, title, desc }) => (
+            <div key={step} className="flex gap-3">
+              <div className="w-5 h-5 shrink-0 flex items-center justify-center rounded-full bg-[#00F0FF]/10 text-[#00F0FF] text-[9px] font-bold">{step}</div>
+              <div>
+                <span className="text-[10px] text-slate-200 font-bold">{title}</span>
+                <p className="text-[9px] text-slate-500 mt-0.5">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Architecture diagram */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">Архітектура (Hybrid Python/C++)</h4>
+        <pre className="text-[8px] font-mono text-slate-400 leading-relaxed">{
+`  USB Thermal Camera (MJPEG ~5fps)
+       │
+       ▼
+  usb_camera.py ─── v4l2-ctl subprocess (batch capture)
+       │
+       ▼
+  native_bridge.py ─── Pillow: JPEG → grayscale → 320x240
+       │                    │
+       │               Pillow Sobel corner detector
+       │                    │
+       │               Python features → /api/camera/features
+       ▼
+  C++ inject_frame() ─── VO pipeline (FAST + LK + Kalman)
+       │
+       ▼
+  MAVLink VISION_POSITION_ESTIMATE → ArduPilot EKF3`
+        }</pre>
+      </div>
+
+      {/* SET HOMEPOINT */}
+      <div className="bg-[#0A0C10] border border-amber-500/20 rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">SET HOMEPOINT (VO Reset)</h4>
+        <p className="text-[9px] text-slate-400">
+          Кнопка <span className="text-amber-400 font-bold">SET HOMEPOINT</span> на вкладці MAVLink скидає VO позицію на (0,0,0).
+          Поточне місце стає "домом". Це корисно перед зльотом або після переміщення дрона.
+        </p>
+        <code className="text-[9px] text-cyan-400 font-mono block bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50">
+          {`curl -X POST http://jtzero.local:8001/api/command -H "Content-Type: application/json" -d '{"command":"vo_reset"}'`}
+        </code>
+      </div>
+
+      {/* Configuration */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">Параметри</h4>
+        <div className="space-y-0.5">
+          {[
+            { param: 'BRIGHT_DROP', value: '20', desc: 'Тригер: avg brightness нижче цього = темрява' },
+            { param: 'WINDOW_SIZE', value: '10', desc: 'Кількість samples для rolling average (1с при 10Hz)' },
+            { param: 'MIN_SAMPLES', value: '8', desc: 'Мінімум samples перед прийняттям рішення' },
+            { param: 'MIN_FALLBACK_S', value: '3', desc: 'Мінімальний час у fallback перед перевіркою CSI' },
+            { param: 'COOLDOWN_S', value: '5', desc: 'Cooldown після повернення на CSI' },
+            { param: 'INJECT_W x H', value: '320x240', desc: 'Роздільність кадру для VO injection' },
+          ].map(({ param, value, desc }) => (
+            <div key={param} className="flex items-center gap-2 py-0.5">
+              <code className="text-[9px] text-cyan-400 font-mono w-32">{param}</code>
+              <span className="text-[9px] text-amber-400 font-bold w-14">{value}</span>
+              <span className="text-[8px] text-slate-500">{desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* USB Thermal Setup */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">USB Thermal Camera Setup</h4>
+        <p className="text-[9px] text-slate-400">
+          JT-Zero автоматично знаходить USB камеру через <code className="text-cyan-400">v4l2-ctl --list-devices</code>.
+          Працює з AV-to-USB конвертерами (MS210x, EasyCap) та Caddx Thermal.
+        </p>
+        <code className="text-[9px] text-cyan-400 font-mono block bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`# Перевірити USB камеру:
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video1 --list-formats-ext
+
+# Тест MJPEG:
+v4l2-ctl -d /dev/video1 --set-fmt-video=width=640,height=480,pixelformat=MJPG \\
+  --stream-mmap --stream-count=1 --stream-to=test.jpg
+ls -la test.jpg  # має бути >0 bytes`
+        }</code>
+      </div>
+
+      {/* Dependencies */}
+      <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm">
+        <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mb-1">Python залежності (venv)</p>
+        <p className="text-[9px] text-slate-400">
+          Сервіс працює в <span className="text-amber-400 font-bold">venv</span> (<code className="text-cyan-400">backend/venv/</code>).
+          Pillow ОБОВ'ЯЗКОВО встановлювати в venv, не в системний Python:
+        </p>
+        <code className="text-[9px] text-cyan-400 font-mono block mt-1 bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50">
+          ~/jt-zero/backend/venv/bin/pip install Pillow
+        </code>
+        <p className="text-[8px] text-slate-600 mt-1">
+          update.sh робить це автоматично. <code className="text-cyan-400">apt install python3-pil</code> НЕ працює для venv.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 
 const GPIO_WIRING = [

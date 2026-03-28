@@ -1,6 +1,22 @@
 # JT-Zero Changelog
 
-## 2026-03-28 — Silent Feature Detection Crash Fix (P0)
+## 2026-03-28 — SET HOMEPOINT + DOCS Update
+
+### SET HOMEPOINT (VO Reset)
+- **C++ `camera.h`**: Added `reset_vo()` method on `CameraPipeline` (calls `vo_.reset()`)
+- **C++ `runtime.cpp`**: Added `"vo_reset"` command handling in `send_command()` — resets position to (0,0,0), clears distance, Kalman state, hover state
+- **Python `simulator.py`**: Added `"vo_reset"` command handling — resets `vo_total_distance`, `vo_position_uncertainty`, `vo_dx/dy/dz`
+- **MAVLinkPanel.js**: Added "SET HOMEPOINT" button with success/error visual feedback (green "HOMEPOINT SET" for 3s)
+- **API**: `POST /api/command {"command":"vo_reset"}` → resets VO origin
+
+### DOCS Tab Updated
+- Added **VO Fallback** section: architecture diagram, trigger logic, parameters, USB thermal setup, venv dependency note
+- Updated **API Reference**: added 10 missing endpoints (camera/features, cameras, secondary, vo/profiles, diagnostics, sensors)
+- Updated **File Structure**: added usb_camera.py, venv/, static/, update.sh
+- Updated **Hardware Requirements**: added USB Thermal, FC, RC Transmitter as components
+- Updated **Install Step 8**: added Pillow to venv setup
+- Updated command list: added `vo_reset`
+
 
 ### Root Cause: Pillow installed in SYSTEM Python, service runs in VENV
 - `update.sh` ran `apt install python3-pil` → installed into `/usr/lib/python3.13/`
