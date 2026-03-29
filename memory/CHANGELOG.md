@@ -1,11 +1,17 @@
 # JT-Zero Changelog
 
-## 2026-03-30 — MAVLink Thread Safety Fix (CRITICAL)
+## 2026-03-30 — MAVLink Thread Safety Fix + 3D YAW Wrap Fix (CRITICAL)
 
-### Bug Fix #24: handle_message() deadlock / YAW glitch
-- **Root cause**: `handle_message()` acquired `telem_lock_` spinlock but NEVER released it. Every MAVLink message permanently locked the atomic, causing `get_fc_telemetry()` to spin forever (deadlock). The 3D View received stale/corrupted float data → random YAW rotations.
-- **Fix**: Introduced RAII `ScopedSpinLock` struct in `mavlink_interface.h`. Destructor guarantees `telem_lock_.store(false, memory_order_release)` on ALL exit paths. Both `handle_message()` and `get_fc_telemetry()` now use `ScopedSpinLock guard(telem_lock_)`.
-- **Files**: `jt-zero/include/jt_zero/mavlink_interface.h`, `jt-zero/mavlink/mavlink_interface.cpp`
+### Bug Fix #24: handle_message() deadlock
+- `handle_message()` acquired `telem_lock_` spinlock but NEVER released it → deadlock → stale telemetry
+- Introduced RAII `ScopedSpinLock` struct — both `handle_message()` and `get_fc_telemetry()` now use it
+- Files: `jt-zero/include/jt_zero/mavlink_interface.h`, `jt-zero/mavlink/mavlink_interface.cpp`
+
+### Bug Fix #25: 3D View YAW full-spin on 360→0 wrap (ROOT CAUSE)
+- `Drone3DPanel.js` used naive lerp without angle normalization. Yaw crossing 360°→0° caused full 360° model spin
+- Fix: normalize yaw delta to [-PI, PI] before lerping — model always takes shortest path
+- Also fixed: `Feature` → `FeaturePoint` in `camera.h` and `camera_pipeline.cpp` (compilation error)
+- Frontend rebuilt to `backend/static/` with `REACT_APP_BACKEND_URL=""`
 
 
 ## 2026-03-29 — Encrypted Flight Log + STATUSTEXT + NEON + MAVLink Diag

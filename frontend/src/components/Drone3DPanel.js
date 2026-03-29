@@ -12,11 +12,14 @@ function DroneModel({ roll, pitch, yaw, motors, altitude }) {
     if (groupRef.current) {
       const targetR = (roll || 0) * Math.PI / 180;
       const targetP = (pitch || 0) * Math.PI / 180;
-      const targetY = (yaw || 0) * Math.PI / 180;
+      const targetY = -(yaw || 0) * Math.PI / 180;
       // Smooth lerp (0.06 = gentle, no jitter)
       groupRef.current.rotation.z += (targetR - groupRef.current.rotation.z) * 0.06;
       groupRef.current.rotation.x += (targetP - groupRef.current.rotation.x) * 0.06;
-      groupRef.current.rotation.y += (-targetY - groupRef.current.rotation.y) * 0.06;
+      // Normalize yaw delta to [-PI, PI] — prevents full-spin on 360→0 wrap
+      let yawDelta = targetY - groupRef.current.rotation.y;
+      yawDelta -= Math.round(yawDelta / (2 * Math.PI)) * 2 * Math.PI;
+      groupRef.current.rotation.y += yawDelta * 0.06;
     }
     propRefs.forEach((ref, i) => {
       if (ref.current) {

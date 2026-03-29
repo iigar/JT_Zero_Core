@@ -15,6 +15,7 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - **Pre-built frontend**: REACT_APP_BACKEND_URL="" for Pi builds (relative URLs), preview URL for Emergent testing
 - **One camera at a time**: USB bus shared with WiFi, simultaneous VO overloads Pi Zero 2W CPU
 - **RAII Spinlock**: `ScopedSpinLock` struct for thread-safe `fc_telem_` access (MAVLink write thread + Sensor read thread)
+- **YAW angle normalization**: 3D View lerp normalizes delta to [-PI, PI] to prevent full-spin on 360→0 wrap
 
 ## What's Been Implemented
 - Full VO pipeline (FAST/Shi-Tomasi + LK + Kalman filter)
@@ -37,31 +38,17 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - MAVLink STATUSTEXT broadcasting for critical events
 - Encrypted Flight Logger (AES-256 Fernet, point cloud recording)
 - Thread-safe MAVLink telemetry via RAII ScopedSpinLock (Bug Fix #24)
+- 3D View YAW angle normalization — prevents full-spin on 360→0 wrap (Bug Fix #25)
 - Confidence-based covariance reporting to ArduPilot EKF
 - Python simulator with simulated features for dev/preview testing
 - Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md)
 
-### API Endpoints
-- `GET /api/cameras` — List all camera slots (PRIMARY, SECONDARY)
-- `GET /api/camera` — Primary (VO) camera stats
-- `GET /api/camera/frame` — Primary camera frame (PNG)
-- `GET /api/camera/features` — Current VO feature positions
-- `GET /api/camera/secondary/stats` — Thermal camera stats
-- `POST /api/camera/secondary/capture` — Trigger on-demand thermal capture
-- `GET /api/camera/secondary/frame` — Thermal camera frame (JPEG or PNG)
-- `GET /api/mavlink` — MAVLink stats + RC channels + FC telemetry
-- `GET /api/vo/trail` — VO position trail for 3D visualization
-- `GET /api/logs/status` — Flight log status
-- `POST /api/logs/start` / `POST /api/logs/stop` — Flight log recording
-- `WS /api/ws/telemetry` — WebSocket streaming (10Hz)
-
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — all features: Flight Log, STATUSTEXT, NEON, MAVLink Diag, Thread Safety fix
+- Deploy to Pi: `git pull && ./update.sh` — verify YAW glitch resolved with real FC
 - Set flight log password via Dashboard → start recording → fly → stop → download & analyze
 - Test STATUSTEXT visibility in Mission Planner during fallback events
-- Verify YAW glitch is resolved with real FC (thread-safety fix #24)
 
 ### P2 - Planned
 - C++ native MJPEG support for USBCamera
