@@ -932,6 +932,9 @@ static inline int16_t  read_i16(const uint8_t* p) { int16_t v; std::memcpy(&v, p
 static inline uint64_t read_u64(const uint8_t* p) { uint64_t v; std::memcpy(&v, p, 8); return v; }
 
 void MAVLinkInterface::handle_message(uint32_t msg_id, const uint8_t* p, uint8_t len, uint8_t sysid) {
+    // Acquire spinlock — prevents get_fc_telemetry() from reading partial data
+    while (telem_lock_.exchange(true, std::memory_order_acquire)) {}
+    
     fc_system_id_ = sysid;
     fc_telem_.last_update_us = now_us();
     fc_telem_.msg_count++;
