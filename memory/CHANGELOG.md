@@ -1,6 +1,31 @@
 # JT-Zero Changelog
 
-## 2026-03-28 — RC VO Reset + 3D Trail
+## 2026-03-29 — ARM NEON + MAVLink Diagnostics
+
+### ARM NEON SIMD Optimization
+- Created `camera/neon_accel.h` — header-only NEON accelerated functions with scalar fallbacks
+- **`frame_brightness()`**: NEON `vpaddlq_u8` / `vpadalq_u16` — processes 16 pixels/iteration (~8x scalar)
+- **`sobel_row()`**: Batch Sobel 3x3 gradients — 8 pixels/iteration via `vmovl_u8` + widened arithmetic (~4x)
+- **`structure_tensor_5x5()`**: NEON-ready structure tensor for Shi-Tomasi corner detection
+- **`sad_8x8()`**: Sum of Absolute Differences via `vabdl_u8` for patch matching
+- **`row_sum()`**: Fast uint8 row summation for sliding window brightness
+- Integrated into `camera_pipeline.cpp`: frame brightness + CSI probe brightness + Shi-Tomasi detector
+- Auto-detects `__ARM_NEON` — uses scalar fallback on x86/x64 development builds
+
+### MAVLink Diagnostics Panel
+- New `MAVLinkDiagPanel.js` replaces `MAVLinkPanel` on MAVLink tab
+- **RC Channels**: Visual PWM bars for up to 18 channels with color coding (red < 1100, amber > 1900, cyan normal)
+- **FC Telemetry**: Attitude/IMU/Baro/GPS/HUD/Status validity indicators, battery voltage/remaining, GPS fix/sats
+- **Message Types**: Collapsible list of detected MAVLink message IDs
+- **Link Stats**: HB count, RX/TX bytes, CRC errors, parse errors, msg/s rate
+
+### RC_CHANNELS Parsing (C++)
+- Added `rc_channels[18]`, `rc_chancount`, `rc_rssi` to `FCTelemetry` struct
+- Parsing RC_CHANNELS (msg 65) in `mavlink_interface.cpp`
+- Exposed via Python bindings in `get_mavlink()` dict
+
+### DOCS Update
+- Added "Оновлення системи" (update.sh workflow) as primary block on Pi Zero Install page
 
 ### RC-based SET HOMEPOINT
 - C++ RC_CHANNELS (msg 65) parsing added to `mavlink_interface.cpp` — 18 channels + rssi

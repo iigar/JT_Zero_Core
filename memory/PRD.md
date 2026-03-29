@@ -46,13 +46,12 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — RC VO Reset + 3D Trail + Pillow venv fix + Recovery fix
-- Test RC channel 8 switch for SET HOMEPOINT on transmitter
-- Verify 3D trail renders real VO movement on hardware
+- Deploy to Pi: `git pull && ./update.sh` — NEON active on ARM, MAVLink diag with RC, 3D trail
+- Test NEON performance impact (compare frame times before/after)
 
 ### P2 - Planned
-- 3D Trail: make trail scale configurable, add color gradient by time
 - C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)
+- IP camera RTSP support
 - IP camera (RTSP) support
 - ARM NEON optimization for C++ core
 - Autonomous Mission Planning UI

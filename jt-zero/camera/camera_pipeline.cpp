@@ -10,6 +10,7 @@
  */
 
 #include "jt_zero/camera.h"
+#include "neon_accel.h"
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -507,26 +508,12 @@ VOResult VisualOdometry::process(const FrameBuffer& frame, float ground_distance
                                 FeaturePoint* features, size_t max_features) -> size_t {
         const int spacing = 8;
         const int border = 6;
-        const int hw = 2;  // half window for structure tensor (5x5)
-        const float min_eigen = 100.0f;  // above noise floor (~50 for raw thermal)
+        const float min_eigen = 100.0f;
         size_t count = 0;
         for (int y = border; y < h - border && count < max_features; y += spacing) {
             for (int x = border; x < w - border && count < max_features; x += spacing) {
-                float sxx = 0, syy = 0, sxy = 0;
-                for (int dy = -hw; dy <= hw; ++dy) {
-                    for (int dx = -hw; dx <= hw; ++dx) {
-                        int px = x + dx, py = y + dy;
-                        // Sobel 3x3 gradients (same as LK tracker)
-                        const uint8_t* r0 = img + (py-1)*w + px;
-                        const uint8_t* r1 = img + py*w + px;
-                        const uint8_t* r2 = img + (py+1)*w + px;
-                        float gx = static_cast<float>(-r0[-1]+r0[1] -2*r1[-1]+2*r1[1] -r2[-1]+r2[1]);
-                        float gy = static_cast<float>(-r0[-1]-2*r0[0]-r0[1] +r2[-1]+2*r2[0]+r2[1]);
-                        sxx += gx * gx;
-                        syy += gy * gy;
-                        sxy += gx * gy;
-                    }
-                }
+                float sxx, syy, sxy;
+                neon::structure_tensor_5x5(img, x, y, w, sxx, syy, sxy);
                 float trace = sxx + syy;
                 float det = sxx * syy - sxy * sxy;
                 float disc = trace * trace - 4.0f * det;
@@ -958,14 +945,9 @@ bool CameraPipeline::tick(float ground_distance) {
             
             FrameBuffer probe_frame;
             if (primary_camera_->capture(probe_frame)) {
-                // Brightness-only probe: reliable indicator of camera usability
-                // FAST detector removed — gives false positives on sensor noise
-                uint32_t brightness_sum = 0;
+                // Brightness-only probe using NEON-accelerated mean
                 int pixel_count = probe_frame.info.width * probe_frame.info.height;
-                for (int i = 0; i < pixel_count; i++) {
-                    brightness_sum += probe_frame.data[i];
-                }
-                float avg_brightness = static_cast<float>(brightness_sum) / pixel_count;
+                float avg_brightness = neon::frame_brightness(probe_frame.data, static_cast<size_t>(pixel_count));
                 
                 // Normalize: brightness 150 = quality 1.0, brightness < 20 = quality 0
                 float probe_quality = 0;
@@ -1002,13 +984,9 @@ bool CameraPipeline::tick(float ground_distance) {
         features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
     }
     
-    // Compute frame brightness (for fallback trigger — dark camera detection)
-    uint32_t brightness_sum = 0;
+    // Compute frame brightness using NEON-accelerated sum (for fallback trigger)
     int pixel_count = current_frame_.info.width * current_frame_.info.height;
-    for (int i = 0; i < pixel_count; i++) {
-        brightness_sum += current_frame_.data[i];
-    }
-    frame_brightness_ = static_cast<float>(brightness_sum) / pixel_count;
+    frame_brightness_ = neon::frame_brightness(current_frame_.data, static_cast<size_t>(pixel_count));
     
     // Monitor confidence for fallback trigger
     if (vo_result_.confidence < fallback_config_.conf_drop_thresh) {
