@@ -458,6 +458,7 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 21. **VO Fallback recovery stuck** — Recovery used only `probe_conf >= 0.40`, but in dim environments (brightness ~41) CSI confidence hovers at exactly 0.40, sometimes passing, sometimes not. User had to increase room brightness to trigger recovery. Fix: added brightness-based recovery path (`frame_brightness >= 30`), lowered confidence threshold to 0.20 as secondary. Recovery now uses whichever triggers first. `native_bridge.py`.
 22. **Pillow Image.Resampling.NEAREST** — Older apt-installed Pillow versions may not have `Image.Resampling` enum (introduced in Pillow 9.1). Added `try: Image.Resampling.NEAREST except AttributeError: Image.NEAREST` fallback in `_decode_jpeg_to_gray()`. `native_bridge.py`.
 23. **`/api/camera/features` JSON error** — Endpoint could raise unhandled exception → FastAPI returns HTML 500 error page → `curl` gets JSONDecodeError. Fix: wrapped in `try/except`, always returns `[]` on error. `server.py`.
+24. **MAVLink telemetry thread-safety deadlock (CRITICAL)** — `handle_message()` acquired `telem_lock_` spinlock via `telem_lock_.exchange(true)` but NEVER released it. Every call permanently locked the spinlock, causing `get_fc_telemetry()` (called from the Sensor/API thread) to spin forever → deadlock → YAW/roll/pitch data never updates → 3D View shows random cached values interpreted as wild rotations. Fix: introduced RAII `ScopedSpinLock` struct (destructor calls `telem_lock_.store(false, memory_order_release)`). Both `handle_message()` and `get_fc_telemetry()` now use `ScopedSpinLock` — lock is guaranteed released on ALL exit paths (normal return, break, early return). `mavlink_interface.h` (ScopedSpinLock struct + get_fc_telemetry), `mavlink_interface.cpp:handle_message()`.
 
 ---
 
@@ -645,6 +646,7 @@ JT-Zero автоматично визначить будь-яку камеру �
 - **System Constraints updated:** CPU ≤55% (alert 70%), RAM ≤180MB (alert 250MB) — justified by Pi Zero 2W thermal throttling analysis
 - **DOCS update:** Added update.sh workflow as primary Install section, VO Fallback section, updated API Reference (+15 endpoints), Hardware, File Structure
 - Test reports: /app/test_reports/iteration_1-16.json
+- **MAVLink thread-safety fix (CRITICAL):** `handle_message()` had spinlock acquire but no release → deadlock → stale telemetry → YAW glitch in 3D View. Introduced RAII `ScopedSpinLock` struct — both `handle_message()` and `get_fc_telemetry()` now use it. Lock guaranteed released on all exit paths.
 
 ---
 

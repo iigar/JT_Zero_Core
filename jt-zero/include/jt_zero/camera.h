@@ -730,7 +730,7 @@ public:
     const VOFallbackConfig& fallback_config() const { return fallback_config_; }
     
     // Thread-safe feature snapshot access (Python reads, T6 writes)
-    const Feature* features_snapshot() const { return features_snapshot_; }
+    const FeaturePoint* features_snapshot() const { return features_snapshot_; }
     uint32_t features_snapshot_count() const { 
         return features_snapshot_count_.load(std::memory_order_acquire); 
     }
@@ -792,7 +792,7 @@ private:
     float frame_brightness_{0};  // average pixel brightness 0-255
     
     // ── Thread-safe feature snapshot (T6 writes with release, Python reads with acquire) ──
-    Feature          features_snapshot_[MAX_FEATURES];
+    FeaturePoint     features_snapshot_[MAX_FEATURES];
     std::atomic<uint32_t> features_snapshot_count_{0};
 };
 

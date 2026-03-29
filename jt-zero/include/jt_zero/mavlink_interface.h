@@ -216,6 +216,20 @@ struct FCTelemetry {
     bool     rc_valid{false};
 };
 
+// ─── RAII Spinlock Guard ─────────────────────────────────
+
+struct ScopedSpinLock {
+    std::atomic<bool>& lock_;
+    ScopedSpinLock(std::atomic<bool>& lock) : lock_(lock) {
+        while (lock_.exchange(true, std::memory_order_acquire)) {}
+    }
+    ~ScopedSpinLock() {
+        lock_.store(false, std::memory_order_release);
+    }
+    ScopedSpinLock(const ScopedSpinLock&) = delete;
+    ScopedSpinLock& operator=(const ScopedSpinLock&) = delete;
+};
+
 // ─── MAVLink Interface ──────────────────────────────────
 
 class MAVLinkInterface {
@@ -258,13 +272,10 @@ public:
     MAVLinkStats get_stats() const;
     bool is_connected() const { return state_ == MAVLinkState::CONNECTED; }
     
-    // Parsed FC telemetry (thread-safe read)
+    // Parsed FC telemetry (thread-safe read via RAII spinlock)
     FCTelemetry get_fc_telemetry() const {
-        // Spinlock: prevent reading partially-written fc_telem_ from MAVLink thread
-        while (telem_lock_.exchange(true, std::memory_order_acquire)) {}
-        FCTelemetry copy = fc_telem_;
-        telem_lock_.store(false, std::memory_order_release);
-        return copy;
+        ScopedSpinLock guard(telem_lock_);
+        return fc_telem_;
     }
     bool has_fc_data() const { return fc_telem_.heartbeat_valid; }
     

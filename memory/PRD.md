@@ -14,6 +14,7 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - **Hybrid VO Fallback**: Python reads MJPEG from USB → decodes → injects into C++ pipeline (because C++ USBCamera YUYV returns zeros on MS210x hardware)
 - **Pre-built frontend**: REACT_APP_BACKEND_URL="" for Pi builds (relative URLs), preview URL for Emergent testing
 - **One camera at a time**: USB bus shared with WiFi, simultaneous VO overloads Pi Zero 2W CPU
+- **RAII Spinlock**: `ScopedSpinLock` struct for thread-safe `fc_telem_` access (MAVLink write thread + Sensor read thread)
 
 ## What's Been Implemented
 - Full VO pipeline (FAST/Shi-Tomasi + LK + Kalman filter)
@@ -29,9 +30,16 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - ThermalPanel feature overlay (dual-trigger rendering, PTS debug counter)
 - Dashboard VO source indicators (sidebar badge, alert, stats bars)
 - GitHub Actions CI/CD for frontend builds
-- Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md)
+- SET HOMEPOINT: VO reset via Commands panel, RC channel, API
+- 3D Trail visualization in Dashboard
+- ARM NEON SIMD acceleration (frame brightness, Sobel, Shi-Tomasi, SAD)
+- MAVLink Diagnostics Panel (RC Channels, FC Telemetry, Messages)
+- MAVLink STATUSTEXT broadcasting for critical events
+- Encrypted Flight Logger (AES-256 Fernet, point cloud recording)
+- Thread-safe MAVLink telemetry via RAII ScopedSpinLock (Bug Fix #24)
 - Confidence-based covariance reporting to ArduPilot EKF
 - Python simulator with simulated features for dev/preview testing
+- Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md)
 
 ### API Endpoints
 - `GET /api/cameras` — List all camera slots (PRIMARY, SECONDARY)
@@ -41,26 +49,27 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - `GET /api/camera/secondary/stats` — Thermal camera stats
 - `POST /api/camera/secondary/capture` — Trigger on-demand thermal capture
 - `GET /api/camera/secondary/frame` — Thermal camera frame (JPEG or PNG)
-- `WS /api/ws/telemetry` — WebSocket streaming (10Hz) with state, camera, features, mavlink
+- `GET /api/mavlink` — MAVLink stats + RC channels + FC telemetry
+- `GET /api/vo/trail` — VO position trail for 3D visualization
+- `GET /api/logs/status` — Flight log status
+- `POST /api/logs/start` / `POST /api/logs/stop` — Flight log recording
+- `WS /api/ws/telemetry` — WebSocket streaming (10Hz)
 
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — all features: Flight Log, STATUSTEXT, NEON, MAVLink Diag
+- Deploy to Pi: `git pull && ./update.sh` — all features: Flight Log, STATUSTEXT, NEON, MAVLink Diag, Thread Safety fix
 - Set flight log password via Dashboard → start recording → fly → stop → download & analyze
 - Test STATUSTEXT visibility in Mission Planner during fallback events
+- Verify YAW glitch is resolved with real FC (thread-safety fix #24)
 
 ### P2 - Planned
-- GPIO LED status indicator (green=VO OK, yellow=fallback, red=error)
-- 3D flight replay from encrypted logs (load .jtzlog → animate trail + point cloud in 3D View)
 - C++ native MJPEG support for USBCamera
-- IP camera RTSP support
 - IP camera (RTSP) support
-- ARM NEON optimization for C++ core
 - Autonomous Mission Planning UI
 - Focal length calibration for USB thermal cameras
 
 ### P3 - Future
-- MAVLink diagnostics page in React Dashboard
 - Sensor fusion (dual-camera VO simultaneously)
 - CSI camera testing with Sobel/bilinear improvements
+- 3D flight replay from encrypted logs

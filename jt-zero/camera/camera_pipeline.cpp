@@ -933,7 +933,7 @@ bool CameraPipeline::tick(float ground_distance) {
             // features_snapshot_ data is visible when count is read with acquire)
             size_t fc = vo_.feature_count();
             if (fc > MAX_FEATURES) fc = MAX_FEATURES;
-            std::memcpy(features_snapshot_, vo_.features(), fc * sizeof(Feature));
+            std::memcpy(features_snapshot_, vo_.features().data(), fc * sizeof(FeaturePoint));
             features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
         }
         
@@ -980,7 +980,7 @@ bool CameraPipeline::tick(float ground_distance) {
     {
         size_t fc = vo_.feature_count();
         if (fc > MAX_FEATURES) fc = MAX_FEATURES;
-        std::memcpy(features_snapshot_, vo_.features(), fc * sizeof(Feature));
+        std::memcpy(features_snapshot_, vo_.features().data(), fc * sizeof(FeaturePoint));
         features_snapshot_count_.store(static_cast<uint32_t>(fc), std::memory_order_release);
     }
     

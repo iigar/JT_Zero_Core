@@ -1,5 +1,13 @@
 # JT-Zero Changelog
 
+## 2026-03-30 — MAVLink Thread Safety Fix (CRITICAL)
+
+### Bug Fix #24: handle_message() deadlock / YAW glitch
+- **Root cause**: `handle_message()` acquired `telem_lock_` spinlock but NEVER released it. Every MAVLink message permanently locked the atomic, causing `get_fc_telemetry()` to spin forever (deadlock). The 3D View received stale/corrupted float data → random YAW rotations.
+- **Fix**: Introduced RAII `ScopedSpinLock` struct in `mavlink_interface.h`. Destructor guarantees `telem_lock_.store(false, memory_order_release)` on ALL exit paths. Both `handle_message()` and `get_fc_telemetry()` now use `ScopedSpinLock guard(telem_lock_)`.
+- **Files**: `jt-zero/include/jt_zero/mavlink_interface.h`, `jt-zero/mavlink/mavlink_interface.cpp`
+
+
 ## 2026-03-29 — Encrypted Flight Log + STATUSTEXT + NEON + MAVLink Diag
 
 ### Encrypted Flight Log
