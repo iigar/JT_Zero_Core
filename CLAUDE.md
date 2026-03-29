@@ -1,5 +1,14 @@
 # CLAUDE.md — JT-Zero Runtime Technical Reference
 
+> ## MANDATORY RULES FOR ALL AGENTS
+> 1. **User language: Ukrainian.** Always respond in Ukrainian.
+> 2. **Bug fixes → document here.** Every bug fix MUST be appended to "Key Bug Fixes" section with: root cause, WHY it failed, WHAT was changed, file:line. Format: `N. **Title** — explanation.` Do NOT write vague descriptions like "fixed bug". Write exactly what was wrong and why the fix works.
+> 3. **Frontend build rule:** `export REACT_APP_BACKEND_URL="" && yarn build`. If built with Emergent Preview URL, the Pi dashboard will break.
+> 4. **Venv:** Service runs via `backend/venv/bin/uvicorn`. Python packages MUST be installed into venv (`venv/bin/pip install`), NOT system Python. `apt install python3-*` does NOT work for the service.
+> 5. **No numpy.** Too heavy for Pi Zero. Use Pillow or standard library only.
+> 6. **Update PRD.md + CHANGELOG.md** on every finish. Update CLAUDE.md on significant changes.
+> 7. **Hardware testing:** Code in Emergent hits the simulator only. Real bugs only appear on the user's physical Pi. Ask for `journalctl -u jtzero` logs when debugging hardware issues.
+
 ## Project Overview
 JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspberry Pi Zero 2 W.
 
@@ -423,6 +432,9 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 
 ## Key Bug Fixes (chronological)
 
+> **INSTRUCTION FOR ALL AGENTS:** Every bug fix MUST be documented here using this format:
+> `N. **Short title** — Root cause explanation. What was wrong, WHY it was wrong, and what was changed. Include file:line where applicable. Do NOT write "fixed bug" — write what the bug was and why the fix works.`
+
 1. **VO displacement = 0** — Was using median pixel shift as displacement. Now: `displacement = pixel_shift * (ground_distance / focal_length)`
 2. **MemoryPool race** — Replaced mutex-based pool with lock-free CAS free-list (O(1))
 3. **FAST threshold overflow** — `int t = threshold_` prevents uint8_t subtraction underflow
@@ -438,6 +450,14 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 13. **MAVLink auto-baud (CRITICAL)** — Old STX-counting method gave false positives (random bytes contain 0xFD/0xFE by chance). Replaced with full CRC-validated frame detection during probing. Only known messages (with CRC extra) count.
 14. **MAVLink v2 zero truncation** — Heartbeat handler min length 7→5. MAVLink v2 trims trailing zeros, so heartbeats with base_mode=0 had payload len<7 and were silently dropped.
 15. **MAVLink v2 signing** — Parser now detects incompat_flags bit 0, adds 13-byte signature to frame length. Without this, signed frames shifted buffer alignment and corrupted all subsequent parsing.
+16. **USB thermal stream freezing** — MS210x AV-to-USB capture card hangs when `subprocess.Popen` holds the device open continuously. Replaced with sequential batch capture: open → capture N frames → close → sleep → repeat. Each batch is a fresh `v4l2-ctl` subprocess. `usb_camera.py`.
+17. **Server frame cache stale** — `native_bridge.py` fetched thermal frames but never incremented `frame_count`, so `server.py` served the same cached frame indefinitely. Fix: increment `frame_count` on every successful fetch in `native_bridge.py`.
+18. **ThermalPanel canvas rendering** — Canvas-based JPEG rendering in `ThermalPanel.js` failed silently (createImageBitmap not reliable for all JPEG variants). Replaced with direct `<img>` tag + blob URL, matching `CameraPanel.js` pattern.
+19. **Pillow import failure on Pi (CRITICAL)** — `update.sh` installed Pillow via `apt install python3-pil` into system Python (`/usr/lib/python3.13/`), but JT-Zero service runs via `backend/venv/bin/uvicorn`. Venv cannot see system packages → `PIL=False FILTERS=False NUMPY=False` → all feature detectors disabled silently. Fix: `venv/bin/pip install Pillow` in `update.sh`. PEP 668 does NOT block pip inside venv.
+20. **Silent feature detection crash** — `native_bridge.py:461` had `except Exception: pass` around Pillow feature detection, numpy fallback, and raw detector. ALL errors were silently swallowed. Also `_decode_jpeg_to_gray()` returned `(b'', None)` on error without any log. Fix: replaced all silent catches with `sys.stderr.write(f"[VO PyDetect] error: {e}")` + one-time dedup flag.
+21. **VO Fallback recovery stuck** — Recovery used only `probe_conf >= 0.40`, but in dim environments (brightness ~41) CSI confidence hovers at exactly 0.40, sometimes passing, sometimes not. User had to increase room brightness to trigger recovery. Fix: added brightness-based recovery path (`frame_brightness >= 30`), lowered confidence threshold to 0.20 as secondary. Recovery now uses whichever triggers first. `native_bridge.py`.
+22. **Pillow Image.Resampling.NEAREST** — Older apt-installed Pillow versions may not have `Image.Resampling` enum (introduced in Pillow 9.1). Added `try: Image.Resampling.NEAREST except AttributeError: Image.NEAREST` fallback in `_decode_jpeg_to_gray()`. `native_bridge.py`.
+23. **`/api/camera/features` JSON error** — Endpoint could raise unhandled exception → FastAPI returns HTML 500 error page → `curl` gets JSONDecodeError. Fix: wrapped in `try/except`, always returns `[]` on error. `server.py`.
 
 ---
 
