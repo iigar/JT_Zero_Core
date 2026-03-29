@@ -336,8 +336,51 @@ function QuickStartSection() {
 function InstallSection() {
   return (
     <div className="max-w-3xl space-y-4" data-testid="install-section">
-      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
-        Raspberry Pi Zero 2 W — Installation
+      {/* UPDATE — the most important workflow */}
+      <div className="p-4 bg-emerald-500/5 border-2 border-emerald-500/30 rounded-sm space-y-3">
+        <h2 className="text-base font-bold text-emerald-400 uppercase tracking-wider">
+          Оновлення системи
+        </h2>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Якщо JT-Zero вже встановлено на Pi — оновлення займає 1 хвилину.
+          Скрипт <span className="text-emerald-400 font-bold">update.sh</span> автоматично:
+          перезбирає C++ ядро, встановлює Python залежності (Pillow у venv),
+          будує фронтенд, копіює статичні файли та перезапускає сервіс.
+        </p>
+        <code className="block text-sm text-emerald-400 font-mono bg-black/40 px-3 py-2 rounded-sm border border-emerald-500/20 leading-relaxed whitespace-pre">{
+`cd ~/jt-zero
+git pull
+./update.sh`
+        }</code>
+        <div className="space-y-1.5 mt-2">
+          <p className="text-[9px] text-slate-500">
+            <span className="text-emerald-400 font-bold">update.sh</span> виконує:
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {[
+              'git pull (оновлення коду)',
+              'cmake + make -j4 (збірка C++)',
+              'venv/bin/pip install Pillow',
+              'Копіює .so в backend/',
+              'Копіює static/ (frontend)',
+              'systemctl restart jtzero',
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <div className="w-1 h-1 rounded-full bg-emerald-500/50" />
+                <span className="text-[8px] text-slate-500">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="text-[9px] text-slate-600 mt-2">
+          Перевірка: <code className="text-cyan-400">sudo journalctl -u jtzero -n 30 --no-pager</code> або
+          відкрийте <code className="text-cyan-400">http://jtzero.local:8001</code>
+        </p>
+      </div>
+
+      {/* FIRST-TIME INSTALLATION */}
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider pt-2">
+        Перша установка — Raspberry Pi Zero 2 W
       </h2>
       <p className="text-xs text-slate-400 leading-relaxed">
         JT-Zero працює на Raspberry Pi Zero 2 W (BCM2710A1, Cortex-A53 quad-core @ 1GHz) нативно.
