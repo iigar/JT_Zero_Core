@@ -7,7 +7,7 @@ JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspbe
 
 **Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
 
-**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl subprocess (architecture-independent). **USB thermal live streaming** — MJPEG batch capture (~5fps), frame cache invalidation fixed. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **VO Fallback** — automatic switch to USB thermal camera when CSI goes dark (brightness < 20). Uses brightness-only trigger (NOT confidence — FAST detector tracks noise in darkness). Feature overlay on ThermalPanel during fallback. Auto-recovery when CSI brightness returns. **SET HOMEPOINT** — VO origin reset via Dashboard button or RC channel (ch8 PWM >= 1700). **3D Trail** — VO position history visualization in Dashboard 3D View. **ARM NEON SIMD** — frame brightness, Sobel gradients, Shi-Tomasi structure tensor accelerated via NEON intrinsics (auto-fallback to scalar on x86).
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active. **Multi-camera architecture** — CSI forward (VO) + USB thermal (downward). **8 known CSI sensors + GENERIC fallback**. **Real USB camera capture** via v4l2-ctl subprocess (architecture-independent). **USB thermal live streaming** — MJPEG batch capture (~5fps), frame cache invalidation fixed. **GitHub Actions CI/CD** auto-builds frontend — Pi Zero needs no Node.js. **VO Fallback** — automatic switch to USB thermal camera when CSI goes dark (brightness < 20). Uses brightness-only trigger (NOT confidence — FAST detector tracks noise in darkness). Feature overlay on ThermalPanel during fallback. Brightness-based auto-recovery (brightness >= 30 OR confidence >= 0.20). **SET HOMEPOINT** — VO origin reset via Commands panel button, RC channel (ch8 PWM >= 1700), or API. **3D Trail** — VO position history visualization in Dashboard 3D View (cyan trail line + amber HomeMarker). **ARM NEON SIMD** — frame brightness, Sobel gradients, Shi-Tomasi structure tensor, SAD 8x8 accelerated via NEON intrinsics (auto-fallback to scalar on x86). **MAVLink Diagnostics** — RC Channels (18ch PWM bars), FC Telemetry, Message Types, Link Stats panel. **RC_CHANNELS parsing** (msg 65). **MAVLink STATUSTEXT** — sends critical events (VO FALLBACK, CSI RECOVERED, SET HOMEPOINT) to Mission Planner at any radio range. **Encrypted Flight Log** — AES-256 Fernet, PBKDF2 100k iterations, records telemetry + point cloud (camera pose + features for 3D landscape reconstruction). Password-protected API access. **System Constraints** — CPU ≤55% (alert 70%), RAM ≤180MB (alert 250MB) for Pi Zero 2W thermal stability.
 
 ---
 
@@ -126,14 +126,13 @@ THERMAL_FALLBACK ──[CSI probe brightness OK]──────────> 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `BRIGHT_DROP` | 20 | Switch to fallback when rolling avg brightness drops below this |
-| `CONF_RECOVER_THRESH` | 0.25 | Return to CSI above this CSI probe quality |
+| `BRIGHT_RECOVER` | 30 | Return to CSI when probe brightness exceeds this |
+| `CONF_RECOVER` | 0.20 | Secondary recovery: confidence above this (lowered for dim environments) |
 | `WINDOW_SIZE` | 10 | Rolling average window for brightness samples |
-| `MIN_SAMPLES` | 5 | Minimum brightness samples before switching |
+| `MIN_SAMPLES` | 8 | Minimum brightness samples before switching |
 | `MIN_FALLBACK_S` | 3.0 | Minimum seconds in fallback before checking recovery |
-| `PROBES_TO_RECOVER` | 3 | Consecutive good CSI probes needed to recover |
+| `PROBES_TO_RECOVER` | 1 | Consecutive good CSI probes needed to recover |
 | `COOLDOWN_S` | 5.0 | Cooldown after recovery before re-triggering |
-| `CSI_PROBE_INTERVAL_S` | 3.0 | Seconds between CSI recovery probes |
-| `THERMAL_FOCAL_PX` | 180.0 | Default focal length for USB thermal at 640x480 |
 
 ### CRITICAL: Brightness-Only Trigger
 
@@ -340,16 +339,30 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 | GET    | /api/engines                 | Engine stats (events, reflexes, etc) |
 | GET    | /api/camera                  | Primary camera & VO pipeline stats   |
 | GET    | /api/camera/frame            | Primary camera frame (PNG)           |
+| GET    | /api/camera/features         | Current VO feature positions [{x,y,tracked,response}] |
 | GET    | /api/cameras                 | List all camera slots                |
 | GET    | /api/camera/secondary/stats  | Secondary (thermal) camera stats     |
 | POST   | /api/camera/secondary/capture| Trigger on-demand thermal capture    |
-| GET    | /api/camera/secondary/frame  | Secondary camera frame (PNG)         |
-| GET    | /api/mavlink                 | MAVLink connection & message stats   |
+| GET    | /api/camera/secondary/frame  | Secondary camera frame (JPEG/PNG)    |
+| GET    | /api/vo/profiles             | Available VO mode profiles           |
+| POST   | /api/vo/profile/{id}         | Switch VO mode at runtime            |
+| GET    | /api/vo/trail                | VO position trail [{x,y,z,t}] for 3D visualization |
+| GET    | /api/mavlink                 | MAVLink stats + RC channels + FC telemetry |
 | GET    | /api/performance             | CPU, memory, latency breakdown       |
+| GET    | /api/diagnostics             | Hardware diagnostics (camera, I2C)   |
+| POST   | /api/diagnostics/scan        | Run fresh hardware diagnostics       |
+| GET    | /api/sensors                 | Sensor modes (hardware/mavlink/sim)  |
 | GET    | /api/simulator/config        | Current simulator parameters         |
 | POST   | /api/simulator/config        | Update simulator parameters          |
-| POST   | /api/command                 | Send command (arm, takeoff, land)    |
+| POST   | /api/command                 | Send command (arm, disarm, takeoff, land, rtl, hold, vo_reset) |
+| GET    | /api/logs/status             | Flight log status (recording, password set) |
+| POST   | /api/logs/password           | Set/update flight log password       |
+| POST   | /api/logs/start              | Start encrypted flight log recording |
+| POST   | /api/logs/stop               | Stop recording                       |
+| POST   | /api/logs/sessions           | List all log sessions (auth required)|
+| POST   | /api/logs/read               | Read & decrypt a log session (auth required) |
 | WS     | /api/ws/telemetry            | Real-time telemetry @ 10Hz           |
+| WS     | /api/ws/events               | Event stream                         |
 
 ### /api/mavlink Response Fields
 ```json
@@ -362,16 +375,25 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
   "bytes_received": 43170,
   "crc_errors": 0,
   "errors": 0,
+  "msg_per_second": 42,
   "fc_type": "QUADROTOR",
   "fc_firmware": "ArduPilot QUADROTOR",
   "fc_armed": false,
   "transport_info": "/dev/ttyAMA0@115200",
-  "detected_msg_ids": [30, 178, 253, 0, 77, 33, 1, 125, 152, 62, 42, 74, 27, 116, 29, 24],
+  "detected_msg_ids": [30, 178, 253, 0, 77, 33, 1, 125, 152, 62, 42, 74, 27, 116, 29, 24, 65],
+  "rc_channels": [1500, 1500, 1000, 1500, 1800, 1000, 1000, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "rc_chancount": 8,
+  "rc_rssi": 255,
   "fc_telemetry": {
     "attitude_valid": true,
     "imu_valid": true,
+    "baro_valid": true,
     "gps_valid": false,
-    "battery_voltage": 0.0,
+    "hud_valid": true,
+    "status_valid": true,
+    "msg_count": 2021,
+    "battery_voltage": 11.8,
+    "battery_remaining": 75,
     "gps_fix": 0,
     "gps_sats": 0
   }
@@ -426,25 +448,51 @@ jt-zero/
 ├── include/jt_zero/      # Public headers
 │   ├── common.h           # SystemState, sensor data structs, MemoryPool
 │   ├── sensors.h          # Sensor interfaces + auto-detect
-│   ├── camera.h           # Camera sources + VO + Pipeline
-│   └── mavlink_interface.h # MAVLink with Serial/UDP/Sim transport
+│   ├── camera.h           # Camera sources + VO + Pipeline + reset_vo()
+│   └── mavlink_interface.h # MAVLink with Serial/UDP/Sim + FCTelemetry + RC + STATUSTEXT
 ├── core/                  # Runtime core
-│   └── runtime.cpp        # Thread management, main loop
+│   └── runtime.cpp        # Thread management, main loop, vo_reset command
 ├── sensors/
 │   └── sensors.cpp        # Sensor implementations + hw probing
 ├── camera/
-│   ├── camera_pipeline.cpp # VO pipeline + SimulatedCamera
-│   └── camera_drivers.cpp  # PiCSI (V4L2/MMAP) + USB (V4L2)
+│   ├── camera_pipeline.cpp # VO pipeline + SimulatedCamera + NEON integration
+│   ├── camera_drivers.cpp  # PiCSI (V4L2/MMAP) + USB (V4L2)
+│   └── neon_accel.h        # ARM NEON SIMD accelerated functions (frame brightness, Sobel, SAD)
 ├── drivers/
 │   ├── bus.h/cpp          # I2C, SPI, UART HAL
 │   └── sensor_drivers.h/cpp # MPU6050, BMP280, NMEA drivers
 ├── mavlink/
-│   └── mavlink_interface.cpp # Serial/UDP/Sim transport + CRC parser
+│   └── mavlink_interface.cpp # Serial/UDP/Sim + CRC parser + RC_CHANNELS(65) + send_statustext
 ├── api/
-│   └── python_bindings.cpp # pybind11 module
+│   └── python_bindings.cpp # pybind11 module (+ send_statustext, rc_channels)
 ├── simulator/             # Test pattern generators
 ├── CMakeLists.txt
 └── toolchain-pi-zero.cmake
+
+backend/
+├── server.py              # FastAPI + WebSocket + Flight Log API
+├── native_bridge.py       # C++ bridge + VO Fallback monitor + RC reset + trail + STATUSTEXT
+├── simulator.py           # Python fallback simulator
+├── usb_camera.py          # V4L2 subprocess wrapper for USB thermal cam
+├── flight_log.py          # AES-256 encrypted flight log (telemetry + point cloud)
+├── system_metrics.py      # psutil-based real OS metrics
+├── diagnostics.py         # Hardware diagnostics
+├── venv/                  # Python venv (Pillow, cryptography, FastAPI)
+└── static/                # Pre-built React frontend (served by FastAPI)
+
+frontend/src/
+├── App.js                 # Tab navigation + layout + voTrail fetch
+├── components/
+│   ├── CameraPanel.js     # Primary CSI camera stream + VO overlay
+│   ├── ThermalPanel.js    # USB thermal camera stream + feature overlay
+│   ├── CommandPanel.js    # ARM/DISARM/TAKEOFF/LAND/HOLD/RTL/E-STOP/SET HOMEPOINT
+│   ├── MAVLinkPanel.js    # Compact MAVLink status (Dashboard)
+│   ├── MAVLinkDiagPanel.js # Full diagnostics: RC Channels, FC Telemetry, Messages
+│   ├── FlightLogPanel.js  # Encrypted flight log recording control
+│   ├── Drone3DPanel.js    # 3D drone visualization + TrailLine + HomeMarker
+│   ├── DocumentationTab.js # Docs: Quick Start, Install, VO Fallback, API, Hardware
+│   └── ...                # 15+ panels total
+└── hooks/useApi.js        # WebSocket + REST hooks
 ```
 
 ---
@@ -566,6 +614,16 @@ JT-Zero автоматично визначить будь-яку камеру �
 - **USB camera detection rewrite:** Parses `v4l2-ctl --list-devices` output instead of Python ioctl (which fails on aarch64)
 - **Frontend ThermalPanel rewrite:** Matches CameraPanel MJPEG pattern (offscreen Image + canvas + sequential polling)
 - **VO Fallback:** Automatic switch to USB thermal when CSI confidence drops below 10% for ~1s. Auto-recovery when CSI regains tracking. State machine: CSI_PRIMARY ↔ THERMAL_FALLBACK
+- **Pillow venv fix:** `update.sh` now installs Pillow into venv (not system Python) — service runs via `venv/bin/uvicorn`
+- **VO Fallback recovery fix:** Added brightness-based recovery (brightness >= 30). Previous confidence-only recovery (0.40) was too high for dim environments (~41 brightness). Now: brightness OR confidence (0.20)
+- **SET HOMEPOINT:** `vo_reset` command in C++ (camera.h `reset_vo()`), Python, simulator. Button in Commands panel. RC channel edge-detected trigger (ch8 >= 1700 PWM)
+- **3D Trail:** Backend accumulates VO dx/dy/dz into absolute positions (0.5s interval, max 500 points). `/api/vo/trail` API. Frontend: cyan TrailLine + amber HomeMarker in Drone3DPanel
+- **ARM NEON SIMD:** `camera/neon_accel.h` — frame_brightness (16px/iter, ~8x), sobel_row (8px/iter, ~4x), structure_tensor_5x5, sad_8x8, row_sum. Integrated into camera_pipeline.cpp
+- **MAVLink Diagnostics:** MAVLinkDiagPanel.js — RC Channels (18ch PWM bars), FC Telemetry, Message Types, Link Stats. C++ RC_CHANNELS (msg 65) parsing + Python bindings
+- **MAVLink STATUSTEXT:** C++ `send_statustext(severity, text)` → Python `_send_statustext()`. Events: VO FALLBACK ACTIVE, CSI RECOVERED, SET HOMEPOINT, RC HOMEPOINT SET
+- **Encrypted Flight Log:** `flight_log.py` — AES-256 Fernet, PBKDF2 100k iterations. Records telemetry + point cloud (camera pose + features for 3D landscape). Password-protected API. FlightLogPanel.js
+- **System Constraints updated:** CPU ≤55% (alert 70%), RAM ≤180MB (alert 250MB) — justified by Pi Zero 2W thermal throttling analysis
+- **DOCS update:** Added update.sh workflow as primary Install section, VO Fallback section, updated API Reference (+15 endpoints), Hardware, File Structure
 - Test reports: /app/test_reports/iteration_1-16.json
 
 ---
@@ -614,10 +672,12 @@ EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 | `jt-zero/FC_CONNECTION.md` | Flight controller wiring (Matek, SpeedyBee, Pixhawk, Cube) |
 | `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
 | `setup.sh` | Auto-install script for fresh Pi OS (deps, UART, build, systemd) |
-| `update.sh` | Smart update (pre-built frontend priority, auto Pi model detection) |
+| `update.sh` | Smart update: C++ build, venv deps (Pillow+cryptography), frontend, service restart |
 | `.github/workflows/build-frontend.yml` | GitHub Actions CI/CD for React frontend |
 | `commands_reminder.md` | Quick reference: all git, Pi, API, diagnostic commands |
 | `CLAUDE.md` | Technical reference for agents (this file) |
 | `ABOUT_PROJECT.md` | Project overview in Ukrainian (for humans) |
-| `memory/PRD.md` | Product requirements and backlog |
+| `memory/PRD.md` | Product requirements, backlog, roadmap |
 | `memory/CHANGELOG.md` | Implementation changelog with dates |
+| `backend/flight_log.py` | AES-256 encrypted flight log + point cloud recorder |
+| `jt-zero/camera/neon_accel.h` | ARM NEON SIMD accelerated functions |
