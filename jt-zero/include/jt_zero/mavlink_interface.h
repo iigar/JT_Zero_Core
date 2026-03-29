@@ -241,6 +241,9 @@ public:
     bool send_optical_flow_rad(const MAVOpticalFlowRad& msg);
     bool send_heartbeat();
     
+    // Send STATUSTEXT message (severity: 0=EMERGENCY..6=INFO)
+    bool send_statustext(uint8_t severity, const char* text);
+    
     // Build messages from runtime state
     MAVVisionPositionEstimate build_vision_position(const SystemState& state, const VOResult& vo);
     MAVOdometry build_odometry(const SystemState& state, const VOResult& vo);

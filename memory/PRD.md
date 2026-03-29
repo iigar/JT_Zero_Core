@@ -46,11 +46,14 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — NEON active on ARM, MAVLink diag with RC, 3D trail
-- Test NEON performance impact (compare frame times before/after)
+- Deploy to Pi: `git pull && ./update.sh` — all features: Flight Log, STATUSTEXT, NEON, MAVLink Diag
+- Set flight log password via Dashboard → start recording → fly → stop → download & analyze
+- Test STATUSTEXT visibility in Mission Planner during fallback events
 
 ### P2 - Planned
-- C++ native MJPEG support for USBCamera (replace Python injection, reduce CPU)
+- GPIO LED status indicator (green=VO OK, yellow=fallback, red=error)
+- 3D flight replay from encrypted logs (load .jtzlog → animate trail + point cloud in 3D View)
+- C++ native MJPEG support for USBCamera
 - IP camera RTSP support
 - IP camera (RTSP) support
 - ARM NEON optimization for C++ core

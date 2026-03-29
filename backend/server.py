@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from typing import Optional
 from system_metrics import get_system_metrics
 from diagnostics import run_diagnostics, get_cached_diagnostics
+from flight_log import FlightLogger, verify_password, set_password, is_password_set, hash_password
 
 # ─── Runtime Selection ────────────────────────────────────
 # Try native C++ runtime first, fall back to Python simulator
@@ -60,15 +61,26 @@ async def lifespan(app: FastAPI):
     vo_fallback_task.cancel()
     runtime.stop()
 
+# ─── Flight Logger (global) ───────────────────────────────
+flight_logger = FlightLogger()
+
+
 async def _vo_fallback_monitor():
     """Background task: monitors CSI confidence and manages VO fallback to thermal.
-    Runs independently of WebSocket connections at ~10Hz."""
+    Runs independently of WebSocket connections at ~10Hz.
+    Also records flight log telemetry and point cloud."""
     await asyncio.sleep(5)  # Let runtime stabilize
     tick_count = 0
     while True:
         try:
             if hasattr(runtime, 'vo_fallback_tick'):
                 runtime.vo_fallback_tick()
+            
+            # Flight log recording (if active)
+            if flight_logger.is_recording:
+                flight_logger.record_telemetry(runtime)
+                flight_logger.record_pointcloud(runtime)
+            
             tick_count += 1
             if tick_count % 50 == 0:  # Every 5 seconds
                 try:
@@ -109,6 +121,13 @@ class CommandRequest(BaseModel):
     command: str
     param1: Optional[float] = 0
     param2: Optional[float] = 0
+
+class LogPasswordRequest(BaseModel):
+    password: str
+
+class LogSessionRequest(BaseModel):
+    password: str
+    filename: str
 
 class CommandResponse(BaseModel):
     success: bool
@@ -320,6 +339,58 @@ async def get_vo_trail():
     if hasattr(runtime, 'get_vo_trail'):
         return runtime.get_vo_trail()
     return []
+
+# ─── Flight Log API ──────────────────────────────────────────
+
+@app.get("/api/logs/status")
+async def log_status():
+    """Flight log status: recording, password set, sessions list."""
+    return {
+        "recording": flight_logger.is_recording,
+        "record_count": flight_logger.record_count,
+        "session_file": flight_logger.session_file,
+        "password_set": is_password_set(),
+    }
+
+@app.post("/api/logs/password")
+async def set_log_password(req: LogPasswordRequest):
+    """Set or update the flight log password."""
+    if len(req.password) < 6:
+        return {"success": False, "error": "Password must be at least 6 characters"}
+    set_password(req.password)
+    return {"success": True, "message": "Password set"}
+
+@app.post("/api/logs/start")
+async def start_log(req: LogPasswordRequest):
+    """Start recording a flight log session."""
+    if not verify_password(req.password):
+        return {"success": False, "error": "Invalid password"}
+    flight_logger._password = req.password
+    flight_logger.start_session()
+    return {"success": True, "file": flight_logger.session_file}
+
+@app.post("/api/logs/stop")
+async def stop_log():
+    """Stop recording current flight log session."""
+    flight_logger.stop_session()
+    return {"success": True, "records": flight_logger.record_count}
+
+@app.post("/api/logs/sessions")
+async def list_sessions(req: LogPasswordRequest):
+    """List all flight log sessions (requires password)."""
+    if not verify_password(req.password):
+        return {"success": False, "error": "Invalid password"}
+    return {"success": True, "sessions": FlightLogger.list_sessions()}
+
+@app.post("/api/logs/read")
+async def read_session(req: LogSessionRequest):
+    """Read and decrypt a specific flight log session."""
+    if not verify_password(req.password):
+        return {"success": False, "error": "Invalid password"}
+    records = FlightLogger.read_session(req.filename, req.password)
+    if not records:
+        return {"success": False, "error": "Failed to decrypt — wrong password or corrupted file"}
+    return {"success": True, "records": records, "count": len(records)}
 
 # ─── Camera Frame Endpoint ──────────────────────────────────
 # Returns latest camera frame as PNG (pure Python, no Pillow needed)

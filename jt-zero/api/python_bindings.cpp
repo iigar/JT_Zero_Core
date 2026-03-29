@@ -442,6 +442,10 @@ PYBIND11_MODULE(jtzero_native, m) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")
         
+        .def("send_statustext", [](jtzero::Runtime& self, int severity, const std::string& text) {
+            return self.mavlink().send_statustext(static_cast<uint8_t>(severity), text.c_str());
+        }, py::arg("severity"), py::arg("text"), "Send STATUSTEXT via MAVLink (0=EMERG..6=INFO)")
+        
         .def("set_vo_profile", [](jtzero::Runtime& self, int profile_id) {
             if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_VO_MODES)) {
                 self.camera().set_vo_mode(static_cast<jtzero::VOModeType>(profile_id));

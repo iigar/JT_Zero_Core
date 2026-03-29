@@ -101,7 +101,7 @@ if [ "$PILLOW_OK" = false ]; then
     echo -e "  ${YELLOW}Встановлення Pillow...${NC}"
     # Method 1: venv pip (PEP 668 does NOT block pip inside venv)
     if [ -x "$VENV_PIP" ]; then
-        "$VENV_PIP" install Pillow 2>&1 | tail -3 && PILLOW_OK=true
+        "$VENV_PIP" install Pillow cryptography 2>&1 | tail -3 && PILLOW_OK=true
     fi
     # Method 2: apt (for non-venv setups)
     if [ "$PILLOW_OK" = false ]; then

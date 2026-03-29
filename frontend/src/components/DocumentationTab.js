@@ -1202,8 +1202,8 @@ function HardwareSection() {
         <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">System Constraints</h4>
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'CPU Target', value: '<= 65%', actual: '~3%' },
-            { label: 'RAM Target', value: '<= 300MB', actual: '~1MB' },
+            { label: 'CPU Target', value: '<= 55%', actual: 'alert 70%' },
+            { label: 'RAM Target', value: '<= 180MB', actual: 'alert 250MB' },
             { label: 'Threads', value: '8', actual: '8/8' },
           ].map(({ label, value, actual }) => (
             <div key={label} className="text-center">

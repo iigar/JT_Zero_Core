@@ -563,6 +563,25 @@ bool MAVLinkInterface::send_heartbeat() {
     return true;
 }
 
+bool MAVLinkInterface::send_statustext(uint8_t severity, const char* text) {
+    if (state_ != MAVLinkState::CONNECTED && state_ != MAVLinkState::CONNECTING) return false;
+    if (simulated_) return true;  // no-op in simulation
+    
+    // STATUSTEXT (msg_id=253, CRC_EXTRA=83)
+    // Payload: severity(1) + text(50) + id(2) + chunk_seq(1) = 54 bytes
+    uint8_t payload[54] = {0};
+    payload[0] = severity;  // MAV_SEVERITY (0=EMERGENCY, 4=WARNING, 6=INFO)
+    size_t len = 0;
+    while (text[len] && len < 50) {
+        payload[1 + len] = static_cast<uint8_t>(text[len]);
+        ++len;
+    }
+    // id=0, chunk_seq=0 (single message)
+    send_mavlink_v2(253, payload, 54, 83);
+    msgs_sent_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
 // ═══════════════════════════════════════════════════════════
 // MAVLink v2 Frame Serializer
 // ═══════════════════════════════════════════════════════════

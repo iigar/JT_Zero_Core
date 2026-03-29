@@ -149,7 +149,16 @@ class NativeRuntime:
             self._vo_pos_x = 0.0
             self._vo_pos_y = 0.0
             self._vo_pos_z = 0.0
+            self._send_statustext(6, "JT0: SET HOMEPOINT")
         return self._rt.send_command(cmd, param1, param2)
+    
+    def _send_statustext(self, severity: int, text: str):
+        """Send STATUSTEXT via MAVLink (visible in Mission Planner)."""
+        try:
+            if hasattr(self._rt, 'send_statustext'):
+                self._rt.send_statustext(severity, text)
+        except Exception:
+            pass
     
     def get_state(self) -> dict:
         state = dict(self._rt.get_state())
@@ -331,6 +340,7 @@ class NativeRuntime:
                     # Trigger vo_reset
                     self._rt.send_command("vo_reset", 0, 0)
                     self._vo_trail = []  # clear trail on reset
+                    self._send_statustext(6, "JT0: RC HOMEPOINT SET")
                     sys.stderr.write(f"[VO Reset] RC ch{self._rc_reset_channel + 1} = {pwm} >= {self._rc_reset_threshold} → HOMEPOINT SET\n")
                     sys.stderr.flush()
             else:
@@ -428,6 +438,7 @@ class NativeRuntime:
                     self._vo_fallback_active = True
                     self._vo_fallback_start_time = time.time()
                     self._vo_bright_history = []
+                    self._send_statustext(4, "JT0: VO FALLBACK ACTIVE")
                     
                     self._vo_fallback_stop.clear()
                     self._vo_fallback_thread = threading.Thread(
@@ -488,6 +499,7 @@ class NativeRuntime:
                     self._vo_csi_good_probes = 0
                     self._vo_fallback_cooldown_until = time.time() + self._VO_COOLDOWN_S
                     self._vo_python_features = []  # clear Python features on recovery
+                    self._send_statustext(6, "JT0: VO CSI RECOVERED")
             else:
                 # Bad probe — reset good probe counter
                 self._vo_csi_good_probes = 0

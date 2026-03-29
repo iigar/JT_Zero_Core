@@ -10,6 +10,7 @@ import CameraPanel from './components/CameraPanel';
 import ThermalPanel from './components/ThermalPanel';
 import MAVLinkDiagPanel from './components/MAVLinkDiagPanel';
 import MAVLinkPanel from './components/MAVLinkPanel';
+import FlightLogPanel from './components/FlightLogPanel';
 import PerformancePanel from './components/PerformancePanel';
 import SimulatorPanel from './components/SimulatorPanel';
 import DocumentationTab from './components/DocumentationTab';
@@ -440,8 +441,9 @@ function MavlinkTab({ mavlink }) {
   return (
     <div className="h-full flex flex-col gap-2 p-3 overflow-y-auto">
       <div className="grid grid-cols-12 gap-2" style={{ minHeight: '280px' }}>
-        <div className="col-span-6"><MAVLinkDiagPanel mavlink={mavlink} /></div>
-        <div className="col-span-6"><CommandPanel /></div>
+        <div className="col-span-5"><MAVLinkDiagPanel mavlink={mavlink} /></div>
+        <div className="col-span-4"><CommandPanel /></div>
+        <div className="col-span-3"><FlightLogPanel /></div>
       </div>
     </div>
   );
