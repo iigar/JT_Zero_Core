@@ -23,12 +23,47 @@ except ImportError:
 class NativeRuntime:
     """Adapter wrapping C++ Runtime with simulator-compatible interface."""
     
+    _VO_MODES = [
+        {"id": 0, "name": "Light", "type": "LIGHT",
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100},
+        {"id": 1, "name": "Balanced", "type": "BALANCED",
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 180},
+        {"id": 2, "name": "Performance", "type": "PERFORMANCE",
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 250},
+    ]
+    
+    _PLATFORMS = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W",
+         "width": 640, "height": 480, "focal_length": 554.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4",
+         "width": 1280, "height": 720, "focal_length": 830.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5",
+         "width": 1280, "height": 960, "focal_length": 1108.0, "target_fps": 30.0},
+    ]
+    
     def __init__(self):
         if not NATIVE_AVAILABLE:
             raise RuntimeError("jtzero_native module not found")
         
         self._rt = _native.Runtime()
-        self._rt.set_simulator_mode(True)
+        self._active_vo_mode = 1  # Balanced
+        
+        # Auto-detect: use real hardware on Pi, simulator elsewhere
+        # Override with JT_ZERO_SIMULATE=1 to force simulation
+        force_sim = os.environ.get("JT_ZERO_SIMULATE", "").lower() in ("1", "true", "yes")
+        if force_sim:
+            self._rt.set_simulator_mode(True)
+            print("[JT-Zero] Forced SIMULATOR mode (JT_ZERO_SIMULATE=1)")
+        else:
+            # Check if we're on a Raspberry Pi
+            is_pi = os.path.exists("/sys/firmware/devicetree/base/model")
+            if is_pi:
+                self._rt.set_simulator_mode(False)
+                print("[JT-Zero] Running on Pi — HARDWARE mode (auto-detect sensors)")
+            else:
+                self._rt.set_simulator_mode(True)
+                print("[JT-Zero] Not on Pi — SIMULATOR mode")
+        
         self._start_time = time.time()
         self.running = False
     
@@ -79,10 +114,72 @@ class NativeRuntime:
         return dict(self._rt.get_engines())
     
     def get_camera_stats(self) -> dict:
-        return dict(self._rt.get_camera())
+        d = dict(self._rt.get_camera())
+        d.setdefault("vo_inlier_count", d.get("vo_features_tracked", 0))
+        d.setdefault("vo_confidence", d.get("vo_tracking_quality", 0))
+        d.setdefault("vo_position_uncertainty", 0)
+        d.setdefault("vo_total_distance", 0)
+        # Platform info (auto-detected by C++)
+        d.setdefault("platform", 0)
+        d.setdefault("platform_name", "Pi Zero 2W")
+        # VO Mode — inject from managed state
+        m = self._VO_MODES[self._active_vo_mode]
+        d["vo_mode"] = self._active_vo_mode
+        d["vo_mode_name"] = m["name"]
+        # Adaptive parameters defaults
+        d.setdefault("altitude_zone", 0)
+        d.setdefault("altitude_zone_name", "LOW")
+        d.setdefault("adaptive_fast_thresh", float(m["fast_threshold"]))
+        d.setdefault("adaptive_lk_window", float(m["lk_window"]))
+        # Hover yaw correction defaults
+        d.setdefault("hover_detected", False)
+        d.setdefault("hover_duration", 0.0)
+        d.setdefault("yaw_drift_rate", 0.0)
+        d.setdefault("corrected_yaw", 0.0)
+        return d
+    
+    def get_frame_data(self) -> bytes:
+        """Get latest camera frame as raw grayscale bytes (320x240)."""
+        try:
+            return self._rt.get_frame_data()
+        except Exception:
+            return b''
+    
+    def get_features(self) -> list:
+        """Get current VO feature positions [{x, y, tracked, response}, ...]."""
+        try:
+            return [dict(f) for f in self._rt.get_features()]
+        except Exception:
+            return []
     
     def get_mavlink_stats(self) -> dict:
         return dict(self._rt.get_mavlink())
+    
+    def get_sensor_modes(self) -> dict:
+        try:
+            if hasattr(self._rt, 'get_sensor_modes'):
+                return dict(self._rt.get_sensor_modes())
+        except Exception:
+            pass
+        # Fallback: native mode without new C++ binding = mavlink
+        return {
+            "imu": "mavlink",
+            "baro": "mavlink",
+            "gps": "mavlink",
+            "rangefinder": "mavlink",
+            "optical_flow": "mavlink",
+            "hw_info": {
+                "i2c_available": False,
+                "imu_detected": False,
+                "baro_detected": False,
+                "gps_detected": False,
+                "spi_available": False,
+                "uart_available": False,
+                "imu_model": "none",
+                "baro_model": "none",
+                "gps_model": "none",
+            },
+        }
     
     def get_performance(self) -> dict:
         return dict(self._rt.get_performance())
@@ -92,3 +189,24 @@ class NativeRuntime:
     
     def set_sim_config(self, config: dict):
         self._rt.set_sim_config(config)
+    
+    def get_vo_profiles(self) -> list:
+        try:
+            if hasattr(self._rt, 'get_vo_profiles'):
+                return [dict(p) for p in self._rt.get_vo_profiles()]
+        except Exception:
+            pass
+        return list(self._VO_MODES)
+    
+    def set_vo_profile(self, mode_id: int) -> bool:
+        if 0 <= mode_id < len(self._VO_MODES):
+            # Try C++ first
+            try:
+                if hasattr(self._rt, 'set_vo_profile'):
+                    self._rt.set_vo_profile(mode_id)
+            except Exception:
+                pass
+            # Always update managed state
+            self._active_vo_mode = mode_id
+            return True
+        return False

@@ -5,10 +5,12 @@
  * Abstract camera sources with simulated implementations.
  * Supports: Raspberry Pi CSI camera, USB cameras, IP cameras
  * 
- * Default for Pi Zero 2 W:
- *   Resolution: 320x240
- *   FPS: 10-15
- *   Format: Grayscale (for VO) + optional RGB
+ * Hardware profiles for different Pi models:
+ *   Pi Zero 2W: 320x240 @ 15fps (default)
+ *   Pi 4:       640x480 @ 30fps
+ *   Pi 5:       800x600 @ 30fps
+ * 
+ * Adaptive VO parameters based on altitude + hover yaw correction.
  */
 
 #include "jt_zero/common.h"
@@ -30,14 +32,143 @@ struct FrameInfo {
     bool     valid{false};
 };
 
-// Fixed-size frame buffer for embedded (320x240 grayscale = 76800 bytes)
+// Default dimensions (Pi Zero 2W profile)
 static constexpr uint16_t FRAME_WIDTH  = 320;
 static constexpr uint16_t FRAME_HEIGHT = 240;
-static constexpr size_t   FRAME_SIZE   = FRAME_WIDTH * FRAME_HEIGHT;
+
+// Maximum frame buffer (supports up to Pi 5 profile: 800x600)
+static constexpr uint16_t MAX_FRAME_WIDTH  = 800;
+static constexpr uint16_t MAX_FRAME_HEIGHT = 600;
+static constexpr size_t   MAX_FRAME_SIZE   = MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT;
+static constexpr size_t   FRAME_SIZE       = MAX_FRAME_SIZE;
 
 struct FrameBuffer {
     alignas(64) uint8_t data[FRAME_SIZE]{};
     FrameInfo info;
+};
+
+// ─── Platform Config (auto-detected at startup) ─────────
+// Determines camera resolution and focal length. NOT switchable at runtime.
+
+enum class PlatformType : uint8_t {
+    PI_ZERO_2W = 0,
+    PI_4       = 1,
+    PI_5       = 2
+};
+
+inline const char* platform_str(PlatformType t) {
+    switch(t) {
+        case PlatformType::PI_ZERO_2W: return "PI_ZERO_2W";
+        case PlatformType::PI_4:       return "PI_4";
+        case PlatformType::PI_5:       return "PI_5";
+        default: return "UNKNOWN";
+    }
+}
+
+struct PlatformConfig {
+    const char*  name;
+    PlatformType type;
+    uint16_t frame_width;
+    uint16_t frame_height;
+    float    focal_length_px;
+    float    target_fps;
+};
+
+static constexpr PlatformConfig PLATFORMS[] = {
+    {"Pi Zero 2W", PlatformType::PI_ZERO_2W, 640, 480, 554.0f, 15.0f},
+    {"Pi 4",       PlatformType::PI_4,      1280, 720, 830.0f, 30.0f},
+    {"Pi 5",       PlatformType::PI_5,      1280, 960, 1108.0f, 30.0f},
+};
+static constexpr size_t NUM_PLATFORMS = sizeof(PLATFORMS) / sizeof(PLATFORMS[0]);
+
+// ─── VO Mode (switchable at runtime) ─────────────────────
+// Only algorithm parameters. Does NOT change camera resolution.
+
+enum class VOModeType : uint8_t {
+    LIGHT       = 0,   // Economy: fewer features, less CPU
+    BALANCED    = 1,   // Default: good tracking, moderate CPU
+    PERFORMANCE = 2    // Maximum accuracy: most features, high CPU
+};
+
+inline const char* vo_mode_str(VOModeType m) {
+    switch(m) {
+        case VOModeType::LIGHT:       return "LIGHT";
+        case VOModeType::BALANCED:    return "BALANCED";
+        case VOModeType::PERFORMANCE: return "PERFORMANCE";
+        default: return "UNKNOWN";
+    }
+}
+
+struct VOMode {
+    const char* name;
+    VOModeType  type;
+    uint8_t  fast_threshold;
+    int      lk_window_size;
+    int      lk_iterations;
+    size_t   max_features;
+};
+
+static constexpr VOMode VO_MODES[] = {
+    {"Light",       VOModeType::LIGHT,       30, 5, 4, 100},
+    {"Balanced",    VOModeType::BALANCED,     25, 7, 5, 180},
+    {"Performance", VOModeType::PERFORMANCE,  20, 9, 6, 250},
+};
+static constexpr size_t NUM_VO_MODES = sizeof(VO_MODES) / sizeof(VO_MODES[0]);
+
+// ─── Altitude-Adaptive VO Parameters ─────────────────────
+// Automatically adjusts VO algorithm settings based on barometric altitude.
+// Smooth interpolation between zone boundaries.
+
+enum class AltitudeZone : uint8_t {
+    LOW     = 0,   // 0-10m:   aggressive tracking, small features
+    MEDIUM  = 1,   // 10-50m:  balanced
+    HIGH    = 2,   // 50-200m: conservative, large features
+    CRUISE  = 3    // 200m+:   maximum stability, biggest window
+};
+
+inline const char* altitude_zone_str(AltitudeZone z) {
+    switch(z) {
+        case AltitudeZone::LOW:    return "LOW";
+        case AltitudeZone::MEDIUM: return "MEDIUM";
+        case AltitudeZone::HIGH:   return "HIGH";
+        case AltitudeZone::CRUISE: return "CRUISE";
+        default: return "UNKNOWN";
+    }
+}
+
+struct AdaptiveVOParams {
+    AltitudeZone zone{AltitudeZone::LOW};
+    uint8_t  fast_threshold{30};
+    int      lk_window_size{5};
+    int      lk_iterations{4};
+    int      min_inliers{5};
+    float    kalman_q{0.5f};       // process noise (m/s^2)
+    float    kalman_r_base{0.3f};  // measurement noise base
+    float    redetect_ratio{0.15f}; // re-detect if tracked < ratio * max
+};
+
+// Zone boundary altitudes (meters AGL)
+static constexpr float ALT_ZONE_LOW_MAX     = 10.0f;
+static constexpr float ALT_ZONE_MEDIUM_MAX  = 50.0f;
+static constexpr float ALT_ZONE_HIGH_MAX    = 200.0f;
+
+// ─── Hover Yaw Correction ────────────────────────────────
+// Detects hovering state and corrects gyroscopic yaw drift
+// by analyzing micro-movements of tracked features.
+
+struct HoverState {
+    bool  is_hovering{false};
+    float hover_duration_sec{0};
+    float yaw_drift_rate{0};         // rad/s, estimated gyro drift
+    float corrected_yaw{0};          // rad, corrected yaw
+    float micro_motion_avg{0};       // px, average feature displacement
+    int   stable_frame_count{0};     // consecutive frames with low motion
+    float accumulated_yaw_drift{0};  // rad, total drift correction applied
+    
+    // Thresholds
+    static constexpr float HOVER_MOTION_THRESH = 0.5f;  // px, below = hovering
+    static constexpr int   HOVER_MIN_FRAMES    = 30;     // frames before hover confirmed
+    static constexpr float DRIFT_ALPHA         = 0.02f;  // EMA smoothing for drift rate
 };
 
 // ─── Visual Odometry Result ──────────────────────────────
@@ -46,15 +177,35 @@ struct VOResult {
     uint64_t timestamp_us{0};
     // Position estimate (body-frame delta)
     float dx{0}, dy{0}, dz{0};         // m
-    // Velocity estimate
+    // Velocity estimate (Kalman-filtered)
     float vx{0}, vy{0}, vz{0};         // m/s
     // Rotation delta
     float droll{0}, dpitch{0}, dyaw{0}; // rad
     // Quality metrics
     uint16_t features_detected{0};
     uint16_t features_tracked{0};
+    uint16_t inlier_count{0};           // features after outlier rejection
     float    tracking_quality{0};        // 0-1
+    float    confidence{0};              // 0-1, combined quality metric for EKF
+    float    position_uncertainty{0};    // meters, grows with drift
     bool     valid{false};
+    
+    // Platform (auto-detected, not switchable)
+    uint8_t  platform{0};                // PlatformType
+    
+    // VO Mode (switchable at runtime)
+    uint8_t  vo_mode{1};                 // VOModeType (default: BALANCED)
+    
+    // Adaptive altitude zone
+    uint8_t  altitude_zone{0};           // AltitudeZone
+    float    adaptive_fast_thresh{30};
+    float    adaptive_lk_window{5};
+    
+    // Hover yaw correction
+    bool     hover_detected{false};
+    float    hover_duration{0};          // seconds
+    float    yaw_drift_rate{0};          // rad/s estimated drift
+    float    corrected_yaw{0};           // rad, corrected yaw
 };
 
 // ─── Feature Point ───────────────────────────────────────
@@ -65,7 +216,7 @@ struct FeaturePoint {
     bool  tracked{false};
 };
 
-static constexpr size_t MAX_FEATURES = 200;
+static constexpr size_t MAX_FEATURES = 300;
 
 // ─── Camera Source Interface ─────────────────────────────
 
@@ -130,18 +281,18 @@ public:
     void close() override;
     bool is_open() const override { return open_; }
     CameraType type() const override { return CameraType::PI_CSI; }
-    const char* name() const override { return "PiCSI_libcamera"; }
+    const char* name() const override { return "PiCSI_rpicam"; }
     
-    // Auto-detect: check if /dev/video0 exists and is a CSI camera
+    // Auto-detect: check if rpicam-hello can see a camera
     static bool detect();
 
 private:
     bool open_{false};
-    int fd_{-1};
+    FILE* pipe_{nullptr};  // rpicam-vid subprocess pipe
+    uint16_t cap_w_{0};
+    uint16_t cap_h_{0};
     uint32_t frame_counter_{0};
     uint64_t last_capture_us_{0};
-    uint8_t* mmap_buf_{nullptr};
-    size_t mmap_len_{0};
 };
 
 // ─── USB Camera (via V4L2) ───────────────────────────────
@@ -164,8 +315,16 @@ private:
     const char* device_;
     bool open_{false};
     int fd_{-1};
+    uint16_t cap_w_{0};
+    uint16_t cap_h_{0};
     uint32_t frame_counter_{0};
     uint64_t last_capture_us_{0};
+    // V4L2 MMAP streaming
+    static constexpr int MAX_V4L2_BUFS = 4;
+    struct MappedBuffer { void* start{nullptr}; size_t length{0}; };
+    MappedBuffer buffers_[MAX_V4L2_BUFS]{};
+    int n_buffers_{0};
+    bool streaming_{false};
 };
 
 // ─── FAST Corner Detector ────────────────────────────────
@@ -212,17 +371,47 @@ public:
     // Process a new frame and compute VO estimate
     VOResult process(const FrameBuffer& frame, float ground_distance = 1.0f);
     
+    // Set IMU data for cross-validation (call before process())
+    void set_imu_hint(float ax, float ay, float gyro_z);
+    
+    // Set current altitude for adaptive parameter adjustment
+    void set_altitude(float altitude_agl);
+    
+    // Set current yaw from IMU/EKF for hover correction reference
+    void set_yaw_hint(float yaw_rad);
+    
+    // Set hardware profile
+    void set_platform(const PlatformConfig& platform);
+    
+    // Set VO mode (algorithm parameters only, no reset)
+    void set_vo_mode(const VOMode& mode);
+    
     // Reset state
     void reset();
     
     // Get current feature state
     size_t active_features() const { return active_count_; }
+    
+    // Get feature positions (read-only access)
+    const std::array<FeaturePoint, MAX_FEATURES>& features() const { return features_; }
+    size_t feature_count() const { return active_count_; }
+    
+    // Get accumulated pose
+    float pose_x() const { return pose_x_; }
+    float pose_y() const { return pose_y_; }
+    float total_distance() const { return total_distance_; }
+    
+    // Get adaptive state
+    const AdaptiveVOParams& adaptive_params() const { return adaptive_; }
+    const HoverState& hover_state() const { return hover_; }
+    const PlatformConfig& platform() const { return platform_; }
+    const VOMode& vo_mode() const { return vo_mode_; }
 
 private:
     FASTDetector detector_;
     LKTracker    tracker_;
     
-    // Double-buffer for frame storage (avoid allocation)
+    // Double-buffer for frame storage (max size)
     alignas(64) uint8_t prev_frame_[FRAME_SIZE]{};
     bool has_prev_frame_{false};
     
@@ -233,8 +422,41 @@ private:
     
     // Accumulated local pose (NED frame)
     float pose_x_{0}, pose_y_{0}, pose_z_{0};
+    float total_distance_{0};
     
     uint64_t prev_timestamp_us_{0};
+    
+    // ── Long-range drift reduction ──
+    
+    // Kalman filter state per axis (simple 1D: [position_rate])
+    float kf_vx_{0}, kf_vy_{0};           // filtered velocity
+    float kf_vx_var_{1.0f}, kf_vy_var_{1.0f}; // velocity variance
+    
+    // IMU hint for cross-validation
+    float imu_ax_{0}, imu_ay_{0}, imu_gz_{0};
+    bool  imu_hint_valid_{false};
+    
+    // Running confidence metric
+    float running_confidence_{0.5f};
+    
+    // ── Platform + VO Mode ──
+    PlatformConfig platform_;
+    VOMode vo_mode_;
+    
+    // ── Altitude-Adaptive Parameters ──
+    AdaptiveVOParams adaptive_;
+    float current_altitude_{0};
+    void update_adaptive_params();
+    
+    // ── Hover Yaw Correction ──
+    HoverState hover_;
+    float yaw_hint_{0};
+    bool  yaw_hint_valid_{false};
+    void update_hover_state(float median_dx, float median_dy, float dt);
+    
+    // Median + MAD computation helpers
+    static float compute_median(float* arr, int n);
+    static float compute_mad(float* arr, int n, float median);
 };
 
 // ─── Camera Pipeline (combines Camera + VO) ──────────────
@@ -249,10 +471,29 @@ struct CameraPipelineStats {
     // VO stats
     uint16_t   vo_features_detected{0};
     uint16_t   vo_features_tracked{0};
+    uint16_t   vo_inlier_count{0};
     float      vo_tracking_quality{0};
+    float      vo_confidence{0};          // 0-1 combined confidence
+    float      vo_position_uncertainty{0}; // meters
+    float      vo_total_distance{0};       // meters total path
     float      vo_dx{0}, vo_dy{0}, vo_dz{0};
     float      vo_vx{0}, vo_vy{0};
     bool       vo_valid{false};
+    // Platform info (auto-detected)
+    uint8_t    platform{0};                // PlatformType
+    char       platform_name[32]{};
+    // VO Mode (switchable)
+    uint8_t    vo_mode{1};                 // VOModeType
+    char       vo_mode_name[32]{};
+    // Adaptive parameters
+    uint8_t    altitude_zone{0};           // AltitudeZone
+    float      adaptive_fast_thresh{30};
+    float      adaptive_lk_window{5};
+    // Hover yaw correction
+    bool       hover_detected{false};
+    float      hover_duration{0};
+    float      yaw_drift_rate{0};
+    float      corrected_yaw{0};
 };
 
 class CameraPipeline {
@@ -274,9 +515,27 @@ public:
     // Access results
     const FrameInfo& last_frame_info() const { return current_frame_.info; }
     const VOResult&  last_vo_result() const  { return vo_result_; }
+    const FrameBuffer& current_frame() const { return current_frame_; }
     CameraPipelineStats get_stats() const;
     
     bool is_running() const { return running_; }
+    
+    // Get current VO feature positions
+    const VisualOdometry& vo() const { return vo_; }
+    
+    // Platform (auto-detected at startup, sets camera resolution)
+    void set_platform(PlatformType type);
+    PlatformType active_platform() const;
+    
+    // VO mode (switchable at runtime, only algorithm parameters)
+    void set_vo_mode(VOModeType type);
+    VOModeType active_vo_mode() const;
+    
+    // Set altitude for adaptive parameters (call from runtime)
+    void set_altitude(float altitude_agl);
+    
+    // Set yaw hint for hover correction (call from runtime)
+    void set_yaw_hint(float yaw_rad);
 
 private:
     SimulatedCamera sim_camera_;

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FileText, Server, Cpu, Terminal, HardDrive, ExternalLink, Download, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { FileText, Server, Cpu, Terminal, HardDrive, ExternalLink, Download, ChevronRight, Camera, CheckCircle, XCircle, RefreshCw, Zap } from 'lucide-react';
 
 const API_ENDPOINTS = [
   { method: 'GET', path: '/api/health', desc: 'System health + runtime mode + build info' },
@@ -10,6 +10,7 @@ const API_ENDPOINTS = [
   { method: 'GET', path: '/api/threads', desc: 'Thread statistics (8 threads)' },
   { method: 'GET', path: '/api/engines', desc: 'Engine statistics (event, reflex, rule, memory, output)' },
   { method: 'GET', path: '/api/camera', desc: 'Camera pipeline + Visual Odometry' },
+  { method: 'GET', path: '/api/camera/frame', desc: 'Latest camera frame as PNG image' },
   { method: 'GET', path: '/api/mavlink', desc: 'MAVLink connection state' },
   { method: 'GET', path: '/api/performance', desc: 'CPU, memory, latency metrics' },
   { method: 'GET', path: '/api/simulator/config', desc: 'Current simulator parameters' },
@@ -59,38 +60,38 @@ const FILE_TREE = [
 
 const PI_INSTALL_STEPS = [
   { step: 1, title: 'Підготовка SD-карти',
-    content: 'Завантажте Raspberry Pi Imager. Виберіть "Raspberry Pi OS Lite (64-bit)" — Bookworm або новіший. В налаштуваннях (Ctrl+Shift+X): увімкніть SSH, задайте hostname "jtzero", Wi-Fi SSID/пароль.',
+    content: 'Завантажте Raspberry Pi Imager. Виберіть "Raspberry Pi OS Lite (64-bit)". В налаштуваннях: hostname "jtzero", SSH увімкнути, Wi-Fi SSID/пароль, user: pi.',
     cmd: 'https://www.raspberrypi.com/software/' },
-  { step: 2, title: 'Налаштування інтерфейсів',
-    content: 'Після першого завантаження увімкніть I2C, SPI та Serial Port через raspi-config. Це необхідно для MPU6050, BMP280 та GPS модулів.',
-    cmd: 'sudo raspi-config  # Interface Options → I2C: Yes, SPI: Yes, Serial Port: Yes (login shell: No)' },
-  { step: 3, title: 'Встановлення залежностей',
-    content: 'Встановіть компілятор, CMake, Python та pybind11. libatomic1 потрібен для lock-free операцій на ARMv8.',
-    cmd: 'sudo apt update && sudo apt install -y cmake g++ python3-dev python3-pip python3-venv pybind11-dev libatomic1 i2c-tools' },
-  { step: 4, title: 'Перевірка I2C шини',
-    content: 'Переконайтесь що сенсори підключені правильно. MPU6050 = 0x68, BMP280 = 0x76. Якщо пусто — система автоматично використає симуляцію.',
-    cmd: 'sudo i2cdetect -y 1' },
-  { step: 5, title: 'Перенесення файлів на Pi',
-    content: 'Скопіюйте весь проєкт з хост-машини на Pi через SCP або rsync.',
-    cmd: 'scp -r jt-zero/ backend/ pi@jtzero.local:~/jt-zero/' },
-  { step: 6, title: 'Збірка C++ Runtime (на Pi)',
-    content: 'Збірка безпосередньо на Pi займає ~5-10 хв. Для швидшої збірки використовуйте крос-компіляцію (див. нижче).',
-    cmd: 'cd ~/jt-zero/jt-zero && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4' },
-  { step: 7, title: 'Встановлення Python-середовища',
-    content: 'Створіть віртуальне середовище та встановіть FastAPI + WebSocket сервер.',
-    cmd: 'cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets' },
-  { step: 8, title: 'Копіювання нативного модуля',
-    content: 'Скопіюйте зібрану .so бібліотеку в каталог backend. Сервер автоматично визначить її наявність.',
-    cmd: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/' },
-  { step: 9, title: 'Перевірка нативного модуля',
-    content: 'Переконайтесь що Python може імпортувати C++ модуль. Якщо помилка — система працюватиме в режимі симулятора.',
-    cmd: 'cd ~/jt-zero/backend && source venv/bin/activate && python3 -c "import jtzero_native; print(\'OK\')"' },
-  { step: 10, title: 'Запуск сервера',
-    content: 'Запустіть FastAPI сервер. Dashboard буде доступний на http://<PI_IP>:8001. WebSocket телеметрія — ws://<PI_IP>:8001/api/ws/telemetry',
+  { step: 2, title: 'Підключення SSH',
+    content: 'Вставте SD-карту в Pi, увімкніть живлення, зачекайте 1-2 хв. Підключіться з комп\'ютера через SSH.',
+    cmd: 'ssh pi@jtzero.local' },
+  { step: 3, title: 'Налаштування інтерфейсів',
+    content: 'Увімкніть I2C, SPI та Serial Port через raspi-config. Serial: login shell = No, hardware = Yes. Потім перезавантажте.',
+    cmd: 'sudo raspi-config  # Interface Options → I2C/SPI/Serial → Yes → Finish → Reboot' },
+  { step: 4, title: 'Встановлення залежностей',
+    content: 'Компілятор, CMake, Python, pybind11, git. Займає 2-5 хвилин.',
+    cmd: 'sudo apt update && sudo apt install -y cmake g++ python3-dev python3-pip python3-venv pybind11-dev libatomic1 i2c-tools git' },
+  { step: 5, title: 'Завантаження проєкту',
+    content: 'Клонуйте репозиторій з GitHub на Pi.',
+    cmd: 'git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero' },
+  { step: 6, title: 'Виправлення для GCC 14',
+    content: 'Новий GCC 14 на Pi OS Bookworm вимагає явний include <cstdlib>.',
+    cmd: 'sed -i \'10a #include <cstdlib>\' ~/jt-zero/jt-zero/main.cpp' },
+  { step: 7, title: 'Збірка C++ Runtime',
+    content: 'Збірка на Pi займає 5-10 хв. Жовті warning — нормально, головне немає error.',
+    cmd: 'cd ~/jt-zero/jt-zero && rm -rf build && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4' },
+  { step: 8, title: 'Копіювання модуля + Python',
+    content: 'Скопіюйте .so в backend, створіть venv та встановіть FastAPI.',
+    cmd: 'cp ~/jt-zero/jt-zero/build/jtzero_native*.so ~/jt-zero/backend/ && cd ~/jt-zero/backend && python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn websockets' },
+  { step: 9, title: 'Перевірка модуля',
+    content: 'Якщо бачите OK — C++ рантайм працює. Якщо помилка — система використає Python-симулятор.',
+    cmd: 'python3 -c "import jtzero_native; print(\'OK\')"' },
+  { step: 10, title: 'Тестовий запуск',
+    content: 'Запустіть сервер вручну. Dashboard: http://jtzero.local:8001. Ctrl+C щоб зупинити.',
     cmd: 'uvicorn server:app --host 0.0.0.0 --port 8001' },
   { step: 11, title: 'Автозапуск (systemd)',
-    content: 'Створіть systemd сервіс для автоматичного запуску при завантаженні Pi.',
-    cmd: 'sudo systemctl enable jtzero && sudo systemctl start jtzero' },
+    content: 'Створіть systemd сервіс (див. DEPLOYMENT.md). Після цього JT-Zero запускатиметься автоматично.',
+    cmd: 'sudo systemctl daemon-reload && sudo systemctl enable jtzero && sudo systemctl start jtzero' },
 ];
 
 const HARDWARE_REQS = [
@@ -104,10 +105,13 @@ const HARDWARE_REQS = [
 ];
 
 export default function DocumentationTab() {
-  const [section, setSection] = useState('install');
+  const [section, setSection] = useState('quickstart');
 
   const sections = [
+    { id: 'quickstart', label: 'Quick Start', icon: Zap },
     { id: 'install', label: 'Pi Zero Install', icon: Download },
+    { id: 'camera', label: 'Camera Setup', icon: Camera },
+    { id: 'fc', label: 'Flight Controller', icon: ExternalLink },
     { id: 'wiring', label: 'Wiring / GPIO', icon: Terminal },
     { id: 'api', label: 'API Reference', icon: Server },
     { id: 'threads', label: 'Thread Model', icon: Cpu },
@@ -138,13 +142,178 @@ export default function DocumentationTab() {
 
       {/* Content */}
       <div className="flex-1 p-4 overflow-y-auto">
+        {section === 'quickstart' && <QuickStartSection />}
         {section === 'install' && <InstallSection />}
+        {section === 'camera' && <CameraSetupSection />}
+        {section === 'fc' && <FCSection />}
         {section === 'wiring' && <WiringSection />}
         {section === 'api' && <APISection />}
         {section === 'threads' && <ThreadsSection />}
         {section === 'files' && <FilesSection />}
         {section === 'hardware' && <HardwareSection />}
       </div>
+    </div>
+  );
+}
+
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+const CHECKS = [
+  { id: 'server', label: 'JT-Zero Server', desc: 'Backend is running and responding', endpoint: '/api/health', validate: d => d?.status === 'ok' },
+  { id: 'runtime', label: 'C++ Runtime', desc: 'Native C++ module loaded (not Python simulator)', endpoint: '/api/health', validate: d => d?.mode === 'native' },
+  { id: 'camera', label: 'Camera', desc: 'CSI or USB camera detected and streaming', endpoint: '/api/camera', validate: d => d?.camera_open === true },
+  { id: 'mavlink', label: 'MAVLink Connection', desc: 'Flight controller connected via UART', endpoint: '/api/mavlink', validate: d => d?.state === 'CONNECTED' },
+  { id: 'fc_type', label: 'FC Identified', desc: 'Flight controller type recognized', endpoint: '/api/mavlink', validate: d => d?.fc_autopilot && d.fc_autopilot !== 'Unknown' && d.fc_autopilot !== 'N/A' },
+  { id: 'vo', label: 'Visual Odometry', desc: 'VO messages being sent to FC', endpoint: '/api/mavlink', validate: d => (d?.vision_pos_sent || 0) > 0 },
+  { id: 'sensors', label: 'IMU Data', desc: 'IMU sensor receiving data (hardware or MAVLink)', endpoint: '/api/sensors', validate: d => d?.imu === 'mavlink' || d?.imu === 'hardware' },
+  { id: 'gps', label: 'GPS Fix', desc: 'GPS has valid fix (3D)', endpoint: '/api/state', validate: d => (d?.gps?.fix_type || 0) >= 3 && d?.gps?.satellites >= 4 },
+];
+
+function QuickStartSection() {
+  const [results, setResults] = useState({});
+  const [checking, setChecking] = useState(false);
+  const [lastCheck, setLastCheck] = useState(null);
+
+  const runChecks = useCallback(async () => {
+    setChecking(true);
+    const newResults = {};
+    const endpoints = {};
+
+    for (const check of CHECKS) {
+      if (!endpoints[check.endpoint]) {
+        try {
+          const res = await fetch(`${BACKEND_URL}${check.endpoint}`);
+          endpoints[check.endpoint] = await res.json();
+        } catch {
+          endpoints[check.endpoint] = null;
+        }
+      }
+      const data = endpoints[check.endpoint];
+      try {
+        newResults[check.id] = { ok: data ? check.validate(data) : false, data };
+      } catch {
+        newResults[check.id] = { ok: false, data: null };
+      }
+    }
+
+    setResults(newResults);
+    setChecking(false);
+    setLastCheck(new Date());
+  }, []);
+
+  useEffect(() => { runChecks(); }, [runChecks]);
+
+  const passed = Object.values(results).filter(r => r.ok).length;
+  const total = CHECKS.length;
+
+  return (
+    <div className="max-w-3xl space-y-4" data-testid="quickstart-section">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">Quick Start Check</h2>
+          <p className="text-xs text-slate-400 mt-1">Automatic system health check. Verifies all components are working.</p>
+        </div>
+        <button
+          onClick={runChecks}
+          disabled={checking}
+          data-testid="run-checks-btn"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#00F0FF]/10 border border-[#00F0FF]/30 rounded-sm text-[10px] text-[#00F0FF] font-bold uppercase tracking-wider hover:bg-[#00F0FF]/20 transition-all disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${checking ? 'animate-spin' : ''}`} />
+          {checking ? 'Checking...' : 'Re-check'}
+        </button>
+      </div>
+
+      {/* Score */}
+      <div className="p-4 bg-[#0A0C10] border border-[#1E293B] rounded-sm">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">System Readiness</span>
+          <span className={`text-lg font-bold tabular-nums ${passed === total ? 'text-emerald-400' : passed > total / 2 ? 'text-amber-400' : 'text-red-400'}`}>
+            {passed}/{total}
+          </span>
+        </div>
+        <div className="h-2 bg-black/50 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${passed === total ? 'bg-emerald-500' : passed > total / 2 ? 'bg-amber-500' : 'bg-red-500'}`}
+            style={{ width: `${(passed / total) * 100}%` }}
+          />
+        </div>
+        {lastCheck && (
+          <p className="text-[8px] text-slate-600 mt-2">
+            Last check: {lastCheck.toLocaleTimeString()}
+          </p>
+        )}
+      </div>
+
+      {/* Check items */}
+      <div className="space-y-1.5">
+        {CHECKS.map(check => {
+          const result = results[check.id];
+          const ok = result?.ok;
+          const pending = !result && checking;
+          return (
+            <div key={check.id} data-testid={`check-${check.id}`}
+              className={`flex items-center gap-3 p-3 rounded-sm border transition-all ${
+                ok ? 'bg-emerald-500/5 border-emerald-500/20' :
+                pending ? 'bg-slate-800/30 border-slate-700/30 animate-pulse' :
+                result ? 'bg-red-500/5 border-red-500/20' :
+                'bg-[#0A0C10] border-[#1E293B]'
+              }`}>
+              <div className="shrink-0">
+                {ok ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                ) : pending ? (
+                  <RefreshCw className="w-4 h-4 text-slate-500 animate-spin" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-400" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-[11px] font-bold text-slate-200">{check.label}</h4>
+                <p className="text-[9px] text-slate-500">{check.desc}</p>
+              </div>
+              <span className={`text-[9px] font-bold uppercase ${ok ? 'text-emerald-400' : pending ? 'text-slate-600' : 'text-red-400'}`}>
+                {ok ? 'PASS' : pending ? '...' : 'FAIL'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Tips based on results */}
+      {Object.keys(results).length > 0 && passed < total && (
+        <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm space-y-2">
+          <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">Fix suggestions</h4>
+          <div className="space-y-1">
+            {!results.server?.ok && (
+              <p className="text-[9px] text-slate-400">Server: Check <code className="text-cyan-400">sudo systemctl status jtzero</code></p>
+            )}
+            {!results.runtime?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">C++ Runtime: Rebuild with <code className="text-cyan-400">cd ~/jt-zero/jt-zero/build && make -j4</code></p>
+            )}
+            {!results.camera?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">Camera: Check <code className="text-cyan-400">rpicam-hello --list-cameras</code></p>
+            )}
+            {!results.mavlink?.ok && results.server?.ok && (
+              <p className="text-[9px] text-slate-400">MAVLink: Check UART wiring and <code className="text-cyan-400">ls -la /dev/ttyAMA0</code></p>
+            )}
+            {!results.vo?.ok && results.mavlink?.ok && (
+              <p className="text-[9px] text-slate-400">VO: Camera must be working. Check <code className="text-cyan-400">curl localhost:8001/api/camera</code></p>
+            )}
+            {!results.gps?.ok && (
+              <p className="text-[9px] text-slate-400">GPS: Connect GPS module or this is expected for indoor flights</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {passed === total && (
+        <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-sm text-center">
+          <p className="text-[11px] text-emerald-400 font-bold">All systems operational! Ready for flight testing.</p>
+          <p className="text-[9px] text-slate-500 mt-1">Remember: First test WITHOUT propellers!</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -226,6 +395,138 @@ WantedBy=multi-user.target`
   );
 }
 
+const CAMERA_STEPS = [
+  { step: 1, title: "Підключення камери",
+    content: "Вимкніть Pi. Pi Zero 2W має міні-CSI роз'єм (22-pin) — стандартний 15-pin шлейф від Pi 3/4 НЕ підходить! Потрібен перехідник 'Pi Zero Camera Cable'. Вставте шлейф контактами вниз, синьою стороною вгору. Закрийте фіксатор.",
+    cmd: null },
+  { step: 2, title: "Встановлення libcamera",
+    content: "На Bookworm (Pi OS 12) libcamera може бути не встановлена за замовчуванням.",
+    cmd: "sudo apt update && sudo apt install -y libcamera-apps libcamera-dev" },
+  { step: 3, title: "Перевірка boot config",
+    content: "Переконайтесь що camera_auto_detect=1 є в конфігурації.",
+    cmd: "grep -i camera /boot/firmware/config.txt\n# Якщо немає:\necho 'camera_auto_detect=1' | sudo tee -a /boot/firmware/config.txt" },
+  { step: 4, title: "Перезавантаження",
+    content: "Після зміни boot config потрібне перезавантаження.",
+    cmd: "sudo reboot" },
+  { step: 5, title: "Перевірка камери",
+    content: "Перевірте що libcamera бачить камеру. На Pi OS Trixie/Bookworm команди починаються з rpicam- (не libcamera-).",
+    cmd: "rpicam-hello --list-cameras\n# Маєте побачити список камер (ov5647/imx219/imx708)\nrpicam-hello --timeout 2000" },
+  { step: 6, title: "Тестове фото",
+    content: "Якщо rpicam-hello працює — зробіть фото для перевірки якості.",
+    cmd: "rpicam-still -o test.jpg && ls -la test.jpg" },
+];
+
+const CAMERA_TROUBLESHOOT = [
+  { problem: "libcamera-hello: command not found", solution: "На Pi OS Trixie/Bookworm команди перейменовані: rpicam-hello, rpicam-still, rpicam-vid" },
+  { problem: "vcgencmd get_camera → detected=0", solution: "Перевірте шлейф і boot config. Для Pi Camera v3: додайте dtoverlay=imx708 в config.txt" },
+  { problem: "Немає /dev/video0", solution: "Камера не підключена або шлейф пошкоджений. Перевірте: dmesg | grep -i camera" },
+  { problem: "raspi-config не має пункту Camera", solution: "Це нормально для Bookworm. Камера увімкнена через camera_auto_detect=1 в config.txt" },
+  { problem: "Зображення темне/розмите", solution: "Pi Camera v2: фокус фіксований. v3: має автофокус. Перевірте освітлення." },
+];
+
+function CameraSetupSection() {
+  return (
+    <div className="max-w-3xl space-y-4" data-testid="camera-setup-section">
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
+        Camera Setup
+      </h2>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        JT-Zero підтримує Pi Camera (CSI) та USB веб-камери. Камера потрібна для Visual Odometry —
+        визначення позиції дрона за допомогою комп'ютерного зору (без GPS).
+      </p>
+
+      {/* CSI vs USB */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-[#0A0C10] border border-emerald-500/20 rounded-sm p-3">
+          <h4 className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-2">Pi Camera (CSI) — рекомендовано</h4>
+          <ul className="text-[9px] text-slate-400 space-y-1 list-disc pl-3">
+            <li>Pi Camera v2 (IMX219) або v3 (IMX708)</li>
+            <li>Підключається через міні-CSI шлейф</li>
+            <li>Низька затримка, апаратне кодування</li>
+            <li>320x240 grayscale для VO pipeline</li>
+          </ul>
+        </div>
+        <div className="bg-[#0A0C10] border border-amber-500/20 rounded-sm p-3">
+          <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider mb-2">USB Camera — альтернатива</h4>
+          <ul className="text-[9px] text-slate-400 space-y-1 list-disc pl-3">
+            <li>Будь-яка UVC-сумісна камера</li>
+            <li>Через micro-USB OTG адаптер</li>
+            <li>Більша затримка ніж CSI</li>
+            <li>Простіше підключення</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Mini-CSI warning */}
+      <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-sm">
+        <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider mb-1">Pi Zero 2W — Міні-CSI!</p>
+        <p className="text-[9px] text-slate-400">
+          Pi Zero 2W має <span className="text-amber-400 font-bold">22-pin міні-CSI</span> роз'єм (менший за стандартний 15-pin).
+          Стандартний шлейф від Pi 3/4 <span className="text-red-400 font-bold">НЕ підходить</span>!
+          Потрібен перехідний шлейф "Pi Zero Camera Cable" (22→15 pin) або "Raspberry Pi Zero Camera Adapter".
+        </p>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-2">
+        {CAMERA_STEPS.map(({ step, title, content, cmd }) => (
+          <div key={step} className="flex gap-3 p-3 bg-[#0A0C10] border border-[#1E293B] rounded-sm">
+            <div className="w-6 h-6 shrink-0 flex items-center justify-center rounded-full bg-[#00F0FF]/10 text-[#00F0FF] text-[10px] font-bold">
+              {step}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-[11px] font-bold text-slate-200 uppercase tracking-wider">{title}</h4>
+              <p className="text-[10px] text-slate-400 mt-0.5">{content}</p>
+              {cmd && (
+                <code className="block mt-1.5 text-[9px] text-cyan-400 font-mono bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50 whitespace-pre-wrap break-all">
+                  {cmd}
+                </code>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* USB alternative */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">USB камера (альтернатива)</h4>
+        <p className="text-[9px] text-slate-400">Підключіть камеру через micro-USB OTG адаптер:</p>
+        <code className="text-[9px] text-cyan-400 font-mono block bg-black/40 px-2 py-1 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`ls /dev/video*          # Пошук відео-пристроїв
+v4l2-ctl --list-devices # Детальна інформація
+# JT-Zero автоматично визначить USB камеру`
+        }</code>
+      </div>
+
+      {/* Troubleshooting */}
+      <div className="border border-[#1E293B] rounded-sm overflow-hidden">
+        <div className="bg-[#0A0C10] px-3 py-2">
+          <h4 className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Вирішення проблем з камерою</h4>
+        </div>
+        <div className="divide-y divide-[#1E293B]/50">
+          {CAMERA_TROUBLESHOOT.map(({ problem, solution }, i) => (
+            <div key={i} className="px-3 py-2">
+              <p className="text-[10px] text-slate-200 font-semibold">{problem}</p>
+              <p className="text-[9px] text-slate-400 mt-0.5">{solution}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Auto-detection */}
+      <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-sm">
+        <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider mb-1">Автоматичне визначення</p>
+        <p className="text-[9px] text-slate-400">
+          JT-Zero при запуску автоматично сканує: <span className="text-cyan-400">CSI → USB → Симуляція</span>.
+          Якщо камера працює з libcamera-hello — JT-Zero її побачить. Жодного додаткового налаштування не потрібно.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+
 const GPIO_WIRING = [
   { sensor: 'MPU6050 (IMU)', pin_sda: 'GPIO 2 (Pin 3)', pin_scl: 'GPIO 3 (Pin 5)', pin_extra: 'VCC: 3.3V (Pin 1), GND: Pin 6', bus: 'I2C-1', addr: '0x68' },
   { sensor: 'BMP280 (Baro)', pin_sda: 'GPIO 2 (Pin 3)', pin_scl: 'GPIO 3 (Pin 5)', pin_extra: 'VCC: 3.3V (Pin 1), GND: Pin 9', bus: 'I2C-1', addr: '0x76' },
@@ -287,6 +588,299 @@ function WiringSection() {
           JT-Zero автоматично сканує I2C шину при запуску. Якщо сенсор не знайдено —
           відповідний канал переходить у режим симуляції. Жодного налаштування не потрібно.
         </p>
+      </div>
+    </div>
+  );
+}
+
+
+const FC_CONFIGS = [
+  { fc: 'Matek H743-SLIM V3', uart: 'UART3', pins: 'TX3 / RX3', serial: 'SERIAL4', rec: true },
+  { fc: 'SpeedyBee F405 V4', uart: 'UART4', pins: 'TX4 / RX4', serial: 'SERIAL4', rec: false },
+  { fc: 'Pixhawk 2.4.8', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
+  { fc: 'Cube Orange+', uart: 'TELEM2', pins: 'Pin 2(TX) / Pin 3(RX)', serial: 'SERIAL2', rec: false },
+];
+
+const ARDUPILOT_PARAMS = [
+  { param: 'SERIALx_PROTOCOL', value: '2', desc: 'MAVLink2 протокол' },
+  { param: 'SERIALx_BAUD', value: '115', desc: '115200 бод' },
+  { param: 'VISO_TYPE', value: '1', desc: 'MAVLink vision position' },
+  { param: 'EK3_SRC1_POSXY', value: '6', desc: 'ExternalNav (Visual Odometry)' },
+  { param: 'EK3_SRC1_VELXY', value: '6', desc: 'ExternalNav velocity' },
+  { param: 'EK3_SRC1_POSZ', value: '1', desc: 'Barometer (висота)' },
+  { param: 'FLOW_TYPE', value: '1', desc: 'MAVLink optical flow' },
+];
+
+function FCSection() {
+  return (
+    <div className="max-w-4xl space-y-4" data-testid="fc-section">
+      <h2 className="text-base font-bold text-[#00F0FF] uppercase tracking-wider">
+        Flight Controller Connection
+      </h2>
+      <p className="text-xs text-slate-400 leading-relaxed">
+        JT-Zero працює як companion computer. З'єднується з FC через UART (MAVLink2).
+        Pi відправляє Visual Odometry та Optical Flow дані в EKF польотника.
+      </p>
+
+      {/* Wiring diagram */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">
+          Підключення (3 дроти)
+        </h4>
+        <pre className="text-[9px] font-mono leading-relaxed">{
+`  Pi Zero 2W                 Flight Controller
+  ──────────                 ─────────────────
+  `}<span className="text-emerald-400">{`Pin 8  (GPIO14, TX) ──────► RX  (UART порт FC)`}</span>{`
+  `}<span className="text-amber-400">{`Pin 10 (GPIO15, RX) ◄────── TX  (UART порт FC)`}</span>{`
+  `}<span className="text-slate-500">{`Pin 6  (GND)        ─────── GND (будь-який GND)`}</span>
+        </pre>
+        <p className="text-[8px] text-red-400 mt-2 font-semibold">
+          TX Pi → RX FC (перехресно!). НЕ підключайте 5V між Pi та FC.
+        </p>
+      </div>
+
+      {/* ═══ MATEK H743-SLIM V3 DETAILED ═══ */}
+      <div className="border-2 border-emerald-500/30 rounded-sm overflow-hidden">
+        <div className="bg-emerald-500/10 px-3 py-2 flex items-center gap-2">
+          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-emerald-500/20 border border-emerald-500/30 text-emerald-400">РЕКОМЕНДОВАНО</span>
+          <h3 className="text-[11px] text-emerald-400 font-bold uppercase tracking-wider">Matek H743-SLIM V3 — Детальна інструкція</h3>
+        </div>
+        <div className="p-3 space-y-3">
+          <p className="text-[10px] text-slate-400">
+            Matek H743-SLIM V3 — один з найкращих FC для роботи з companion computer.
+            STM32H743 процесор, 7 UART портів, вбудований барометр DPS310, гіроскоп ICM42688P.
+          </p>
+
+          {/* Real hardware images */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-black/30 border border-[#1E293B] rounded-sm p-2">
+              <h5 className="text-[8px] text-cyan-400 font-bold uppercase mb-1">Pi Zero 2W — Pinout</h5>
+              <img 
+                src="https://customer-assets.emergentagent.com/job_005e4ff9-18ff-4dd0-95cc-8a677768a88f/artifacts/8xhhmnsw_Raspberry%20Pi%20Zero%20W%202%20pinout1.png"
+                alt="Raspberry Pi Zero 2W pinout"
+                className="w-full rounded-sm"
+                data-testid="pi-pinout-img"
+              />
+              <p className="text-[7px] text-slate-500 mt-1">Pin 8 (GPIO14) = TX, Pin 10 (GPIO15) = RX, Pin 6 = GND</p>
+            </div>
+            <div className="bg-black/30 border border-[#1E293B] rounded-sm p-2">
+              <h5 className="text-[8px] text-cyan-400 font-bold uppercase mb-1">Matek H743-SLIM V3</h5>
+              <img 
+                src="https://customer-assets.emergentagent.com/job_005e4ff9-18ff-4dd0-95cc-8a677768a88f/artifacts/jvm9rhy3_poletnyj-kontroller-matek-h743-slim-v3-3.jpg"
+                alt="Matek H743-SLIM V3 board"
+                className="w-full rounded-sm"
+                data-testid="matek-board-img"
+              />
+              <p className="text-[7px] text-slate-500 mt-1">TX3/RX3 на нижньому лівому краю плати (поряд з TX2/RX2)</p>
+            </div>
+          </div>
+
+          {/* Board UART mapping */}
+          <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3">
+            <h4 className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-2">UART маппінг Matek H743 (ArduPilot)</h4>
+            <pre className="text-[8px] text-slate-400 font-mono leading-relaxed">{
+`  Matek H743-SLIM V3 — UART → ArduPilot SERIAL
+  ──────────────────────────────────────────────
+  SERIAL1 = UART7 (TX7/RX7)  — з RTS/CTS
+  SERIAL2 = UART1 (TX1/RX1)
+  SERIAL3 = UART2 (TX2/RX2)
+  `}<span className="text-emerald-400 font-bold">{`SERIAL4 = UART3 (TX3/RX3)  <-- JT-Zero (MAVLink2, 115200)`}</span>{`
+  SERIAL5 = UART8
+  SERIAL6 = UART4 (TX4/RX4)
+  SERIAL7 = UART6 (TX6/RX6)  — за замовч. RCIN`
+            }</pre>
+          </div>
+
+          {/* Wiring table */}
+          <div className="border border-[#1E293B] rounded-sm overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-[#0A0C10] text-[9px] text-slate-500 uppercase tracking-wider">
+                  <th className="text-left px-3 py-2">Дріт</th>
+                  <th className="text-left px-3 py-2">Від (Pi Zero 2W)</th>
+                  <th className="text-left px-3 py-2">До (Matek H743)</th>
+                  <th className="text-left px-3 py-2">Колір</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { n: '1', from: 'Pin 8 (GPIO14, TX)', to: 'RX3 (UART3 RX)', color: 'Зелений', colorClass: 'text-emerald-400' },
+                  { n: '2', from: 'Pin 10 (GPIO15, RX)', to: 'TX3 (UART3 TX)', color: 'Жовтий', colorClass: 'text-amber-400' },
+                  { n: '3', from: 'Pin 6 (GND)', to: 'GND (будь-який)', color: 'Чорний', colorClass: 'text-slate-400' },
+                ].map(({ n, from, to, color, colorClass }) => (
+                  <tr key={n} className="border-t border-[#1E293B]/50">
+                    <td className="px-3 py-1.5 text-[10px] text-slate-400 font-bold">{n}</td>
+                    <td className="px-3 py-1.5 text-[10px] text-cyan-400 font-mono">{from}</td>
+                    <td className="px-3 py-1.5 text-[10px] text-emerald-400 font-mono">{to}</td>
+                    <td className={`px-3 py-1.5 text-[10px] font-bold ${colorClass}`}>{color}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ArduPilot params for Matek */}
+          <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3 space-y-2">
+            <h4 className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+              ArduPilot параметри для Matek H743 SERIAL4 (UART3)
+            </h4>
+            <p className="text-[8px] text-slate-500">
+              Mission Planner → Config/Tuning → Full Parameter List
+            </p>
+            <code className="text-[9px] font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`# === SERIAL4 (UART3) — Companion Computer (JT-Zero) ===
+SERIAL4_PROTOCOL = 2          # MAVLink2
+SERIAL4_BAUD     = 115        # 115200 бод
+
+# === EKF — приймати Visual Odometry ===
+VISO_TYPE        = 1          # MAVLink vision position
+EK3_SRC1_POSXY   = 6          # ExternalNav (VO)
+EK3_SRC1_VELXY   = 6          # ExternalNav velocity
+EK3_SRC1_POSZ    = 1          # Barometer (висота)
+EK3_SRC1_YAW     = 1          # Compass
+
+# === Optical Flow (опціонально) ===
+FLOW_TYPE        = 1          # MAVLink optical flow
+
+# === System ===
+SYSID_THISMAV    = 1          # System ID`
+            }</code>
+            <p className="text-[8px] text-amber-400 font-semibold">
+              Після зміни: Write Params → перезавантажте FC
+            </p>
+          </div>
+
+          {/* JT-Zero config */}
+          <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3 space-y-2">
+            <h4 className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
+              Конфігурація JT-Zero на Pi
+            </h4>
+            <code className="text-[9px] font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`# Відредагуйте /home/pi/jt-zero/backend/.env:
+MAVLINK_TRANSPORT=serial
+MAVLINK_DEVICE=/dev/ttyAMA0
+MAVLINK_BAUD=115200
+
+# Перезапустіть:
+sudo systemctl restart jtzero`
+            }</code>
+          </div>
+
+          {/* Verification steps */}
+          <div className="bg-black/30 border border-[#1E293B] rounded-sm p-3 space-y-2">
+            <h4 className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
+              Перевірка з'єднання
+            </h4>
+            <code className="text-[9px] font-mono block bg-black/40 px-2 py-1.5 rounded-sm border border-[#1E293B]/50 whitespace-pre leading-relaxed">{
+`# 1. Перевірити UART:
+ls -la /dev/ttyAMA0
+
+# 2. Логи JT-Zero:
+journalctl -u jtzero -f
+# Маєте побачити: [MAVLink] Serial opened: /dev/ttyAMA0 @ 921600
+
+# 3. В Mission Planner → Messages:
+# VISION_POSITION_ESTIMATE або Companion heartbeat`
+            }</code>
+          </div>
+        </div>
+      </div>
+
+      {/* Other FC table */}
+      <div className="space-y-2">
+        <h3 className="text-[11px] text-slate-300 font-bold uppercase tracking-wider">Інші контролери</h3>
+        <div className="border border-[#1E293B] rounded-sm overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-[#0A0C10] text-[9px] text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-3 py-2">Контролер</th>
+                <th className="text-left px-3 py-2">UART порт</th>
+                <th className="text-left px-3 py-2">Піни на платі</th>
+                <th className="text-left px-3 py-2">ArduPilot Serial</th>
+              </tr>
+            </thead>
+            <tbody>
+              {FC_CONFIGS.filter(fc => !fc.rec).map(({ fc, uart, pins, serial }) => (
+                <tr key={fc} className="border-t border-[#1E293B]/50">
+                  <td className="px-3 py-1.5 text-[10px] text-slate-200 font-semibold">{fc}</td>
+                  <td className="px-3 py-1.5 text-[9px] text-cyan-400 font-mono">{uart}</td>
+                  <td className="px-3 py-1.5 text-[9px] text-slate-400 font-mono">{pins}</td>
+                  <td className="px-3 py-1.5 text-[9px] text-amber-400 font-bold">{serial}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ArduPilot params (general) */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider">
+          Параметри ArduPilot — загальне
+        </h4>
+        <p className="text-[8px] text-slate-600">
+          Замініть "x" на номер вашого Serial (6 для Matek, 4 для SpeedyBee, 2 для Pixhawk)
+        </p>
+        <div className="space-y-0.5">
+          {ARDUPILOT_PARAMS.map(({ param, value, desc }) => (
+            <div key={param} className="flex items-center gap-2 py-0.5">
+              <code className="text-[9px] text-cyan-400 font-mono w-36">{param}</code>
+              <span className="text-[9px] text-amber-400 font-bold w-8">{value}</span>
+              <span className="text-[8px] text-slate-500">{desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Pixhawk TELEM2 pinout */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">
+          Pixhawk / Cube Orange+ — TELEM2 конектор
+        </h4>
+        <pre className="text-[9px] font-mono text-slate-400 leading-relaxed">{
+`  TELEM2 (DF13 або JST-GH):
+  ┌─────────────────────────────┐
+  │ 1: 5V  (`}<span className="text-red-400">НЕ підключати!</span>{`)     │
+  │ 2: TX  → RX Pi (Pin 10)    │
+  │ 3: RX  → TX Pi (Pin 8)     │
+  │ 4: CTS (не підключати)     │
+  │ 5: RTS (не підключати)     │
+  │ 6: GND → GND Pi (Pin 6)    │
+  └─────────────────────────────┘`
+        }</pre>
+      </div>
+
+      {/* Safety */}
+      <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-sm space-y-1">
+        <p className="text-[10px] text-red-400 font-semibold uppercase tracking-wider">Безпека</p>
+        <ul className="text-[9px] text-slate-400 space-y-0.5 list-disc pl-4">
+          <li>Перший тест — БЕЗ пропелерів, з USB живленням</li>
+          <li>ЗАВЖДИ майте RC пульт для екстренного перемикання в STABILIZE</li>
+          <li>Не підключайте 5V між Pi та FC</li>
+          <li>Перевіряйте мультиметром що UART працює на 3.3V</li>
+          <li>Тестуйте спочатку на столі, потім у польоті в LOITER/GUIDED</li>
+        </ul>
+      </div>
+
+      {/* Full drone diagram */}
+      <div className="bg-[#0A0C10] border border-[#1E293B] rounded-sm p-3">
+        <h4 className="text-[10px] text-slate-300 font-bold uppercase tracking-wider mb-2">
+          Повна схема підключення дрона
+        </h4>
+        <pre className="text-[8px] font-mono text-slate-400 leading-relaxed">{
+`                                ┌─── GPS Module
+                                │    (до FC)
+                                │
+┌──────────────┐    UART    ┌───┴──────────┐   PWM/DShot   ┌─────────┐
+│  Pi Zero 2W  │◄──────────►│ Matek H743   │──────────────►│ ESC x4  │
+│              │ TX/RX/GND  │ SLIM V3      │               │         │
+│  ┌────────┐  │            │ IMU (вбудов.)│               │ Мотори  │
+│  │ Pi Cam │  │            │ Баро (вбудов)│               └─────────┘
+│  └────────┘  │            │ RC Receiver  │◄── Пульт
+│  Wi-Fi ))))  │            └──────────────┘
+└──────────────┘
+  USB 5V (окремий)          LiPo → BEC 5V`
+        }</pre>
       </div>
     </div>
   );

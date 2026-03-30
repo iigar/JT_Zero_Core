@@ -241,6 +241,41 @@ class TestCameraEndpoint:
         # We check for existence and type, actual non-zero depends on drone movement
         print(f"VO Displacement values: vo_dx={vo_dx}, vo_dy={vo_dy}")
 
+    # New tests for long-range VO fields (iteration 14)
+    def test_camera_vo_inlier_count(self):
+        """Camera returns vo_inlier_count field (median+MAD outlier rejection)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_inlier_count" in data, "vo_inlier_count field missing"
+        assert isinstance(data["vo_inlier_count"], (int, float)), "vo_inlier_count should be numeric"
+        # Should be <= vo_features_tracked (inliers are subset of tracked)
+        assert data["vo_inlier_count"] <= data.get("vo_features_tracked", 0) + 1
+    
+    def test_camera_vo_confidence(self):
+        """Camera returns vo_confidence field (Kalman-filtered velocity confidence)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_confidence" in data, "vo_confidence field missing"
+        assert isinstance(data["vo_confidence"], (int, float)), "vo_confidence should be numeric"
+        # Confidence should be 0-1 range
+        assert 0 <= data["vo_confidence"] <= 1.0
+    
+    def test_camera_vo_position_uncertainty(self):
+        """Camera returns vo_position_uncertainty field (accumulated drift in meters)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_position_uncertainty" in data, "vo_position_uncertainty field missing"
+        assert isinstance(data["vo_position_uncertainty"], (int, float)), "vo_position_uncertainty should be numeric"
+        assert data["vo_position_uncertainty"] >= 0  # Can't be negative
+    
+    def test_camera_vo_total_distance(self):
+        """Camera returns vo_total_distance field (total distance traveled in meters)"""
+        response = requests.get(f"{BASE_URL}/api/camera")
+        data = response.json()
+        assert "vo_total_distance" in data, "vo_total_distance field missing"
+        assert isinstance(data["vo_total_distance"], (int, float)), "vo_total_distance should be numeric"
+        assert data["vo_total_distance"] >= 0  # Can't be negative
+
 
 class TestThreadCount:
     """Tests for thread count - should be 8 threads including T7_API"""
@@ -302,37 +337,138 @@ class TestMavlinkEndpoint:
 
 
 class TestPerformanceEndpoint:
-    """Tests for /api/performance endpoint - CPU/memory/latency metrics"""
+    """Tests for /api/performance endpoint - now returns 'engine' and 'system' keys with real OS metrics"""
     
     def test_performance_returns_200(self):
         """Performance endpoint returns 200"""
         response = requests.get(f"{BASE_URL}/api/performance")
         assert response.status_code == 200
     
-    def test_performance_cpu_metrics(self):
-        """Performance returns CPU metrics"""
+    def test_performance_has_engine_and_system_keys(self):
+        """Performance returns both 'engine' and 'system' keys at top level"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:  # Only available with native runtime
-            assert "total_cpu_percent" in data
-            assert "threads" in data
+        assert "engine" in data, "Missing 'engine' key in /api/performance response"
+        assert "system" in data, "Missing 'system' key in /api/performance response"
     
-    def test_performance_memory_metrics(self):
-        """Performance returns memory metrics"""
+    def test_performance_engine_has_cpu_metrics(self):
+        """Engine performance returns CPU metrics"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:
-            assert "memory" in data
-            mem = data["memory"]
-            assert "total_mb" in mem
+        engine = data.get("engine", {})
+        if engine:  # Only available with native runtime
+            assert "total_cpu_percent" in engine
+            assert "threads" in engine
     
-    def test_performance_latency_metrics(self):
-        """Performance returns latency metrics"""
+    def test_performance_engine_has_memory(self):
+        """Engine performance returns memory metrics"""
         response = requests.get(f"{BASE_URL}/api/performance")
         data = response.json()
-        if "error" not in data:
-            assert "latency" in data
-            assert "throughput" in data
+        engine = data.get("engine", {})
+        if engine:
+            assert "memory" in engine
+            mem = engine["memory"]
+            assert "total_mb" in mem or "total_bytes" in mem
+    
+    def test_performance_engine_has_latency(self):
+        """Engine performance returns latency metrics"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        engine = data.get("engine", {})
+        if engine:
+            assert "latency" in engine
+            assert "throughput" in engine
+    
+    def test_performance_system_cpu_metrics(self):
+        """System metrics returns real OS CPU data via psutil"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "cpu" in system, "Missing 'cpu' in system metrics"
+        cpu = system["cpu"]
+        assert "total_percent" in cpu
+        assert "per_core" in cpu
+        assert "core_count" in cpu
+        assert "load_1m" in cpu
+        assert isinstance(cpu["per_core"], list)
+        assert cpu["total_percent"] >= 0
+    
+    def test_performance_system_memory_metrics(self):
+        """System metrics returns real OS RAM data via psutil"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "memory" in system, "Missing 'memory' in system metrics"
+        mem = system["memory"]
+        assert "total_mb" in mem
+        assert "used_mb" in mem
+        assert "available_mb" in mem
+        assert "percent" in mem
+        assert mem["total_mb"] > 0
+    
+    def test_performance_system_disk_metrics(self):
+        """System metrics returns disk usage data"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "disk" in system, "Missing 'disk' in system metrics"
+        disk = system["disk"]
+        assert "total_gb" in disk
+        assert "used_gb" in disk
+        assert "free_gb" in disk
+        assert "percent" in disk
+    
+    def test_performance_system_network_metrics(self):
+        """System metrics returns network I/O data"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "network" in system, "Missing 'network' in system metrics"
+        net = system["network"]
+        assert "send_kbps" in net
+        assert "recv_kbps" in net
+    
+    def test_performance_system_temperature(self):
+        """System metrics returns temperature (may be 0 in container env)"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "temperature" in system, "Missing 'temperature' in system metrics"
+        # Note: temperature may be 0 in container environment (works on real Pi)
+        assert isinstance(system["temperature"], (int, float))
+    
+    def test_performance_system_process_info(self):
+        """System metrics returns process info for JT-Zero backend"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "process" in system, "Missing 'process' in system metrics"
+        proc = system["process"]
+        assert "pid" in proc
+        assert "memory_mb" in proc
+        assert "threads" in proc
+    
+    def test_performance_system_histories(self):
+        """System metrics returns history arrays for charts"""
+        response = requests.get(f"{BASE_URL}/api/performance")
+        data = response.json()
+        system = data.get("system", {})
+        
+        assert "histories" in system, "Missing 'histories' in system metrics"
+        hist = system["histories"]
+        assert "cpu" in hist
+        assert "ram" in hist
+        assert "temp" in hist
+        assert "net" in hist
+        # Histories should be arrays
+        assert isinstance(hist["cpu"], list)
+        assert isinstance(hist["ram"], list)
 
 
 class TestSimulatorConfigEndpoint:
@@ -516,6 +652,225 @@ class TestEventDeduplication:
         # SYS_HEARTBEAT should not be in the response
         heartbeat_events = [e for e in data if e.get("type") in ["SYS_HEARTBEAT", "SYSTEM_HEARTBEAT"]]
         assert len(heartbeat_events) == 0, "SYS_HEARTBEAT events should be filtered out"
+
+
+class TestDiagnosticsEndpoint:
+    """Tests for /api/diagnostics endpoint - hardware diagnostics scanner (new in iteration 11)"""
+    
+    def test_diagnostics_returns_200(self):
+        """Diagnostics endpoint returns 200"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        assert response.status_code == 200
+    
+    def test_diagnostics_has_summary(self):
+        """Diagnostics returns summary with camera, i2c, spi, uart, mavlink status"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "summary" in data
+        summary = data["summary"]
+        assert "platform" in summary
+        assert "camera" in summary
+        assert "i2c_devices" in summary
+        assert "spi_available" in summary
+        assert "uart_available" in summary
+        assert "mavlink_connected" in summary
+        assert "gpio_available" in summary
+        assert "overall" in summary
+    
+    def test_diagnostics_has_platform(self):
+        """Diagnostics returns platform section with kernel and OS info"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "platform" in data
+        platform = data["platform"]
+        assert "is_raspberry_pi" in platform
+        assert "kernel" in platform
+        assert "os" in platform
+    
+    def test_diagnostics_has_camera(self):
+        """Diagnostics returns camera section with CSI and USB detection"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "camera" in data
+        cameras = data["camera"]
+        assert isinstance(cameras, list)
+        assert len(cameras) == 2  # CSI and USB
+        for cam in cameras:
+            assert "name" in cam
+            assert "detected" in cam
+            assert "status" in cam
+            assert "info" in cam
+    
+    def test_diagnostics_has_i2c(self):
+        """Diagnostics returns I2C section with bus count and device list"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "i2c" in data
+        i2c = data["i2c"]
+        assert "available" in i2c
+        assert "buses" in i2c
+        assert "devices" in i2c
+        assert isinstance(i2c["buses"], list)
+        assert isinstance(i2c["devices"], list)
+    
+    def test_diagnostics_has_spi(self):
+        """Diagnostics returns SPI section with availability"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "spi" in data
+        spi = data["spi"]
+        assert "available" in spi
+        assert "devices" in spi
+        assert "info" in spi
+    
+    def test_diagnostics_has_uart(self):
+        """Diagnostics returns UART section with available and unavailable ports"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "uart" in data
+        uart = data["uart"]
+        assert "ports" in uart
+        assert "available_count" in uart
+        assert isinstance(uart["ports"], list)
+        for port in uart["ports"]:
+            assert "device" in port
+            assert "description" in port
+            assert "available" in port
+    
+    def test_diagnostics_has_gpio(self):
+        """Diagnostics returns GPIO section with sysfs, gpiomem, gpiochip0 status"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "gpio" in data
+        gpio = data["gpio"]
+        assert "sysfs_available" in gpio
+        assert "gpiomem" in gpio
+        assert "gpiochip0" in gpio
+    
+    def test_diagnostics_has_mavlink(self):
+        """Diagnostics returns MAVLink section with connection status, FC type, firmware"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "mavlink" in data
+        mavlink = data["mavlink"]
+        assert "connected" in mavlink
+        assert "fc_type" in mavlink
+        assert "fc_firmware" in mavlink
+    
+    def test_diagnostics_has_metadata(self):
+        """Diagnostics returns timestamp and scan duration"""
+        response = requests.get(f"{BASE_URL}/api/diagnostics")
+        data = response.json()
+        assert "timestamp" in data
+        assert "scan_duration_ms" in data
+        assert isinstance(data["timestamp"], (int, float))
+        assert isinstance(data["scan_duration_ms"], (int, float))
+
+
+class TestDiagnosticsScanEndpoint:
+    """Tests for POST /api/diagnostics/scan endpoint - triggers fresh scan (new in iteration 11)"""
+    
+    def test_diagnostics_scan_returns_200(self):
+        """Diagnostics scan POST returns 200"""
+        response = requests.post(f"{BASE_URL}/api/diagnostics/scan")
+        assert response.status_code == 200
+    
+    def test_diagnostics_scan_returns_fresh_results(self):
+        """Diagnostics scan returns fresh results with new timestamp"""
+        # Get cached diagnostics first
+        cached = requests.get(f"{BASE_URL}/api/diagnostics").json()
+        cached_ts = cached.get("timestamp", 0)
+        
+        # Wait a bit and trigger fresh scan
+        time.sleep(0.1)
+        scanned = requests.post(f"{BASE_URL}/api/diagnostics/scan").json()
+        scanned_ts = scanned.get("timestamp", 0)
+        
+        # Fresh scan should have newer timestamp
+        assert scanned_ts > cached_ts, "Fresh scan should have newer timestamp"
+        
+        # Verify same structure as GET
+        assert "summary" in scanned
+        assert "platform" in scanned
+        assert "camera" in scanned
+        assert "i2c" in scanned
+        assert "spi" in scanned
+        assert "uart" in scanned
+        assert "gpio" in scanned
+        assert "mavlink" in scanned
+
+
+class TestSensorsEndpoint:
+    """Tests for /api/sensors endpoint - C++ sensor driver modes (new in iteration 12)"""
+    
+    def test_sensors_returns_200(self):
+        """Sensors endpoint returns 200"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        assert response.status_code == 200
+    
+    def test_sensors_has_all_sensor_keys(self):
+        """Sensors endpoint returns imu, baro, gps, rangefinder, optical_flow keys"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        required_keys = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        for key in required_keys:
+            assert key in data, f"Missing sensor key: {key}"
+    
+    def test_sensors_mode_values(self):
+        """Each sensor has 'simulated', 'hardware', or 'mavlink' mode value"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        sensor_keys = ["imu", "baro", "gps", "rangefinder", "optical_flow"]
+        valid_modes = ["simulated", "hardware", "mavlink"]  # mavlink = data from flight controller
+        for key in sensor_keys:
+            mode = data.get(key)
+            assert mode in valid_modes, f"Sensor {key} has invalid mode: {mode}"
+    
+    def test_sensors_hw_info_sub_object(self):
+        """Sensors endpoint returns hw_info sub-object with detection details"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        
+        assert "hw_info" in data, "Missing hw_info sub-object"
+        hw_info = data["hw_info"]
+        
+        # Check expected hw_info fields
+        expected_fields = [
+            "i2c_available",
+            "imu_detected",
+            "baro_detected",
+            "gps_detected",
+            "spi_available",
+            "uart_available",
+            "imu_model",
+            "baro_model",
+            "gps_model",
+        ]
+        for field in expected_fields:
+            assert field in hw_info, f"Missing hw_info field: {field}"
+    
+    def test_sensors_hw_info_boolean_types(self):
+        """hw_info boolean fields have correct types"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        hw_info = data["hw_info"]
+        
+        boolean_fields = ["i2c_available", "imu_detected", "baro_detected", "gps_detected", 
+                          "spi_available", "uart_available"]
+        for field in boolean_fields:
+            assert isinstance(hw_info[field], bool), f"hw_info.{field} should be boolean"
+    
+    def test_sensors_hw_info_model_strings(self):
+        """hw_info model fields are strings"""
+        response = requests.get(f"{BASE_URL}/api/sensors")
+        data = response.json()
+        hw_info = data["hw_info"]
+        
+        model_fields = ["imu_model", "baro_model", "gps_model"]
+        for field in model_fields:
+            assert isinstance(hw_info[field], str), f"hw_info.{field} should be string"
 
 
 class TestHardwareEndpoint:

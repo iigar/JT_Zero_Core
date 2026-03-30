@@ -26,12 +26,27 @@ function TelemetryRow({ label, value, unit, color }) {
   );
 }
 
-export default function SensorPanels({ state, history }) {
+function SourceBadge({ mode }) {
+  if (!mode) return null;
+  const colors = {
+    hardware: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
+    mavlink: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10',
+    simulated: 'text-amber-400 border-amber-500/30 bg-amber-500/10',
+  };
+  const labels = { hardware: 'HW', mavlink: 'MAV', simulated: 'SIM' };
+  return (
+    <span className={`text-[7px] font-bold uppercase px-1 py-0 rounded-sm border ml-1 ${colors[mode] || colors.simulated}`}>
+      {labels[mode] || mode}
+    </span>
+  );
+}
+
+function SensorPanelsInner({ state, history, sensorModes }) {
   return (
     <div className="grid grid-cols-2 gap-2 h-full" data-testid="sensor-panels">
       {/* IMU Panel */}
       <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="imu-panel">
-        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">IMU</h3>
+        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">IMU<SourceBadge mode={sensorModes?.imu} /></h3>
         <div className="grid grid-cols-2 gap-x-4">
           <div>
             <span className="text-[8px] text-slate-700 uppercase">Gyroscope (rad/s)</span>
@@ -53,7 +68,7 @@ export default function SensorPanels({ state, history }) {
 
       {/* Barometer Panel */}
       <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="baro-panel">
-        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Barometer</h3>
+        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">Barometer<SourceBadge mode={sensorModes?.baro} /></h3>
         <TelemetryRow label="PRESS" value={state?.baro?.pressure?.toFixed(2)} unit="hPa" />
         <TelemetryRow label="ALT" value={state?.baro?.altitude?.toFixed(2)} unit="m" />
         <TelemetryRow label="TEMP" value={state?.baro?.temperature?.toFixed(1)} unit="C" />
@@ -64,15 +79,29 @@ export default function SensorPanels({ state, history }) {
 
       {/* GPS Panel */}
       <div className="panel-glass p-3 relative corner-bracket overflow-hidden" data-testid="gps-panel">
-        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">GPS</h3>
-        <TelemetryRow label="LAT" value={state?.gps?.lat?.toFixed(6)} unit="deg" />
-        <TelemetryRow label="LON" value={state?.gps?.lon?.toFixed(6)} unit="deg" />
-        <TelemetryRow label="ALT" value={state?.gps?.alt?.toFixed(1)} unit="m" />
-        <TelemetryRow label="SPD" value={state?.gps?.speed?.toFixed(1)} unit="m/s" />
-        <div className="flex justify-between mt-1">
-          <span className="text-[9px] text-slate-600">SAT: <span className="text-emerald-400 font-bold">{state?.gps?.satellites || 0}</span></span>
-          <span className="text-[9px] text-slate-600">FIX: <span className="text-emerald-400 font-bold">{state?.gps?.fix_type || 0}D</span></span>
-        </div>
+        <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2 font-semibold">GPS<SourceBadge mode={sensorModes?.gps} /></h3>
+        {sensorModes?.gps === 'simulated' ? (
+          <div className="text-center py-3">
+            <span className="text-[10px] text-amber-400 font-semibold">Simulated Data</span>
+            <p className="text-[8px] text-slate-600 mt-1">No real GPS connected</p>
+          </div>
+        ) : (state?.gps?.fix_type || 0) < 2 ? (
+          <div className="text-center py-3">
+            <span className="text-[10px] text-slate-500 font-semibold">No GPS Fix</span>
+            <p className="text-[8px] text-slate-600 mt-1">Satellites: {state?.gps?.satellites || 0}</p>
+          </div>
+        ) : (
+          <>
+            <TelemetryRow label="LAT" value={state?.gps?.lat?.toFixed(6)} unit="deg" />
+            <TelemetryRow label="LON" value={state?.gps?.lon?.toFixed(6)} unit="deg" />
+            <TelemetryRow label="ALT" value={state?.gps?.alt?.toFixed(1)} unit="m" />
+            <TelemetryRow label="SPD" value={state?.gps?.speed?.toFixed(1)} unit="m/s" />
+            <div className="flex justify-between mt-1">
+              <span className="text-[9px] text-slate-600">SAT: <span className="text-emerald-400 font-bold">{state?.gps?.satellites || 0}</span></span>
+              <span className="text-[9px] text-slate-600">FIX: <span className="text-emerald-400 font-bold">{state?.gps?.fix_type || 0}D</span></span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Rangefinder + Flow Panel */}
@@ -92,3 +121,6 @@ export default function SensorPanels({ state, history }) {
     </div>
   );
 }
+
+const SensorPanels = React.memo(SensorPanelsInner);
+export default SensorPanels;

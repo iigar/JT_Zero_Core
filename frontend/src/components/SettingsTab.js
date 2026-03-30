@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiCall } from '../hooks/useApi';
-import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, HardDrive, Activity, Wifi, Thermometer, MemoryStick, Server } from 'lucide-react';
+import { Settings, Wind, Battery, Gauge, RefreshCw, Cpu, Activity, Wifi, MemoryStick, Server, Camera, Mountain } from 'lucide-react';
+import DiagnosticsPanel from './DiagnosticsPanel';
 
 function Slider({ label, value, min, max, step, unit, onChange, testId }) {
   return (
@@ -45,18 +46,30 @@ function SectionCard({ title, icon: Icon, children, testId }) {
   );
 }
 
-export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink, sensorModes }) {
+export default function SettingsTab({ state, threads, engines, runtimeMode, mavlink, sensorModes, camera }) {
   const [config, setConfig] = useState({
     wind_speed: 0, wind_direction: 0,
     sensor_noise: 1, battery_drain: 1,
     mass_kg: 1.2, drag_coeff: 0.3,
   });
+  const [voProfiles, setVoProfiles] = useState([]);
+  const [activeMode, setActiveMode] = useState(1);
 
   useEffect(() => {
     apiCall('GET', '/api/simulator/config').then(data => {
       if (!data.error) setConfig(data);
     }).catch(() => {});
+    apiCall('GET', '/api/vo/profiles').then(data => {
+      if (Array.isArray(data)) setVoProfiles(data);
+    }).catch(() => {});
   }, []);
+
+  // Track active mode from camera data
+  useEffect(() => {
+    if (camera?.vo_mode !== undefined) {
+      setActiveMode(camera.vo_mode);
+    }
+  }, [camera?.vo_mode]);
 
   async function updateConfig(key, value) {
     const next = { ...config, [key]: value };
@@ -74,6 +87,15 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
     setConfig(defaults);
     await apiCall('POST', '/api/simulator/config', defaults);
   }
+
+  async function switchProfile(id) {
+    const res = await apiCall('POST', `/api/vo/profile/${id}`);
+    if (res?.success) setActiveMode(id);
+  }
+
+  const ZONE_NAMES = ['LOW', 'MEDIUM', 'HIGH', 'CRUISE'];
+  const ZONE_COLORS = ['text-emerald-400', 'text-cyan-400', 'text-amber-400', 'text-red-400'];
+  const MODE_COLORS = ['text-slate-400', 'text-cyan-400', 'text-red-400'];
 
   const activeThreads = threads?.filter(t => t.running).length || 0;
 
@@ -178,46 +200,83 @@ export default function SettingsTab({ state, threads, engines, runtimeMode, mavl
           </div>
         </div>
 
-        {/* Row 2: Hardware Sensors + Thread Details */}
+        {/* Row 2: VO Configuration */}
         <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-6">
-            <SectionCard title="Hardware Sensors" icon={HardDrive} testId="settings-hardware">
-              <div className="space-y-1.5">
-                {[
-                  { name: 'IMU (MPU6050)', bus: 'I2C 0x68', data: state?.imu, key: 'imu' },
-                  { name: 'Barometer (BMP280)', bus: 'I2C 0x76', data: state?.baro, key: 'baro' },
-                  { name: 'GPS (NMEA)', bus: 'UART 9600', data: state?.gps, key: 'gps' },
-                  { name: 'Rangefinder', bus: 'I2C/UART', data: state?.rangefinder, key: 'rangefinder' },
-                  { name: 'Optical Flow', bus: 'SPI', data: state?.optical_flow, key: 'optical_flow' },
-                ].map(({ name, bus, data, key }) => {
-                  const isHardware = sensorModes?.[key] === 'hardware';
-                  return (
-                  <div key={name} className="flex items-center justify-between py-1 border-b border-[#1E293B]/30">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${data?.valid ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]' : 'bg-slate-700'}`} />
-                      <span className="text-[10px] text-slate-300">{name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[8px] text-slate-600 font-mono">{bus}</span>
-                      <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm border ${
-                        isHardware
-                          ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
-                          : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
-                      }`} data-testid={`sensor-mode-${key}`}>
-                        {isHardware ? 'HW' : 'SIM'}
-                      </span>
-                    </div>
-                  </div>
-                  );
-                })}
+          {/* VO Mode Selection */}
+          <div className="col-span-7">
+            <SectionCard title="VO Mode" icon={Camera} testId="settings-vo-modes">
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-2">
+                  {voProfiles.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => switchProfile(p.id)}
+                      data-testid={`vo-mode-${p.id}`}
+                      className={`relative p-2 border rounded-sm text-left transition-all ${
+                        activeMode === p.id
+                          ? 'border-[#00F0FF]/60 bg-[#00F0FF]/5'
+                          : 'border-[#1E293B] bg-black/20 hover:border-[#1E293B]/80'
+                      }`}
+                    >
+                      {activeMode === p.id && (
+                        <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#00F0FF]" />
+                      )}
+                      <div className={`text-[10px] font-bold ${MODE_COLORS[p.id] || 'text-slate-300'}`}>{p.name}</div>
+                      <div className="text-[8px] text-slate-500 mt-1 space-y-0.5">
+                        <div>FAST={p.fast_threshold} LK={p.lk_window}px</div>
+                        <div>{p.max_features} features, {p.lk_iterations} iter</div>
+                      </div>
+                    </button>
+                  ))}
+                  {voProfiles.length === 0 && (
+                    <p className="text-[9px] text-slate-600 col-span-3">Loading modes...</p>
+                  )}
+                </div>
+                <div className="text-[8px] text-slate-600 mt-1">
+                  Platform: <span className="text-slate-400">{camera?.platform_name || 'Pi Zero 2W'}</span> ({camera?.width || 640}x{camera?.height || 480})
+                  — resolution fixed at startup
+                </div>
               </div>
-              <p className="text-[8px] text-slate-600 mt-2">
-                Sensors auto-detect hardware. Missing devices fall back to simulation.
-              </p>
             </SectionCard>
           </div>
 
-          <div className="col-span-6">
+          {/* Adaptive VO Status */}
+          <div className="col-span-5">
+            <SectionCard title="Adaptive VO Status" icon={Mountain} testId="settings-vo-adaptive">
+              <div className="space-y-1">
+                <InfoRow label="Altitude Zone" 
+                  value={camera?.altitude_zone_name || ZONE_NAMES[camera?.altitude_zone || 0] || 'LOW'}
+                  color={ZONE_COLORS[camera?.altitude_zone || 0]} />
+                <InfoRow label="FAST Threshold" value={camera?.adaptive_fast_thresh?.toFixed(0) || 25} />
+                <InfoRow label="LK Window" value={`${camera?.adaptive_lk_window?.toFixed(0) || 7}px`} />
+                <InfoRow label="VO Mode" value={camera?.vo_mode_name || 'Balanced'}
+                  color={MODE_COLORS[camera?.vo_mode ?? 1] || 'text-cyan-400'} />
+                <InfoRow label="Platform" value={`${camera?.platform_name || 'Pi Zero 2W'} (${camera?.width || 640}x${camera?.height || 480})`}
+                  color="text-slate-400" />
+                <div className="h-px bg-[#1E293B]/50 my-1" />
+                <InfoRow label="Hover Detected" 
+                  value={camera?.hover_detected ? 'YES' : 'NO'}
+                  color={camera?.hover_detected ? 'text-violet-400' : 'text-slate-500'} />
+                {camera?.hover_detected && (
+                  <>
+                    <InfoRow label="Hover Duration" value={`${(camera?.hover_duration || 0).toFixed(0)}s`}
+                      color="text-violet-400" />
+                    <InfoRow label="Yaw Drift" value={`${((camera?.yaw_drift_rate || 0) * 57.2958).toFixed(3)}°/s`}
+                      color="text-amber-400" />
+                    <InfoRow label="Corrected Yaw" value={`${((camera?.corrected_yaw || 0) * 57.2958).toFixed(1)}°`} />
+                  </>
+                )}
+              </div>
+            </SectionCard>
+          </div>
+        </div>
+
+        {/* Row 3: Hardware Diagnostics */}
+        <DiagnosticsPanel />
+
+        {/* Row 3: Thread Details */}
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-12">
             <SectionCard title="Thread Status" icon={Activity} testId="settings-threads">
               <div className="space-y-1">
                 {threads?.map((t, i) => (

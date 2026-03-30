@@ -1,0 +1,6 @@
+# JT-Zero dependencies for Raspberry Pi
+# Install: pip install -r requirements-pi.txt
+fastapi>=0.115.0
+uvicorn>=0.30.0
+websockets>=13.0
+psutil>=5.9.0
