@@ -13,6 +13,7 @@
 #include "jt_zero/sensors.h"
 #include "jt_zero/camera.h"
 #include "jt_zero/mavlink_interface.h"
+#include "../drivers/bus.h"
 
 #include <thread>
 #include <atomic>
@@ -54,6 +55,12 @@ public:
     RangefinderSensor&  range() { return range_; }
     OpticalFlowSensor&  flow()  { return flow_; }
     
+    const IMUSensor&          imu()   const { return imu_; }
+    const BarometerSensor&    baro()  const { return baro_; }
+    const GPSSensor&          gps()   const { return gps_sensor_; }
+    const RangefinderSensor&  range() const { return range_; }
+    const OpticalFlowSensor&  flow()  const { return flow_; }
+    
     // Access camera & MAVLink
     CameraPipeline&    camera()  { return camera_; }
     MAVLinkInterface&  mavlink() { return mavlink_; }
@@ -62,6 +69,9 @@ public:
     
     // Command interface
     bool send_command(const char* cmd, float param1 = 0, float param2 = 0);
+    
+    // Hardware info
+    const HardwareInfo& hw_info() const { return hw_info_; }
     
     // Thread stats
     struct ThreadStats {
@@ -102,6 +112,13 @@ private:
     CameraPipeline    camera_;
     MAVLinkInterface  mavlink_;
     
+    // Hardware buses (for direct sensor access)
+    I2CBus  i2c_bus_;
+    UARTBus gps_uart_;
+    
+    // Hardware detection result
+    HardwareInfo hw_info_;
+    
     // State
     SystemState state_;
     SimulatorConfig sim_config_;
@@ -116,6 +133,7 @@ private:
     std::thread t4_rules_;
     std::thread t5_mavlink_;
     std::thread t6_camera_;
+    std::thread t7_api_;
     
     // Thread stats (lock-free access)
     static constexpr int NUM_THREADS = 8;
@@ -136,6 +154,7 @@ private:
     void rule_loop();           // T4: 20 Hz
     void mavlink_loop();        // T5: 50 Hz
     void camera_loop();         // T6: 15 FPS
+    void api_bridge_loop();     // T7: 30 Hz
     
     // Setup default rules
     void setup_default_reflexes();

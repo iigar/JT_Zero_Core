@@ -152,10 +152,29 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
         "height"_a = cs.height,
         "vo_features_detected"_a = cs.vo_features_detected,
         "vo_features_tracked"_a = cs.vo_features_tracked,
+        "vo_inlier_count"_a = cs.vo_inlier_count,
         "vo_tracking_quality"_a = cs.vo_tracking_quality,
+        "vo_confidence"_a = cs.vo_confidence,
+        "vo_position_uncertainty"_a = cs.vo_position_uncertainty,
+        "vo_total_distance"_a = cs.vo_total_distance,
         "vo_dx"_a = cs.vo_dx, "vo_dy"_a = cs.vo_dy, "vo_dz"_a = cs.vo_dz,
         "vo_vx"_a = cs.vo_vx, "vo_vy"_a = cs.vo_vy,
-        "vo_valid"_a = cs.vo_valid
+        "vo_valid"_a = cs.vo_valid,
+        // Platform (auto-detected)
+        "platform"_a = static_cast<int>(cs.platform),
+        "platform_name"_a = std::string(cs.platform_name),
+        // VO Mode (switchable)
+        "vo_mode"_a = static_cast<int>(cs.vo_mode),
+        "vo_mode_name"_a = std::string(cs.vo_mode_name),
+        // Adaptive parameters
+        "altitude_zone"_a = static_cast<int>(cs.altitude_zone),
+        "adaptive_fast_thresh"_a = cs.adaptive_fast_thresh,
+        "adaptive_lk_window"_a = cs.adaptive_lk_window,
+        // Hover yaw correction
+        "hover_detected"_a = cs.hover_detected,
+        "hover_duration"_a = cs.hover_duration,
+        "yaw_drift_rate"_a = cs.yaw_drift_rate,
+        "corrected_yaw"_a = cs.corrected_yaw
     );
 }
 
@@ -163,23 +182,89 @@ static py::dict camera_stats_to_dict(const jtzero::Runtime& rt) {
 
 static py::dict mavlink_stats_to_dict(const jtzero::Runtime& rt) {
     auto ms = rt.mavlink().get_stats();
-    return py::dict(
+    auto fc = rt.mavlink().get_fc_telemetry();
+    
+    // Autopilot type string
+    std::string ap_str = "Unknown";
+    if (fc.heartbeat_valid) {
+        if (fc.fc_autopilot == 3) ap_str = "ArduPilot";
+        else if (fc.fc_autopilot == 12) ap_str = "PX4";
+    } else if (ms.state == jtzero::MAVLinkState::CONNECTED) {
+        ap_str = "Simulated";
+    }
+    
+    // MAV_TYPE string
+    std::string type_str = "UNKNOWN";
+    if (fc.heartbeat_valid) {
+        switch (fc.fc_type) {
+            case 0: type_str = "GENERIC"; break;
+            case 1: type_str = "FIXED_WING"; break;
+            case 2: type_str = "QUADROTOR"; break;
+            case 3: type_str = "COAXIAL"; break;
+            case 4: type_str = "HELICOPTER"; break;
+            case 10: type_str = "GROUND_ROVER"; break;
+            case 11: type_str = "SURFACE_BOAT"; break;
+            case 12: type_str = "SUBMARINE"; break;
+            case 13: type_str = "HEXAROTOR"; break;
+            case 14: type_str = "OCTOROTOR"; break;
+            case 15: type_str = "TRICOPTER"; break;
+            case 19: type_str = "VTOL_TAILSITTER"; break;
+            case 20: type_str = "VTOL_TILTROTOR"; break;
+            case 21: type_str = "VTOL_FIXEDROTOR"; break;
+            case 22: type_str = "VTOL_TAILSITTER_DUOROTOR"; break;
+            case 29: type_str = "DODECAROTOR"; break;
+            default: type_str = "MAV_TYPE_" + std::to_string(fc.fc_type); break;
+        }
+    }
+    
+    // Diagnostic msg IDs — always available for debugging
+    py::list msg_ids;
+    for (size_t i = 0; i < rt.mavlink().diag_unique_count_; i++) {
+        msg_ids.append(static_cast<int>(rt.mavlink().diag_msg_ids_[i]));
+    }
+    
+    py::dict result(
         "state"_a = jtzero::mavstate_str(ms.state),
         "messages_sent"_a = ms.messages_sent,
         "messages_received"_a = ms.messages_received,
+        "heartbeats_received"_a = ms.heartbeats_received,
+        "bytes_received"_a = static_cast<uint64_t>(ms.bytes_received),
+        "bytes_sent"_a = static_cast<uint64_t>(ms.bytes_sent),
+        "crc_errors"_a = static_cast<uint64_t>(ms.crc_errors),
         "errors"_a = ms.errors,
         "link_quality"_a = ms.link_quality,
         "system_id"_a = static_cast<int>(ms.system_id),
         "component_id"_a = static_cast<int>(ms.component_id),
         "fc_system_id"_a = static_cast<int>(ms.fc_system_id),
-        "fc_autopilot"_a = "ArduPilot",
+        "fc_autopilot"_a = ap_str,
         "fc_firmware"_a = std::string(ms.fc_firmware),
-        "fc_type"_a = "QUADROTOR",
+        "fc_type"_a = type_str,
         "fc_armed"_a = ms.fc_armed,
+        "transport_info"_a = std::string(ms.transport_info),
+        "detected_msg_ids"_a = msg_ids,
         "vision_pos_sent"_a = ms.messages_sent / 3,
         "odometry_sent"_a = ms.messages_sent / 3,
         "optical_flow_sent"_a = ms.messages_sent / 6
     );
+    
+    // Add FC telemetry if available
+    if (fc.heartbeat_valid) {
+        result["fc_telemetry"] = py::dict(
+            "attitude_valid"_a = fc.attitude_valid,
+            "imu_valid"_a = fc.imu_valid,
+            "baro_valid"_a = fc.baro_valid,
+            "gps_valid"_a = fc.gps_valid,
+            "hud_valid"_a = fc.hud_valid,
+            "status_valid"_a = fc.status_valid,
+            "msg_count"_a = fc.msg_count,
+            "battery_voltage"_a = fc.battery_voltage,
+            "battery_remaining"_a = static_cast<int>(fc.battery_remaining),
+            "gps_fix"_a = static_cast<int>(fc.gps_fix),
+            "gps_sats"_a = static_cast<int>(fc.gps_sats)
+        );
+    }
+    
+    return result;
 }
 
 // ─── Helper: Recent events to Python list ────────────────
@@ -309,9 +394,89 @@ PYBIND11_MODULE(jtzero_native, m) {
             return camera_stats_to_dict(self);
         }, "Get camera pipeline stats as dict")
         
+        .def("get_frame_data", [](const jtzero::Runtime& self) {
+            const auto& frame = self.camera().current_frame();
+            if (!frame.info.valid) return py::bytes();
+            return py::bytes(reinterpret_cast<const char*>(frame.data),
+                             static_cast<size_t>(frame.info.width) * frame.info.height);
+        }, "Get latest camera frame as raw grayscale bytes")
+        
+        .def("get_features", [](const jtzero::Runtime& self) {
+            const auto& vo = self.camera().vo();
+            const auto& feats = vo.features();
+            size_t count = vo.feature_count();
+            py::list result;
+            for (size_t i = 0; i < count && i < jtzero::MAX_FEATURES; ++i) {
+                result.append(py::dict(
+                    "x"_a = feats[i].x,
+                    "y"_a = feats[i].y,
+                    "tracked"_a = feats[i].tracked,
+                    "response"_a = feats[i].response
+                ));
+            }
+            return result;
+        }, "Get current VO feature positions as list of dicts")
+        
         .def("get_mavlink", [](const jtzero::Runtime& self) {
             return mavlink_stats_to_dict(self);
         }, "Get MAVLink interface stats as dict")
+        
+        .def("set_vo_profile", [](jtzero::Runtime& self, int profile_id) {
+            if (profile_id >= 0 && profile_id < static_cast<int>(jtzero::NUM_VO_MODES)) {
+                self.camera().set_vo_mode(static_cast<jtzero::VOModeType>(profile_id));
+                return true;
+            }
+            return false;
+        }, py::arg("profile_id"), "Set VO mode (0=Light, 1=Balanced, 2=Performance)")
+        
+        .def("get_vo_profiles", []() {
+            py::list modes;
+            for (size_t i = 0; i < jtzero::NUM_VO_MODES; ++i) {
+                auto& m = jtzero::VO_MODES[i];
+                modes.append(py::dict(
+                    "id"_a = static_cast<int>(i),
+                    "name"_a = std::string(m.name),
+                    "type"_a = jtzero::vo_mode_str(m.type),
+                    "fast_threshold"_a = static_cast<int>(m.fast_threshold),
+                    "lk_window"_a = m.lk_window_size,
+                    "lk_iterations"_a = m.lk_iterations,
+                    "max_features"_a = static_cast<int>(m.max_features)
+                ));
+            }
+            return modes;
+        }, "Get available VO modes")
+        
+        .def("get_sensor_modes", [](const jtzero::Runtime& self) {
+            const auto& hw = self.hw_info();
+            // Determine actual data source for each sensor:
+            // - "hardware" = direct I2C/SPI driver active (hw_info detected + try_hardware succeeded)
+            // - "mavlink"  = native mode, data comes from flight controller via MAVLink
+            // - "simulated" = simulation mode
+            auto sensor_mode = [&](bool hw_detected) -> std::string {
+                if (!self.is_simulator_mode()) {
+                    return hw_detected ? "hardware" : "mavlink";
+                }
+                return "simulated";
+            };
+            return py::dict(
+                "imu"_a = sensor_mode(hw.imu_detected),
+                "baro"_a = sensor_mode(hw.baro_detected),
+                "gps"_a = sensor_mode(hw.gps_detected),
+                "rangefinder"_a = self.is_simulator_mode() ? "simulated" : "mavlink",
+                "optical_flow"_a = self.is_simulator_mode() ? "simulated" : "mavlink",
+                "hw_info"_a = py::dict(
+                    "i2c_available"_a = hw.i2c_available,
+                    "imu_detected"_a = hw.imu_detected,
+                    "baro_detected"_a = hw.baro_detected,
+                    "gps_detected"_a = hw.gps_detected,
+                    "spi_available"_a = hw.spi_available,
+                    "uart_available"_a = hw.uart_available,
+                    "imu_model"_a = std::string(hw.imu_model),
+                    "baro_model"_a = std::string(hw.baro_model),
+                    "gps_model"_a = std::string(hw.gps_model)
+                )
+            );
+        }, "Get sensor modes (hardware vs mavlink vs simulated) and detection info")
         
         .def("get_events", [](const jtzero::Runtime& self, size_t count) {
             return recent_events_to_list(self, count);
@@ -404,6 +569,10 @@ PYBIND11_MODULE(jtzero_native, m) {
             "max_features"_a = jtzero::MAX_FEATURES,
             "frame_width"_a = jtzero::FRAME_WIDTH,
             "frame_height"_a = jtzero::FRAME_HEIGHT,
+            "max_frame_width"_a = jtzero::MAX_FRAME_WIDTH,
+            "max_frame_height"_a = jtzero::MAX_FRAME_HEIGHT,
+            "num_platforms"_a = static_cast<int>(jtzero::NUM_PLATFORMS),
+            "num_vo_modes"_a = static_cast<int>(jtzero::NUM_VO_MODES),
             "telemetry_history"_a = jtzero::MemoryEngine::TELEMETRY_HISTORY,
             "event_history"_a = jtzero::MemoryEngine::EVENT_HISTORY
         );

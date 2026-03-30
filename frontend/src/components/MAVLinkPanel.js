@@ -1,7 +1,7 @@
 import React from 'react';
 import { Radio, Send, Download, Link2, AlertCircle } from 'lucide-react';
 
-export default function MAVLinkPanel({ mavlink }) {
+function MAVLinkPanelInner({ mavlink }) {
   const stateColor = {
     CONNECTED: 'text-emerald-400',
     CONNECTING: 'text-amber-400 animate-pulse',
@@ -17,7 +17,7 @@ export default function MAVLinkPanel({ mavlink }) {
   };
 
   return (
-    <div className="panel-glass p-3 relative corner-bracket" data-testid="mavlink-panel">
+    <div className="panel-glass p-3 relative corner-bracket h-full overflow-hidden" data-testid="mavlink-panel">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Radio className="w-3.5 h-3.5 text-slate-500" />
@@ -105,3 +105,6 @@ function MsgTag({ label, count }) {
     </div>
   );
 }
+
+const MAVLinkPanel = React.memo(MAVLinkPanelInner);
+export default MAVLinkPanel;

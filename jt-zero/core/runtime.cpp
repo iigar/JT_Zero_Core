@@ -19,12 +19,53 @@ Runtime::~Runtime() {
 bool Runtime::initialize() {
     std::printf("[JT-Zero] Initializing runtime...\n");
     
-    // Initialize sensors
+    // Initialize sensors (default: simulated)
     imu_.set_simulated(simulator_mode_);
     baro_.set_simulated(simulator_mode_);
     gps_sensor_.set_simulated(simulator_mode_);
     range_.set_simulated(simulator_mode_);
     flow_.set_simulated(simulator_mode_);
+    
+    // Hardware auto-detection (only when not in simulator mode)
+    if (!simulator_mode_) {
+        std::printf("[JT-Zero] Probing hardware...\n");
+        hw_info_ = detect_hardware();
+        
+        // Open I2C bus and try real sensor drivers
+        if (hw_info_.i2c_available) {
+            if (i2c_bus_.open("/dev/i2c-1")) {
+                std::printf("[JT-Zero] I2C bus opened, probing sensors...\n");
+                
+                // Try MPU6050 IMU
+                if (hw_info_.imu_detected) {
+                    if (imu_.try_hardware(i2c_bus_)) {
+                        std::printf("[JT-Zero] IMU: using real MPU6050 via I2C\n");
+                    }
+                }
+                
+                // Try BMP280 Barometer
+                if (hw_info_.baro_detected) {
+                    if (baro_.try_hardware(i2c_bus_)) {
+                        std::printf("[JT-Zero] Baro: using real BMP280 via I2C\n");
+                    }
+                }
+            }
+        }
+        
+        // Open GPS UART
+        if (hw_info_.uart_available) {
+            if (gps_uart_.open("/dev/ttyS0", 9600)) {
+                if (gps_sensor_.try_hardware(gps_uart_)) {
+                    std::printf("[JT-Zero] GPS: using real NMEA via UART\n");
+                }
+            }
+        }
+        
+        std::printf("[JT-Zero] Hardware probe complete: IMU=%s, Baro=%s, GPS=%s\n",
+                    imu_.is_simulated() ? "SIM" : "HW",
+                    baro_.is_simulated() ? "SIM" : "HW",
+                    gps_sensor_.is_simulated() ? "SIM" : "HW");
+    }
     
     if (!imu_.initialize()) {
         std::printf("[JT-Zero] IMU init failed\n");
@@ -100,8 +141,9 @@ void Runtime::start() {
     t4_rules_      = std::thread([this]() { rule_loop(); });
     t5_mavlink_    = std::thread([this]() { mavlink_loop(); });
     t6_camera_     = std::thread([this]() { camera_loop(); });
+    t7_api_        = std::thread([this]() { api_bridge_loop(); });
     
-    std::printf("[JT-Zero] All threads started (7 threads)\n");
+    std::printf("[JT-Zero] All threads started (8 threads)\n");
 }
 
 void Runtime::stop() {
@@ -117,6 +159,7 @@ void Runtime::stop() {
     if (t4_rules_.joinable())      t4_rules_.join();
     if (t5_mavlink_.joinable())    t5_mavlink_.join();
     if (t6_camera_.joinable())     t6_camera_.join();
+    if (t7_api_.joinable())        t7_api_.join();
     
     // Shutdown camera & MAVLink
     camera_.shutdown();
@@ -259,39 +302,44 @@ void Runtime::sensor_loop() {
     while (running_.load(std::memory_order_acquire)) {
         auto start = SteadyClock::now();
         
-        // IMU: every cycle (200 Hz)
-        imu_.update();
-        state_.imu = imu_.data();
+        // When real FC telemetry is available, skip simulated sensor updates
+        bool fc_active = !simulator_mode_ && mavlink_.has_fc_data();
         
-        // Derive attitude from accelerometer (simplified)
-        state_.roll  = std::atan2(state_.imu.acc_y, state_.imu.acc_z) * 57.2958f;
-        state_.pitch = std::atan2(-state_.imu.acc_x, 
-                       std::sqrt(state_.imu.acc_y * state_.imu.acc_y + 
-                                 state_.imu.acc_z * state_.imu.acc_z)) * 57.2958f;
-        state_.yaw  += state_.imu.gyro_z * (1.0f / HZ) * 57.2958f;
-        if (state_.yaw > 360.0f) state_.yaw -= 360.0f;
-        if (state_.yaw < 0.0f) state_.yaw += 360.0f;
-        
-        // Barometer: every 4th cycle (50 Hz)
-        if (cycle % 4 == 0) {
-            baro_.update();
-            state_.baro = baro_.data();
-            state_.altitude_agl = state_.baro.altitude;
+        if (!fc_active) {
+            // IMU: every cycle (200 Hz)
+            imu_.update();
+            state_.imu = imu_.data();
+            
+            // Derive attitude from accelerometer (simplified)
+            state_.roll  = std::atan2(state_.imu.acc_y, state_.imu.acc_z) * 57.2958f;
+            state_.pitch = std::atan2(-state_.imu.acc_x, 
+                           std::sqrt(state_.imu.acc_y * state_.imu.acc_y + 
+                                     state_.imu.acc_z * state_.imu.acc_z)) * 57.2958f;
+            state_.yaw  += state_.imu.gyro_z * (1.0f / HZ) * 57.2958f;
+            if (state_.yaw > 360.0f) state_.yaw -= 360.0f;
+            if (state_.yaw < 0.0f) state_.yaw += 360.0f;
+            
+            // Barometer: every 4th cycle (50 Hz)
+            if (cycle % 4 == 0) {
+                baro_.update();
+                state_.baro = baro_.data();
+                state_.altitude_agl = state_.baro.altitude;
+            }
+            
+            // GPS: every 20th cycle (10 Hz)
+            if (cycle % 20 == 0) {
+                gps_sensor_.update();
+                state_.gps = gps_sensor_.data();
+            }
         }
         
-        // GPS: every 20th cycle (10 Hz)
-        if (cycle % 20 == 0) {
-            gps_sensor_.update();
-            state_.gps = gps_sensor_.data();
-        }
-        
-        // Rangefinder: every 4th cycle (50 Hz)
+        // Rangefinder: every 4th cycle (50 Hz) — keep even with FC (no rangefinder msg)
         if (cycle % 4 == 1) {
             range_.update();
             state_.range = range_.data();
         }
         
-        // Optical Flow: every 4th cycle (50 Hz)
+        // Optical Flow: every 4th cycle (50 Hz) — keep even with FC
         if (cycle % 4 == 2) {
             flow_.update();
             state_.flow = flow_.data();
@@ -636,7 +684,76 @@ void Runtime::mavlink_loop() {
         VOResult vo = camera_.last_vo_result();
         
         // MAVLink tick: sends heartbeat, vision position, odometry, optical flow
+        // Also calls process_incoming() which parses FC responses
         mavlink_.tick(state_, vo);
+        
+        // If FC telemetry is available, feed it into system state
+        if (mavlink_.has_fc_data() && !simulator_mode_) {
+            FCTelemetry fc = mavlink_.get_fc_telemetry();
+            
+            // Attitude from FC (rad → degrees)
+            if (fc.attitude_valid) {
+                state_.roll  = fc.roll  * 57.2957795f;
+                state_.pitch = fc.pitch * 57.2957795f;
+                state_.yaw   = fc.yaw   * 57.2957795f;
+            }
+            
+            // IMU from FC
+            if (fc.imu_valid) {
+                state_.imu.acc_x  = fc.acc_x;
+                state_.imu.acc_y  = fc.acc_y;
+                state_.imu.acc_z  = fc.acc_z;
+                state_.imu.gyro_x = fc.gyro_x;
+                state_.imu.gyro_y = fc.gyro_y;
+                state_.imu.gyro_z = fc.gyro_z;
+                state_.imu.valid  = true;
+                state_.imu.timestamp_us = now_us();
+            }
+            
+            // Barometer from FC
+            if (fc.baro_valid) {
+                state_.baro.pressure    = fc.pressure;
+                state_.baro.temperature = fc.temperature;
+                // Altitude from pressure (ISA model)
+                state_.baro.altitude = 44330.0f * (1.0f - std::pow(fc.pressure / 1013.25f, 0.1903f));
+                state_.baro.valid = true;
+                state_.baro.timestamp_us = now_us();
+            }
+            
+            // GPS from FC
+            if (fc.gps_valid) {
+                state_.gps.lat        = fc.gps_lat;
+                state_.gps.lon        = fc.gps_lon;
+                state_.gps.alt        = fc.gps_alt;
+                state_.gps.speed      = fc.gps_speed;
+                state_.gps.fix_type   = fc.gps_fix;
+                state_.gps.satellites = fc.gps_sats;
+                state_.gps.valid      = true;
+                state_.gps.timestamp_us = now_us();
+            }
+            
+            // VFR HUD — altitude & speed
+            if (fc.hud_valid) {
+                state_.altitude_agl = fc.alt;
+                state_.vx = fc.groundspeed;
+            }
+            
+            // Battery from FC
+            if (fc.status_valid) {
+                state_.battery_voltage = fc.battery_voltage;
+                if (fc.battery_remaining >= 0) {
+                    state_.battery_percent = static_cast<float>(fc.battery_remaining);
+                }
+            }
+            
+            // Armed state
+            state_.armed = fc.armed;
+            if (fc.armed && state_.flight_mode == FlightMode::IDLE) {
+                state_.flight_mode = FlightMode::ARMED;
+            } else if (!fc.armed && state_.flight_mode == FlightMode::ARMED) {
+                state_.flight_mode = FlightMode::IDLE;
+            }
+        }
         
         // Emit MAVLink heartbeat event periodically
         if (thread_stats_[5].loop_count.load(std::memory_order_relaxed) % 50 == 0) {
@@ -664,6 +781,10 @@ void Runtime::camera_loop() {
         float ground_dist = state_.range.valid ? state_.range.distance : 1.0f;
         
         if (camera_.is_running()) {
+            // Feed altitude and yaw to camera VO for adaptive params + hover correction
+            camera_.set_altitude(state_.altitude_agl);
+            camera_.set_yaw_hint(state_.yaw * 0.0174533f); // deg to rad
+            
             camera_.tick(ground_dist);
             
             // Emit frame event periodically
@@ -686,6 +807,41 @@ void Runtime::camera_loop() {
     }
     
     thread_stats_[6].running.store(false);
+}
+
+// ─── API Bridge Thread ───────────────────────────────────
+
+void Runtime::api_bridge_loop() {
+    constexpr int HZ = 30;
+    thread_stats_[7].running.store(true);
+    auto next_wake = SteadyClock::now();
+    
+    while (running_.load(std::memory_order_acquire)) {
+        auto start = SteadyClock::now();
+        
+        // API bridge thread: maintains runtime state consistency
+        // for external API consumers (pybind11/FastAPI).
+        // Computes derived metrics and aggregates system health.
+        
+        // Update RAM usage estimate
+        size_t mem = memory_engine_.memory_usage_bytes();
+        mem += sizeof(Event) * EventEngine::QUEUE_SIZE;
+        mem += sizeof(FrameBuffer) * 2;
+        state_.ram_usage_mb = static_cast<float>(mem) / (1024.0f * 1024.0f);
+        
+        // Aggregate CPU usage from all threads
+        double total_cpu = 0;
+        for (int i = 0; i < NUM_THREADS; ++i) {
+            total_cpu += thread_stats_[i].cpu_percent.load(std::memory_order_relaxed);
+        }
+        state_.cpu_usage = static_cast<float>(total_cpu);
+        
+        auto end = SteadyClock::now();
+        update_thread_stats(7, start, end, HZ);
+        rate_sleep(next_wake, HZ);
+    }
+    
+    thread_stats_[7].running.store(false);
 }
 
 } // namespace jtzero

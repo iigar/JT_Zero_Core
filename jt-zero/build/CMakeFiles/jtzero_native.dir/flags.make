@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = -Djtzero_native_EXPORTS
 
-CXX_INCLUDES = -I/app/jt-zero/include -isystem /root/.venv/lib/python3.11/site-packages/pybind11/include -isystem /usr/local/include/python3.11
+CXX_INCLUDES = -I/app/jt-zero/include -I/app/jt-zero/drivers -isystem /root/.venv/include -isystem /usr/local/include/python3.11
 
-CXX_FLAGS = -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -O2 -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections -fexceptions -frtti -flto=auto -fno-fat-lto-objects -std=c++17
+CXX_FLAGS = -O3 -DNDEBUG -fPIC -fvisibility=hidden -Wall -Wextra -Wpedantic -O2 -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections -O3 -DNDEBUG -flto -fexceptions -frtti -flto=auto -fno-fat-lto-objects -std=c++17
 

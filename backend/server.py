@@ -7,11 +7,18 @@ Auto-detects native C++ runtime, falls back to Python simulator.
 import os
 import asyncio
 import time
+import struct
+import zlib
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional
+from system_metrics import get_system_metrics
+from diagnostics import run_diagnostics, get_cached_diagnostics
 
 # ─── Runtime Selection ────────────────────────────────────
 # Try native C++ runtime first, fall back to Python simulator
@@ -36,6 +43,16 @@ except Exception as e:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     runtime.start()
+    # Run initial hardware diagnostics scan
+    try:
+        mavlink = runtime.get_mavlink_stats()
+        diag = run_diagnostics(mavlink_stats=mavlink)
+        print(f"[JT-Zero API] Hardware scan: camera={diag['summary']['camera']}, "
+              f"i2c={diag['summary']['i2c_devices']} devices, "
+              f"mavlink={'OK' if diag['summary']['mavlink_connected'] else 'N/A'} "
+              f"({diag['scan_duration_ms']}ms)")
+    except Exception as e:
+        print(f"[JT-Zero API] Hardware scan failed: {e}")
     yield
     runtime.stop()
 
@@ -79,13 +96,101 @@ async def health():
         "uptime": runtime.get_state().get("uptime_sec", 0)
     }
 
+@app.get("/api/hardware")
+async def get_hardware():
+    """Hardware detection status for all sensors."""
+    if hasattr(runtime, 'get_hardware_info'):
+        return runtime.get_hardware_info()
+    # Default: all simulated (no real hardware in this environment)
+    return {
+        "i2c_available": False,
+        "spi_available": False,
+        "uart_available": False,
+        "sensors": {
+            "imu": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x68"},
+            "baro": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C", "address": "0x76"},
+            "gps": {"detected": False, "model": "none", "mode": "simulation", "bus": "UART", "address": "9600"},
+            "rangefinder": {"detected": False, "model": "none", "mode": "simulation", "bus": "I2C/UART", "address": "-"},
+            "optical_flow": {"detected": False, "model": "none", "mode": "simulation", "bus": "SPI", "address": "CS0"},
+        },
+        "auto_detect_ran": True,
+        "note": "No hardware detected — all sensors using simulation"
+    }
+
 @app.get("/api/state")
 async def get_state():
     return runtime.get_state()
 
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Return cached hardware diagnostics with live MAVLink status."""
+    diag = get_cached_diagnostics()
+    # Always refresh MAVLink status (it changes after startup)
+    mavlink = runtime.get_mavlink_stats()
+    connected = mavlink.get("state") == "CONNECTED"
+    diag["mavlink"]["connected"] = connected
+    diag["mavlink"]["fc_type"] = mavlink.get("fc_type", "N/A")
+    diag["mavlink"]["fc_firmware"] = mavlink.get("fc_firmware", "N/A")
+    diag["summary"]["mavlink_connected"] = connected
+    # Recalculate overall based on live MAVLink status
+    cam_ok = diag["summary"].get("camera", "NONE") != "NONE"
+    diag["summary"]["overall"] = "ok" if cam_ok and connected else "partial"
+    return diag
+
+@app.post("/api/diagnostics/scan")
+async def scan_diagnostics():
+    """Run a fresh hardware diagnostics scan."""
+    mavlink = runtime.get_mavlink_stats()
+    return run_diagnostics(mavlink_stats=mavlink)
+
+@app.get("/api/sensors")
+async def api_get_sensor_modes():
+    """Return sensor modes (hardware vs simulated) and detection info."""
+    result = runtime.get_sensor_modes()
+    return result
+
 @app.get("/api/events")
 async def get_events(count: int = 50):
-    return runtime.get_events(count)
+    raw = runtime.get_events(200)
+    return _filter_events(raw, count)
+
+
+def _filter_events(events: list, max_count: int = 50) -> list:
+    """Filter & deduplicate events:
+    - Remove noise (empty messages, IMU_UPDATE, SYS_HEARTBEAT)
+    - Group same type+message, show latest timestamp with (xN)
+    """
+    if not events:
+        return events
+
+    # Filter noise
+    skip_types = {"IMU_UPDATE", "SYS_HEARTBEAT"}
+    filtered = [ev for ev in events if ev.get("message") and ev.get("type") not in skip_types]
+
+    # Group by (type, message) — preserve order of first occurrence
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for ev in filtered:
+        key = (ev.get("type", ""), ev.get("message", ""))
+        if key not in groups:
+            groups[key] = {"event": ev, "count": 1}
+        else:
+            groups[key]["count"] += 1
+            groups[key]["event"] = ev  # keep latest timestamp
+
+    deduped = []
+    for (etype, msg), g in groups.items():
+        entry = {
+            "timestamp": g["event"].get("timestamp", 0),
+            "priority": g["event"].get("priority", 0),
+            "type": etype,
+            "message": msg + (f" (x{g['count']})" if g["count"] > 1 else ""),
+        }
+        deduped.append(entry)
+
+    # Sort by timestamp desc, take latest max_count
+    deduped.sort(key=lambda e: e["timestamp"])
+    return deduped[-max_count:]
 
 @app.get("/api/telemetry")
 async def get_telemetry():
@@ -112,15 +217,87 @@ async def get_engines():
 async def get_camera():
     return runtime.get_camera_stats()
 
+@app.get("/api/camera/features")
+async def get_camera_features():
+    """Get current VO feature positions."""
+    if hasattr(runtime, 'get_features'):
+        return runtime.get_features()
+    return []
+
+@app.get("/api/vo/profiles")
+async def get_vo_profiles():
+    """Get available hardware profiles for Visual Odometry."""
+    if hasattr(runtime, 'get_vo_profiles'):
+        return runtime.get_vo_profiles()
+    return []
+
+@app.post("/api/vo/profile/{profile_id}")
+async def set_vo_profile(profile_id: int):
+    """Set active VO hardware profile."""
+    if hasattr(runtime, 'set_vo_profile'):
+        ok = runtime.set_vo_profile(profile_id)
+        return {"success": ok, "profile_id": profile_id}
+    return {"success": False, "error": "VO profiles not available"}
+
 @app.get("/api/mavlink")
 async def get_mavlink():
     return runtime.get_mavlink_stats()
 
+# ─── Camera Frame Endpoint ──────────────────────────────────
+# Returns latest camera frame as PNG (pure Python, no Pillow needed)
+
+def _grayscale_to_png(data: bytes, width: int, height: int) -> bytes:
+    """Encode raw grayscale bytes to PNG using only stdlib."""
+    raw = b''.join(b'\x00' + data[y*width:(y+1)*width] for y in range(height))
+    compressed = zlib.compress(raw, 1)  # Fast compression
+    
+    def chunk(tag, d):
+        c = tag + d
+        crc = zlib.crc32(c) & 0xffffffff
+        return struct.pack('>I', len(d)) + c + struct.pack('>I', crc)
+    
+    ihdr = struct.pack('>IIBBBBB', width, height, 8, 0, 0, 0, 0)
+    return (b'\x89PNG\r\n\x1a\n' +
+            chunk(b'IHDR', ihdr) +
+            chunk(b'IDAT', compressed) +
+            chunk(b'IEND', b''))
+
+_frame_cache = {"png": b'', "frame_id": -1}
+
+@app.get("/api/camera/frame")
+async def get_camera_frame():
+    """Return latest camera frame as PNG image."""
+    if not hasattr(runtime, 'get_frame_data'):
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    frame_data = runtime.get_frame_data()
+    if not frame_data or len(frame_data) == 0:
+        return Response(content=b'', media_type="image/png", status_code=204)
+    
+    # Cache: only re-encode if frame changed
+    cam = runtime.get_camera_stats()
+    fid = cam.get("frame_count", 0)
+    if fid != _frame_cache["frame_id"]:
+        w = cam.get("width", 320) or 320
+        h = cam.get("height", 240) or 240
+        expected = w * h
+        if len(frame_data) >= expected:
+            _frame_cache["png"] = _grayscale_to_png(frame_data[:expected], w, h)
+            _frame_cache["frame_id"] = fid
+    
+    return Response(
+        content=_frame_cache["png"],
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache", "X-Frame-Id": str(fid)}
+    )
+
 @app.get("/api/performance")
 async def get_performance():
+    result = {}
     if hasattr(runtime, 'get_performance'):
-        return runtime.get_performance()
-    return {"error": "Performance metrics only available with native runtime"}
+        result["engine"] = runtime.get_performance()
+    result["system"] = get_system_metrics()
+    return result
 
 @app.get("/api/simulator/config")
 async def get_sim_config():
@@ -176,12 +353,17 @@ async def websocket_telemetry(ws: WebSocket):
     await manager.connect(ws)
     try:
         while True:
+            # Build a consistent data snapshot (all reads happen together)
             state = runtime.get_state()
             threads = runtime.get_thread_stats()
             engines = runtime.get_engine_stats()
-            events = runtime.get_events(10)
+            events = _filter_events(runtime.get_events(60), 10)
             camera = runtime.get_camera_stats()
             mavlink = runtime.get_mavlink_stats()
+            features = runtime.get_features() if hasattr(runtime, 'get_features') else []
+            sensor_modes = runtime.get_sensor_modes()
+            perf = runtime.get_performance() if hasattr(runtime, 'get_performance') else None
+            sys_metrics = get_system_metrics()
             
             payload = {
                 "type": "telemetry",
@@ -193,11 +375,13 @@ async def websocket_telemetry(ws: WebSocket):
                 "recent_events": events,
                 "camera": camera,
                 "mavlink": mavlink,
+                "features": features,
+                "sensor_modes": sensor_modes,
+                "system_metrics": sys_metrics,
             }
             
-            # Add performance data if native
-            if hasattr(runtime, 'get_performance'):
-                payload["performance"] = runtime.get_performance()
+            if perf:
+                payload["performance"] = perf
             
             await ws.send_json(payload)
             await asyncio.sleep(0.1)  # 10 Hz
@@ -225,3 +409,29 @@ async def websocket_events(ws: WebSocket):
         pass
     except Exception:
         pass
+
+
+
+# ─── Static Files (Dashboard) ────────────────────────────
+# Serve built React frontend from /static directory
+# This is used when running standalone on Pi (no separate frontend server)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="static-assets")
+
+    # Catch-all: serve index.html for any non-API route (React SPA routing)
+    @app.get("/{path:path}")
+    async def serve_frontend(path: str):
+        # Try to serve exact file first (favicon.ico, manifest.json, etc.)
+        file_path = STATIC_DIR / path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        # Otherwise serve index.html (React handles routing)
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    print(f"[JT-Zero API] Serving Dashboard from {STATIC_DIR}")
+else:
+    print(f"[JT-Zero API] No Dashboard found at {STATIC_DIR} — API-only mode")

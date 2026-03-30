@@ -1,0 +1,352 @@
+# CLAUDE.md — JT-Zero Runtime Technical Reference
+
+## Project Overview
+JT-Zero is a real-time robotics runtime for lightweight drone autonomy on Raspberry Pi Zero 2 W.
+
+**Architecture:** Multi-threaded C++ core → pybind11 → FastAPI backend → React dashboard
+
+**Runtime Mode:** Native C++ (primary) or Python Simulator (fallback)
+
+**Current Status (March 2026):** Full VO pipeline verified on hardware. MAVLink connected to ArduPilot FC. VISION_POSITION_ESTIMATE delivered at 25Hz. EKF3 ExternalNav integration active.
+
+---
+
+## Thread Model (8 threads)
+
+| Thread | Name        | Hz    | Function                                           |
+|--------|-------------|-------|-----------------------------------------------------|
+| T0     | Supervisor  | 10    | System health, battery, failsafe, mode transitions  |
+| T1     | Sensors     | 200   | IMU, Baro, GPS, Rangefinder, Optical Flow           |
+| T2     | Events      | 200   | Event queue processing, prioritization              |
+| T3     | Reflex      | 200   | Reflexes — instant reactions (obstacle avoidance)   |
+| T4     | Rules       | 20    | Rules engine — condition-based state transitions    |
+| T5     | MAVLink     | 50    | MAVLink v2 communication with flight controller     |
+| T6     | Camera      | 15    | Frame capture + Visual Odometry (FAST + LK)        |
+| T7     | API Bridge  | 30    | pybind11 ↔ Python data sync                        |
+
+**Thread communication:** Lock-free SPSC ring buffers between threads.  
+**Memory:** Lock-free O(1) MemoryPool using CAS (Compare-And-Swap).
+
+---
+
+## Sensor Hardware Auto-Detection
+
+On startup, the runtime probes hardware interfaces:
+
+| Sensor          | Bus     | Address | Auto-detect Method          |
+|-----------------|---------|---------|------------------------------|
+| MPU6050 (IMU)   | I2C-1   | 0x68    | i2cdetect probe              |
+| BMP280 (Baro)   | I2C-1   | 0x76    | i2cdetect probe              |
+| NMEA GPS        | UART    | 9600    | /dev/ttyS0 availability      |
+| Rangefinder     | I2C/UART| varies  | Bus scan                     |
+| PMW3901 (Flow)  | SPI0    | CS0     | SPI device probe             |
+
+**Fallback:** If no hardware detected → automatic simulation mode. No manual config needed.
+
+---
+
+## Camera Pipeline
+
+**Priority cascade:** PI_CSI → USB → Simulation
+
+| Source    | Interface        | Implementation                              |
+|-----------|------------------|---------------------------------------------|
+| PI_CSI    | /dev/video0      | V4L2 + libcamera, MMAP                      |
+| USB       | /dev/videoN      | V4L2 MMAP streaming, YUYV → grayscale       |
+| Simulated | In-memory        | Test pattern with features                   |
+
+**Visual Odometry:**
+- **Detection:** FAST corner detector (primary) + Shi-Tomasi grid corner detector (fallback for thermal/low-contrast)
+- **Tracking:** Lucas-Kanade optical flow with **bilinear interpolation** and **Sobel 3x3 gradients**
+- **Resolution:** Camera-native (480x320 for Caddx thermal, 640x480 for CSI)
+
+**Platform/VO Mode architecture:**
+- **Platform:** Auto-detected at startup (Pi Zero 2W / Pi 4 / Pi 5) — sets camera resolution
+- **VO Mode:** User-selectable (Light / Balanced / Performance) — adjusts algorithmic parameters on-the-fly
+
+---
+
+## MAVLink Interface
+
+**Transport cascade:** Serial → UDP → Simulation
+
+| Transport  | Config                    | Use Case                    |
+|-----------|----------------------------|-----------------------------|
+| Serial    | auto-detect port + baud   | Direct FC UART connection   |
+| UDP       | 127.0.0.1:14550           | SITL / QGC / MissionPlanner |
+| Simulated | In-memory                 | Development & testing       |
+
+**Auto-baud detection (CRC-validated):**
+Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~1.5s of data and searches for complete MAVLink frames with valid CRC-16/MCRF4XX. Only frames with **known CRC extra** are counted — eliminates false positives from garbage bytes at wrong baud rates. Falls back to 115200 (ArduPilot default) if no valid frames found.
+
+**Messages sent to FC:**
+- `VISION_POSITION_ESTIMATE` (#102) @ 25Hz — accumulated VO pose, NED frame
+- `ODOMETRY` (#331) @ 25Hz — full 6DOF with quaternion
+- `OPTICAL_FLOW_RAD` (#106) — integrated flow + gyro
+- `HEARTBEAT` (#0) @ 1Hz — companion computer heartbeat (MAV_TYPE_ONBOARD_CONTROLLER)
+
+**MAVLink parser features:**
+- CRC-16/MCRF4XX validation on all received frames (rejects corrupt/garbled data)
+- MAVLink v1 (0xFE) and v2 (0xFD) support
+- MAVLink v2 signing detection (incompat_flags bit 0 → +13 bytes signature)
+- MAVLink v2 zero truncation handling (heartbeat min payload 5 bytes, not 9)
+- Diagnostic: raw byte hex dump on first data, per-heartbeat logging (first 10)
+- API counters: bytes_sent, bytes_received, heartbeats_received, crc_errors, detected_msg_ids
+
+**Verified hardware configurations:**
+- Pi Zero 2W + Matek H743 @ 115200 baud — CONNECTED, HB:12, ArduPilot QUADROTOR
+- VISION_POSITION_ESTIMATE arriving at FC at 25Hz (confirmed in MAVLink Inspector)
+- ODOMETRY arriving at FC at 25Hz
+- FC telemetry flowing back: ATTITUDE, RAW_IMU, GPS_RAW_INT, VFR_HUD, SYS_STATUS
+
+---
+
+## API Endpoints
+
+| Method | Path                     | Description                          |
+|--------|--------------------------|--------------------------------------|
+| GET    | /api/health              | Runtime status, mode, build info     |
+| GET    | /api/state               | Full system state (attitude, sensors)|
+| GET    | /api/hardware            | Hardware detection status            |
+| GET    | /api/events              | Recent event log                     |
+| GET    | /api/telemetry/history   | Time-series telemetry data           |
+| GET    | /api/threads             | Thread stats (Hz, CPU, iterations)   |
+| GET    | /api/engines             | Engine stats (events, reflexes, etc) |
+| GET    | /api/camera              | Camera & VO pipeline stats           |
+| GET    | /api/mavlink             | MAVLink connection & message stats   |
+| GET    | /api/performance         | CPU, memory, latency breakdown       |
+| GET    | /api/simulator/config    | Current simulator parameters         |
+| POST   | /api/simulator/config    | Update simulator parameters          |
+| POST   | /api/command             | Send command (arm, takeoff, land)    |
+| WS     | /api/ws/telemetry        | Real-time telemetry @ 10Hz           |
+
+### /api/mavlink Response Fields
+```json
+{
+  "state": "CONNECTED",
+  "messages_sent": 202,
+  "messages_received": 2021,
+  "heartbeats_received": 12,
+  "bytes_sent": 27366,
+  "bytes_received": 43170,
+  "crc_errors": 0,
+  "errors": 0,
+  "fc_type": "QUADROTOR",
+  "fc_firmware": "ArduPilot QUADROTOR",
+  "fc_armed": false,
+  "transport_info": "/dev/ttyAMA0@115200",
+  "detected_msg_ids": [30, 178, 253, 0, 77, 33, 1, 125, 152, 62, 42, 74, 27, 116, 29, 24],
+  "fc_telemetry": {
+    "attitude_valid": true,
+    "imu_valid": true,
+    "gps_valid": false,
+    "battery_voltage": 0.0,
+    "gps_fix": 0,
+    "gps_sats": 0
+  }
+}
+```
+
+---
+
+## WebSocket Telemetry Payload
+
+```json
+{
+  "type": "telemetry",
+  "timestamp": 1710192000.0,
+  "runtime_mode": "native",
+  "state": { "roll": 0.5, "pitch": -0.3, "yaw": 45.2, "altitude_agl": 7.0 },
+  "threads": [ { "name": "T0_Supervisor", "actual_hz": 10.0, "running": true } ],
+  "engines": { "events": {}, "reflexes": {}, "rules": {}, "memory": {}, "output": {} },
+  "recent_events": [ { "timestamp": 100.5, "type": "OBSTACLE", "priority": 200, "message": "..." } ],
+  "camera": { "fps_actual": 15.0, "vo_features_tracked": 21, "vo_valid": true },
+  "mavlink": { "state": "CONNECTED", "messages_sent": 779, "heartbeats_received": 12 },
+  "sensor_modes": { "imu": "simulation", "baro": "simulation", "gps": "simulation" }
+}
+```
+
+---
+
+## Key Bug Fixes (chronological)
+
+1. **VO displacement = 0** — Was using median pixel shift as displacement. Now: `displacement = pixel_shift * (ground_distance / focal_length)`
+2. **MemoryPool race** — Replaced mutex-based pool with lock-free CAS free-list (O(1))
+3. **FAST threshold overflow** — `int t = threshold_` prevents uint8_t subtraction underflow
+4. **MAVLink VISION_POS** — Now uses accumulated VO local pose, not GPS coordinates
+5. **MAVLink ODOMETRY** — Uses accumulated pose, not per-frame delta
+6. **rand() thread safety** — Replaced with per-thread xorshift32 PRNG
+7. **Roll calculation** — Fixed `atan2(acc_y, acc_z)` → `atan2(acc_y, -acc_z)` (acc_z is -9.81 when level)
+8. **LK bilinear interpolation (CRITICAL)** — LK tracker used integer pixel access, preventing sub-pixel convergence. Added bilinear interpolation — fixes tracking on ALL cameras, especially low-contrast thermal
+9. **Sobel 3x3 gradients** — Replaced simple central differences with Sobel operator in LK tracker. 4x signal amplification, 16x better matrix conditioning for thermal images
+10. **USB camera V4L2 MMAP** — Rewrote USB camera driver from simple `read()` (fails on UVC) to proper V4L2 MMAP streaming with `select()` timeout
+11. **MAVLink heartbeat filter (CRITICAL)** — Old code rejected type=0 (GENERIC) heartbeats and type=18 unconditionally. Now: only filters own echoed heartbeats (sysid+type match), GCS, and ADSB. Accepts GENERIC and all vehicle types.
+12. **MAVLink CRC validation** — Parser now validates CRC-16/MCRF4XX on all received frames. Without CRC, garbage bytes from baud mismatch were counted as valid messages (RX:42 with 0 heartbeats).
+13. **MAVLink auto-baud (CRITICAL)** — Old STX-counting method gave false positives (random bytes contain 0xFD/0xFE by chance). Replaced with full CRC-validated frame detection during probing. Only known messages (with CRC extra) count.
+14. **MAVLink v2 zero truncation** — Heartbeat handler min length 7→5. MAVLink v2 trims trailing zeros, so heartbeats with base_mode=0 had payload len<7 and were silently dropped.
+15. **MAVLink v2 signing** — Parser now detects incompat_flags bit 0, adds 13-byte signature to frame length. Without this, signed frames shifted buffer alignment and corrupted all subsequent parsing.
+
+---
+
+## File Structure
+
+```
+jt-zero/
+├── include/jt_zero/      # Public headers
+│   ├── common.h           # SystemState, sensor data structs, MemoryPool
+│   ├── sensors.h          # Sensor interfaces + auto-detect
+│   ├── camera.h           # Camera sources + VO + Pipeline
+│   └── mavlink_interface.h # MAVLink with Serial/UDP/Sim transport
+├── core/                  # Runtime core
+│   └── runtime.cpp        # Thread management, main loop
+├── sensors/
+│   └── sensors.cpp        # Sensor implementations + hw probing
+├── camera/
+│   ├── camera_pipeline.cpp # VO pipeline + SimulatedCamera
+│   └── camera_drivers.cpp  # PiCSI (V4L2/MMAP) + USB (V4L2)
+├── drivers/
+│   ├── bus.h/cpp          # I2C, SPI, UART HAL
+│   └── sensor_drivers.h/cpp # MPU6050, BMP280, NMEA drivers
+├── mavlink/
+│   └── mavlink_interface.cpp # Serial/UDP/Sim transport + CRC parser
+├── api/
+│   └── python_bindings.cpp # pybind11 module
+├── simulator/             # Test pattern generators
+├── CMakeLists.txt
+└── toolchain-pi-zero.cmake
+```
+
+---
+
+## FAQ: Running Without External IMU
+
+**Q: Чи працюватиме система тільки з Pi Zero + польотний контролер, без зовнішнього IMU?**
+
+**A: Так, повністю.** Ось як:
+
+1. **Сценарій: Pi Zero + FC (ArduPilot/PX4)**
+   - IMU вбудований у польотний контролер (він завжди має свій MPU6050/ICM20948)
+   - JT-Zero отримує дані через MAVLink: `ATTITUDE`, `SCALED_IMU`, `GLOBAL_POSITION_INT`
+   - Зовнішній MPU6050 на Pi НЕ потрібен
+
+2. **Що робить JT-Zero без зовнішнього IMU:**
+   - Камера + Visual Odometry — працює (не залежить від IMU)
+   - MAVLink → FC — працює (передає VO дані польотнику)
+   - Рефлекси та правила — працюють (використовують дані від FC)
+   - IMU канал → автоматично переходить у SIM режим (генерує тестові дані)
+
+3. **Мінімальна конфігурація:**
+   - Pi Zero 2 W
+   - Pi Camera Module v2 (або USB камера)
+   - UART з'єднання з FC: TX→RX, RX→TX, GND
+   - JT-Zero надсилає `VISION_POSITION_ESTIMATE` та `OPTICAL_FLOW_RAD` для fusion у EKF
+
+4. **Оптимальна конфігурація:**
+   - + MPU6050 на I2C (для власного AHRS і VO компенсації)
+   - + BMP280 (незалежна альтиметрія)
+   - + GPS UART (для absolute position backup)
+
+---
+
+## Build & Deploy
+
+### Автоматичне встановлення (рекомендовано):
+```bash
+cd ~/jt-zero
+chmod +x setup.sh
+./setup.sh
+```
+Скрипт автоматично: встановить пакети, увімкне UART/I2C/SPI/Camera, збілдить C++, створить venv, налаштує systemd, перезавантажить Pi. ~10-15 хвилин.
+
+### На Pi (ручна збірка):
+```bash
+cd ~/jt-zero/jt-zero && mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release .. && make -j4
+cp jtzero_native*.so ~/jt-zero/backend/
+sudo systemctl restart jtzero
+```
+
+### Cross-compilation (from x86 host):
+```bash
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+scp jtzero_native*.so pi@jtzero.local:~/jt-zero/backend/
+```
+
+### Quick test after deploy:
+```bash
+sudo systemctl restart jtzero && sleep 15
+curl -s http://localhost:8001/api/mavlink | python3 -c "
+import sys,json; d=json.load(sys.stdin)
+print(f\"State: {d['state']}, HB: {d.get('heartbeats_received',0)}\")
+print(f\"Baud: {d.get('transport_info','?')}\")
+print(f\"FC: {d['fc_type']} {d['fc_firmware']}\")
+"
+```
+
+---
+
+## Session History
+- Phase 1-11: Core runtime, sensors, camera, MAVLink, dashboard
+- Bug fixes: VO displacement, MemoryPool, MAVLink semantics, roll atan2
+- UI overhaul: 7-tab interface, detailed 3D drone, GPIO docs, Settings
+- P1: Sensor auto-detect (I2C/UART probing)
+- P2: Camera drivers (PiCSI V4L2, USB V4L2), MAVLink Serial/UDP transport
+- Deployment: Successfully deployed on real Pi Zero 2W with native C++ runtime
+- FC Connection guide: Matek H743-SLIM V3, SpeedyBee F405 V4, Pixhawk 2.4.8, Cube Orange+
+- Platform/VO Mode refactor: Separated hardware config from algorithmic config
+- USB thermal camera (Caddx 256): V4L2 MMAP driver, Shi-Tomasi detector, Sobel gradients, bilinear LK
+- Verified on Pi 4 + Caddx thermal: Det:180, Track:16-59, Valid:True, Conf:0.18-0.29
+- **MAVLink parser overhaul:** CRC validation, CRC-validated auto-baud, relaxed heartbeat filter, v2 signing support, diagnostic counters
+- **MAVLink FC integration verified:** Pi Zero 2W + Matek H743 @ 115200 — CONNECTED, HB OK, VISION_POSITION_ESTIMATE @ 25Hz confirmed in MAVLink Inspector
+- Test reports: /app/test_reports/iteration_1-15.json
+
+---
+
+## Flight Controller Connection (Quick Reference)
+
+### Підключення Pi → FC (3 дроти):
+```
+Pi Pin 8  (TX)  ──► FC RX (UART порт)
+Pi Pin 10 (RX)  ◄── FC TX
+Pi Pin 6  (GND) ─── FC GND
+```
+
+### ArduPilot параметри:
+```
+SERIALx_PROTOCOL = 2    (MAVLink2)
+SERIALx_BAUD = 115      (115200 — auto-detected by JT-Zero)
+VISO_TYPE = 1            (MAVLink vision)
+EK3_SRC1_POSXY = 6      (ExternalNav)
+EK3_SRC1_VELXY = 6      (ExternalNav)
+EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
+```
+
+### UART порти по контролерах:
+| FC | UART | Serial |
+|----|------|--------|
+| Matek H743-SLIM V3 | UART6 | SERIAL6 |
+| SpeedyBee F405 V4 | UART4 | SERIAL4 |
+| Pixhawk 2.4.8 | TELEM2 | SERIAL2 |
+| Cube Orange+ | TELEM2 | SERIAL2 |
+
+**Baud rate:** JT-Zero автоматично визначає baud rate FC (CRC-validated probe). Будь-який стандартний baud (57600-921600) підтримується. Ніякого ручного налаштування baud на стороні Pi не потрібно.
+
+Детальна інструкція: /jt-zero/FC_CONNECTION.md
+
+---
+
+## Documentation Map (all in Ukrainian)
+
+| File | Content |
+|------|---------|
+| `jt-zero/SYSTEM.md` | VO algorithm (FAST+Shi-Tomasi, Sobel LK, bilinear), Platform/VO Mode |
+| `jt-zero/DEPLOYMENT.md` | Pi deployment (CSI + USB cameras, requirements-pi.txt) |
+| `jt-zero/COMMANDS.md` | API curl commands, USB camera diagnostics, troubleshooting |
+| `jt-zero/README.md` | Project overview, capabilities, architecture |
+| `jt-zero/FC_CONNECTION.md` | Flight controller wiring (Matek, SpeedyBee, Pixhawk, Cube) |
+| `jt-zero/LONG_RANGE_FLIGHT.md` | 5km autonomous flight guide |
+| `CLAUDE.md` | Technical reference for agents (this file) |
+| `memory/PRD.md` | Product requirements and backlog |
+| `memory/CHANGELOG.md` | Implementation changelog with dates |
