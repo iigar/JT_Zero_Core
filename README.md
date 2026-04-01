@@ -110,3 +110,12 @@ cd jt-zero && chmod +x setup.sh && ./setup.sh
 - MAVLink підключений до ArduPilot (Matek H743)
 - EKF3 ExternalNav підтверджено
 - 15 fps VO, 25Hz MAVLink, 0 CRC помилок
+
+
+# Коли Emergent зробить нові зміни і запушить в origin:
+git fetch origin
+
+git merge origin/main
+
+# Я вношу виправлення, потім пушу у свій репо:
+git push claude main
