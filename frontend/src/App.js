@@ -142,7 +142,7 @@ function App() {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-[#050505] overflow-hidden" data-testid="app-root">
+    <div className="h-screen flex flex-col bg-[#050505] overflow-hidden hud-lines sweep-overlay" data-testid="app-root">
       <Header state={state} connected={connected} runtimeMode={runtimeMode} />
 
       {/* Tab Navigation */}
@@ -154,9 +154,10 @@ function App() {
             onClick={() => setActiveTab(id)}
             className={`flex items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider transition-all border-b-2 ${
               activeTab === id
-                ? 'text-[#00F0FF] border-[#00F0FF] bg-[#00F0FF]/5'
+                ? 'text-[#00F0FF] border-[#00F0FF] bg-[#00F0FF]/5 tab-active'
                 : 'text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-600'
             }`}
+            style={activeTab === id ? { textShadow: '0 0 8px rgba(0,240,255,0.5)', boxShadow: '0 2px 0 -1px rgba(0,240,255,0.25)' } : {}}
           >
             <Icon className="w-3.5 h-3.5" />
             {label}
