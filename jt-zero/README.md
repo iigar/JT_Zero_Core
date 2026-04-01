@@ -1,211 +1,134 @@
-# JT-Zero: Lightweight Drone Autonomy Runtime
+# JT-Zero: Система Visual Odometry для дронів
 
-## Overview
+## Що це і навіщо?
 
-JT-Zero is a high-performance robotics runtime designed for the Raspberry Pi Zero 2 W, enabling lightweight autonomous drone operations. Built in C++17 with embedded best practices, it provides a real-time event-driven architecture with lock-free data structures.
+JT-Zero — це **companion computer система** для дронів. Вона вирішує конкретну проблему: **стабільний політ без GPS** (у приміщеннях, підвалах, тунелях, складах).
 
-## Architecture
+Як це працює: CSI камера дивиться вперед, аналізує переміщення ландшафту і обчислює позицію дрона. Польотний контролер (ArduPilot) використовує ці дані замість GPS для стабілізації і навігації.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     JT-Zero Runtime                         │
-│                                                             │
-│  ┌─── T0: Supervisor (10 Hz) ───────────────────────────┐   │
-│  │  System health, battery monitor, telemetry recording  │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T1: Sensor Pipeline (200 Hz) ─────────────────────┐   │
-│  │  IMU(200Hz) BARO(50Hz) GPS(10Hz) RANGE(50Hz) FLOW    │   │
-│  └──────────────────┬────────────────────────────────────┘   │
-│                     │ Lock-free Ring Buffer                  │
-│  ┌─── T2: Event Engine (200 Hz) ────────────────────────┐   │
-│  │  Event queue dispatch, memory recording               │   │
-│  └──────────────────┬────────────────────────────────────┘   │
-│                     │                                        │
-│  ┌─── T3: Reflex Engine (200 Hz) ───────────────────────┐   │
-│  │  Ultra-fast reactions (<5ms): E-stop, proximity alert │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T4: Rule Engine (20 Hz) ──────────────────────────┐   │
-│  │  Complex logic: auto-RTL, GPS-lost hold, mode mgmt   │   │
-│  └───────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌─── T7: API Bridge (HTTP/WebSocket) ──────────────────┐   │
-│  │  FastAPI server, real-time telemetry streaming        │   │
-│  └───────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
+**Коштує:** ~$60 (Pi Zero 2W + камера + дроти) замість $500+ за промислові рішення.
 
-## System Constraints
+---
 
-| Parameter       | Target            |
-|----------------|-------------------|
-| CPU usage       | <= 65%            |
-| RAM usage       | <= 300 MB         |
-| Reflex latency  | < 5 ms            |
-| Platform        | Pi Zero 2 W (ARM) |
-| C++ standard    | C++17             |
+## Документація
 
-## Core Components
+| Документ | Що описує |
+|----------|-----------|
+| **[SYSTEM.md](SYSTEM.md)** | Алгоритм VO, характеристики, архітектура, обмеження |
+| **[DEPLOYMENT.md](DEPLOYMENT.md)** | Покрокова установка (setup.sh — автоматично). Два способи: GitHub або офлайн |
+| **[COMMANDS.md](COMMANDS.md)** | Всі команди: update.sh, API (curl), діагностика, troubleshooting |
+| **[FC_CONNECTION.md](FC_CONNECTION.md)** | Підключення до польотного контролера |
+| **[LONG_RANGE_FLIGHT.md](LONG_RANGE_FLIGHT.md)** | Конфігурація для 5+ км польотів (VO+IMU, без GPS) |
 
-### Event Engine (`core/event_engine.cpp`)
-- Lock-free SPSC ring buffer (1024 events)
-- O(1) push/pop operations
-- Zero dynamic allocation
-- Event types: sensor, system, flight, camera, MAVLink, command
+---
 
-### Reflex Engine (`core/reflex_engine.cpp`)
-- Pattern matching: Event → Condition → Action
-- < 5ms latency guaranteed
-- Cooldown support to prevent rapid firing
-- Default reflexes: emergency stop, low battery, altitude limit
+## Швидкий старт
 
-### Rule Engine (`core/rule_engine.cpp`)
-- Priority-based behavior evaluation
-- Flight mode state machine
-- Default rules: auto-RTL on low battery, GPS-lost hold, takeoff detection
-
-### Memory Engine (`core/memory_engine.cpp`)
-- Ring buffer telemetry history (2048 records)
-- Event history (512 records)
-- Fixed memory: ~424 KB total
-
-### Output Engine (`core/output_engine.cpp`)
-- Queued output commands
-- Support for GPIO, MAVLink, logging, buzzer, LED
-- Pluggable output handler
-
-## Sensor Modules
-
-| Sensor       | Rate   | Data                                    |
-|-------------|--------|----------------------------------------|
-| IMU          | 200 Hz | gyro_xyz, acc_xyz (rad/s, m/s²)        |
-| Barometer    | 50 Hz  | pressure (hPa), altitude (m), temp (°C)|
-| GPS          | 10 Hz  | lat, lon (°), alt (m), speed (m/s)     |
-| Rangefinder  | 50 Hz  | distance (m), signal_quality (0-1)     |
-| Optical Flow | 50 Hz  | flow_xy (rad/s), quality (0-255)       |
-
-## Building
-
-### Native (development/test)
 ```bash
-cd jt-zero
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-./jt-zero --duration 10
+# На Pi через SSH:
+sudo apt update && sudo apt install -y git
+git clone https://github.com/iigar/JT_Zero_Core.git ~/jt-zero
+cd ~/jt-zero && git checkout main15
+chmod +x setup.sh && ./setup.sh
+# setup.sh робить ВСЕ: deps, UART, I2C, C++ build, Python venv, systemd, reboot
 ```
 
-### Cross-compile for Pi Zero 2 W
+**Після перезавантаження:** Dashboard на `http://jtzero.local:8001`
+
+### Оновлення:
 ```bash
-cd jt-zero
-mkdir build-pi && cd build-pi
-cmake -DCMAKE_TOOLCHAIN_FILE=../toolchain-pi-zero.cmake ..
-make -j$(nproc)
-scp jt-zero pi@raspberrypi:/home/pi/
+cd ~/jt-zero && git pull && ./update.sh
 ```
 
-## Thread Model
+---
 
-| Thread | Name          | Rate     | Priority | Core | Purpose                   |
-|--------|--------------|----------|----------|------|---------------------------|
-| T0     | Supervisor    | 10 Hz    | 90       | 0    | Health, telemetry, output |
-| T1     | Sensors       | 200 Hz   | 95       | 1    | Read all sensors          |
-| T2     | Events        | 200 Hz   | 85       | 2    | Dispatch events           |
-| T3     | Reflex        | 200 Hz   | 98       | 2    | Fast reactions            |
-| T4     | Rules         | 20 Hz    | 70       | 3    | Complex behavior logic    |
-| T5     | MAVLink       | 50 Hz    | 80       | 1    | Flight controller comm    |
-| T6     | Camera        | 15 FPS   | 60       | 3    | Visual pipeline           |
-| T7     | API           | 30 Hz    | 50       | any  | HTTP/WS bridge            |
+## Встановлення без GitHub
 
-## API Endpoints
+### Варіант 1: ZIP з сайту
 
-| Method | Endpoint               | Description                    |
-|--------|----------------------|--------------------------------|
-| GET    | /api/health           | Runtime health check           |
-| GET    | /api/state            | Full system state              |
-| GET    | /api/events           | Recent events (query: count)   |
-| GET    | /api/telemetry        | State + threads + engines      |
-| GET    | /api/telemetry/history| Historical telemetry records   |
-| GET    | /api/threads          | Thread statistics              |
-| GET    | /api/engines          | Engine statistics              |
-| POST   | /api/command          | Send command (arm/disarm/etc)  |
-| WS     | /api/ws/telemetry     | Real-time telemetry stream     |
-| WS     | /api/ws/events        | Real-time event stream         |
+1. На комп'ютері: `https://github.com/iigar/JT_Zero_Core/archive/refs/heads/main.zip`
+2. `scp ~/Downloads/JT_Zero_Core-main.zip pi@jtzero.local:~/`
+3. На Pi: `unzip JT_Zero_Core-main.zip && mv JT_Zero_Core-main jt-zero && cd jt-zero && ./setup.sh`
 
-### Commands
-- `arm` / `disarm` — Arm/disarm motors
-- `takeoff` — Start takeoff (param1: altitude)
-- `land` — Initiate landing
-- `hold` — Position hold
-- `rtl` — Return to launch
-- `emergency` — Emergency stop
+### Варіант 2: USB флешка (без мережі)
 
-## Extending the System
+1. Скачайте ZIP на флешку
+2. Вставте в Pi через OTG адаптер
+3. `sudo mount /dev/sda1 /mnt && cp /mnt/*.zip ~/ && sudo umount /mnt`
+4. `unzip *.zip && mv JT_Zero_Core-main jt-zero && cd jt-zero && ./setup.sh`
 
-### Adding a new sensor
-1. Define data struct in `include/jt_zero/common.h`
-2. Create sensor class in `include/jt_zero/sensors.h`
-3. Implement in `sensors/` directory
-4. Add to sensor loop in `runtime.cpp`
+---
 
-### Adding a reflex rule
-```cpp
-ReflexRule my_rule;
-my_rule.name = "my_reflex";
-my_rule.trigger = EventType::SENSOR_IMU_UPDATE;
-my_rule.condition = [](const Event& e, const SystemState& s) {
-    return s.imu.acc_z > -5.0f; // Free-fall detection
-};
-my_rule.action = [](const Event&, SystemState& s, EventEngine& ev) {
-    s.flight_mode = FlightMode::EMERGENCY;
-    ev.emit(EventType::SYSTEM_ERROR, 255, "Free-fall detected!");
-};
-reflex_engine_.add_rule(my_rule);
+## Архітектура
+
+```
+┌─────────────────┐      ┌──────────────────┐      ┌────────────────┐
+│   CSI Camera    │─────>│  C++ Core        │─────>│  Flight        │
+│   (Forward VO)  │ MIPI │  - Feature Det.  │ UART │  Controller    │
+│                 │      │  - Visual Odom.  │      │  (ArduPilot)   │
+└─────────────────┘      │  - MAVLink TX/RX │      └────────────────┘
+                         └────────┬─────────┘
+┌─────────────────┐              │ pybind11
+│  USB Thermal    │──────>┌──────┴──────────┐
+│  (Down, scan)   │ V4L2  │  FastAPI Backend │
+└─────────────────┘       │  + WebSocket     │
+                          └────────┬─────────┘
+                          ┌────────┴─────────┐
+                          │  React Dashboard  │
+                          │  (7 вкладок)      │
+                          └──────────────────┘
 ```
 
-### Adding a behavior rule
-```cpp
-BehaviorRule my_rule;
-my_rule.name = "altitude_fence";
-my_rule.priority = 80;
-my_rule.evaluate = [](const SystemState& s, RuleResult& r) -> bool {
-    if (s.altitude_agl > 50.0f) {
-        r.action = RuleAction::HOLD;
-        strncpy(r.message, "Altitude fence triggered", sizeof(r.message));
-        return true;
-    }
-    return false;
-};
-rule_engine_.add_rule(my_rule);
-```
+## Підтримувані камери (CSI — авто-детекція)
 
-## File Structure
-```
-jt-zero/
-├── include/jt_zero/
-│   ├── common.h          # Types, ring buffer, memory pool
-│   ├── event_engine.h    # Event queue interface
-│   ├── reflex_engine.h   # Fast reaction interface
-│   ├── rule_engine.h     # Behavior logic interface
-│   ├── memory_engine.h   # Telemetry history interface
-│   ├── output_engine.h   # Hardware output interface
-│   ├── sensors.h         # Sensor interfaces
-│   └── runtime.h         # Main runtime orchestrator
-├── core/
-│   ├── event_engine.cpp
-│   ├── reflex_engine.cpp
-│   ├── rule_engine.cpp
-│   ├── memory_engine.cpp
-│   ├── output_engine.cpp
-│   └── runtime.cpp
-├── sensors/
-│   └── sensors.cpp       # Simulated sensor implementations
-├── main.cpp              # Standalone entry point
-├── CMakeLists.txt        # Build system
-└── README.md             # This file
-```
+| Сенсор | Камера | Роздільність | FOV |
+|--------|--------|-------------|-----|
+| OV5647 | Pi Camera v1 | 5MP | 62° |
+| IMX219 | Pi Camera v2 | 8MP | 62° |
+| IMX477 | Pi HQ Camera | 12.3MP | lens |
+| IMX708 | Pi Camera v3 | 12MP | 66° |
+| OV9281 | Global Shutter | 1MP | 80° |
+| IMX296 | Pi GS Camera | 1.6MP | 49° |
+| OV64A40 | Arducam 64MP | 64MP | 84° |
+| IMX290 | STARVIS | 2MP | 82° |
+| *будь-яка* | GENERIC | auto | auto |
 
-## License
+Будь-яка libcamera-сумісна камера працює автоматично.
 
-MIT License - see LICENSE file for details.
+## Стек технологій
+
+| Компонент | Технологія |
+|-----------|-----------|
+| Ядро | C++17, lock-free, 8 потоків реального часу |
+| Зв'язка C++/Python | pybind11 |
+| Backend | FastAPI, WebSocket, uvicorn |
+| Frontend | React 19, Recharts, Tailwind CSS, Three.js |
+| CI/CD | GitHub Actions (auto-build frontend) |
+| Протокол | MAVLink v2 (CRC-validated) |
+| Платформи | Raspberry Pi Zero 2W, Pi 4, Pi 5 |
+| Камери | 8 CSI моделей + GENERIC, USB thermal (Caddx 256) |
+
+## Можливості
+
+- Visual Odometry з точністю ±5-20 см
+- **Далекий політ: до 5+ км з RTL (VO+IMU, без GPS)**
+- Ефективна швидкість: до 2-3 м/с
+- Робоча висота: 0.3-10 м (оптимально 1-3 м)
+- Частота VO: ~12 Hz (ArduPilot EKF приймає)
+- **FAST + Shi-Tomasi детектори** (каскад для термальних камер)
+- **LK трекер з Sobel градієнтами і білінійною інтерполяцією**
+- Kalman-фільтрована швидкість + outlier rejection
+- Confidence-based covariance для EKF
+- **Мульти-камера:** CSI (PRIMARY/VO вперед) + USB thermal (SECONDARY/вниз)
+- **8 CSI сенсорів** авто-детекція + GENERIC fallback для будь-яких інших
+- **GitHub Actions CI/CD** — frontend білдиться автоматично, Pi не потребує Node.js
+- **setup.sh** — повна установка одною командою
+- **update.sh** — оновлення: git pull + C++ build + frontend + restart
+- 7-вкладковий Dashboard з реальним часом
+
+## Перевірено на залізі
+
+- **Pi Zero 2W + IMX219** — CONNECTED, VO Valid:True
+- **Pi Zero 2W + IMX290 STARVIS** — CONNECTED, DET:180, TRACK:44, Valid:True
+- **Pi 4 + IMX219 + Caddx thermal** — CONNECTED, multi-camera working
+- **Matek H743** — EKF3 ExternalNav confirmed

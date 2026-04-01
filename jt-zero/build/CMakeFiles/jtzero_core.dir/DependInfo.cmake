@@ -15,6 +15,8 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/app/jt-zero/core/reflex_engine.cpp" "CMakeFiles/jtzero_core.dir/core/reflex_engine.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/core/reflex_engine.cpp.o.d"
   "/app/jt-zero/core/rule_engine.cpp" "CMakeFiles/jtzero_core.dir/core/rule_engine.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/core/rule_engine.cpp.o.d"
   "/app/jt-zero/core/runtime.cpp" "CMakeFiles/jtzero_core.dir/core/runtime.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/core/runtime.cpp.o.d"
+  "/app/jt-zero/drivers/bus.cpp" "CMakeFiles/jtzero_core.dir/drivers/bus.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/drivers/bus.cpp.o.d"
+  "/app/jt-zero/drivers/sensor_drivers.cpp" "CMakeFiles/jtzero_core.dir/drivers/sensor_drivers.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/drivers/sensor_drivers.cpp.o.d"
   "/app/jt-zero/mavlink/mavlink_interface.cpp" "CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/mavlink/mavlink_interface.cpp.o.d"
   "/app/jt-zero/sensors/sensors.cpp" "CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o" "gcc" "CMakeFiles/jtzero_core.dir/sensors/sensors.cpp.o.d"
   )

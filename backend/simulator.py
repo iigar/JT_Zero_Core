@@ -146,13 +146,40 @@ class CameraStats:
     height: int = 240
     vo_features_detected: int = 0
     vo_features_tracked: int = 0
+    vo_inlier_count: int = 0
     vo_tracking_quality: float = 0.0
+    vo_confidence: float = 0.0
+    vo_position_uncertainty: float = 0.0
+    vo_total_distance: float = 0.0
     vo_dx: float = 0.0
     vo_dy: float = 0.0
     vo_dz: float = 0.0
     vo_vx: float = 0.0
     vo_vy: float = 0.0
     vo_valid: bool = True
+    # Hardware profile
+    active_profile: int = 0
+    profile_name: str = "Pi Zero 2W"
+    # VO Mode (switchable)
+    vo_mode: int = 1
+    vo_mode_name: str = "Balanced"
+    # Adaptive parameters
+    altitude_zone: int = 0
+    altitude_zone_name: str = "LOW"
+    adaptive_fast_thresh: float = 30.0
+    adaptive_lk_window: float = 5.0
+    # Hover yaw correction
+    hover_detected: bool = False
+    hover_duration: float = 0.0
+    yaw_drift_rate: float = 0.0
+    corrected_yaw: float = 0.0
+    # VO Fallback state
+    vo_source: str = "CSI_PRIMARY"
+    vo_fallback_reason: str = ""
+    vo_fallback_duration: float = 0.0
+    vo_fallback_switches: int = 0
+    # Frame brightness
+    frame_brightness: float = 128.0
 
 @dataclass
 class MAVLinkStats:
@@ -208,6 +235,53 @@ class JTZeroSimulator:
         self.camera_stats = CameraStats()
         self.mavlink_stats = MAVLinkStats()
         
+        # Multi-camera: secondary thermal camera
+        self._usb_capture = None
+        self._last_secondary_frame = None
+        try:
+            from usb_camera import find_usb_camera, USBCameraCapture
+            dev_path, card, driver = find_usb_camera()
+            if dev_path:
+                self._usb_capture = USBCameraCapture(dev_path, 256, 192)
+                if self._usb_capture.open():
+                    self._secondary_camera = {
+                        "slot": "SECONDARY",
+                        "camera_type": "USB_THERMAL",
+                        "camera_open": True,
+                        "active": False,
+                        "frame_count": 0,
+                        "fps_actual": 0.0,
+                        "width": self._usb_capture.actual_w,
+                        "height": self._usb_capture.actual_h,
+                        "label": f"USB Thermal ({card or 'Down'})",
+                        "device": dev_path,
+                        "last_capture_time": 0,
+                        "frame_format": self._usb_capture.frame_format,
+                    }
+                    print(f"[Simulator] USB camera ready: {card} @ {dev_path}")
+                else:
+                    self._usb_capture = None
+        except Exception as e:
+            print(f"[Simulator] USB camera init failed: {e}")
+            self._usb_capture = None
+        
+        if not self._usb_capture:
+            self._secondary_camera = {
+                "slot": "SECONDARY",
+                "camera_type": "USB_THERMAL",
+                "camera_open": False,
+                "active": False,
+                "frame_count": 0,
+                "fps_actual": 0.0,
+                "width": 256,
+                "height": 192,
+                "label": "USB Thermal (not connected)",
+                "device": "none",
+                "last_capture_time": 0,
+                "frame_format": "gray",
+            }
+        self._secondary_capturing = False
+        
     def start(self):
         if self.running:
             return
@@ -252,6 +326,13 @@ class JTZeroSimulator:
                 self.state.armed = False
                 self.state.flight_mode = "EMERGENCY"
                 self._emit_event(EventType.SYSTEM_ERROR, 255, "EMERGENCY STOP")
+            elif cmd == "vo_reset":
+                self.camera.vo_total_distance = 0.0
+                self.camera.vo_position_uncertainty = 0.0
+                self.camera.vo_dx = 0.0
+                self.camera.vo_dy = 0.0
+                self.camera.vo_dz = 0.0
+                self._emit_event(EventType.CMD_USER, 200, "VO origin reset (SET HOMEPOINT)")
             else:
                 self._emit_event(EventType.CMD_USER, 100, f"Custom: {cmd}")
             return True
@@ -379,11 +460,17 @@ class JTZeroSimulator:
     def _update_state(self, t: float):
         s = self.state
         
-        # Attitude
-        s.roll = math.atan2(s.imu["acc_y"], s.imu["acc_z"]) * 57.2958
-        s.pitch = math.atan2(-s.imu["acc_x"],
-                  math.sqrt(s.imu["acc_y"]**2 + s.imu["acc_z"]**2)) * 57.2958
-        s.yaw = (s.yaw + s.imu["gyro_z"] * 0.05 * 57.2958) % 360
+        # Attitude from accelerometer (stable, no gyro drift)
+        # acc_z = -9.81 when level → negate for correct atan2
+        raw_roll  = math.atan2(s.imu["acc_y"], -s.imu["acc_z"]) * 57.2958
+        raw_pitch = math.atan2(-s.imu["acc_x"],
+                    math.sqrt(s.imu["acc_y"]**2 + s.imu["acc_z"]**2)) * 57.2958
+        
+        # Low-pass filter (smooth, no jitter)
+        lp = 0.15
+        s.roll  = s.roll + lp * (raw_roll - s.roll)
+        s.pitch = s.pitch + lp * (raw_pitch - s.pitch)
+        s.yaw   = (s.yaw + s.imu["gyro_z"] * 0.05 * 57.2958) % 360
         
         s.altitude_agl = s.baro["altitude"]
         s.uptime_sec = int(time.time() - self._start_time)
@@ -440,6 +527,198 @@ class JTZeroSimulator:
         self.engine_stats["memory"]["telemetry_records"] += 1
 
 
+    def get_performance(self) -> dict:
+        """Return internal engine performance metrics."""
+        return {
+            "memory": {
+                "total_mb": 0.42,
+                "engines_bytes": 8192,
+                "event_queue_bytes": 4096,
+                "camera_bytes": 76800,
+            },
+            "latency": {
+                "reflex_avg_us": 1.2,
+                "reflex_fires": self.engine_stats["reflexes"]["total_fires"],
+            },
+            "throughput": {
+                "events_total": self.engine_stats["events"]["total"],
+                "events_dropped": self.engine_stats["events"]["dropped"],
+                "drop_rate": 0,
+            },
+            "threads": [
+                {"name": t.name, "cpu_percent": t.cpu_percent}
+                for t in self.thread_stats
+            ],
+            "total_cpu_percent": sum(t.cpu_percent for t in self.thread_stats),
+        }
+
+    def get_sensor_modes(self) -> dict:
+        """Return sensor mode info (all simulated in simulator mode)."""
+        return {
+            "imu": "simulated",
+            "baro": "simulated",
+            "gps": "simulated",
+            "rangefinder": "simulated",
+            "optical_flow": "simulated",
+            "hw_info": {
+                "i2c_available": False,
+                "imu_detected": False,
+                "baro_detected": False,
+                "gps_detected": False,
+                "spi_available": False,
+                "uart_available": False,
+                "imu_model": "none",
+                "baro_model": "none",
+                "gps_model": "none",
+            },
+        }
+
+    # ── VO Mode Management ──
+
+    _vo_modes = [
+        {"id": 0, "name": "Light", "type": "LIGHT",
+         "fast_threshold": 30, "lk_window": 5, "lk_iterations": 4, "max_features": 100},
+        {"id": 1, "name": "Balanced", "type": "BALANCED",
+         "fast_threshold": 25, "lk_window": 7, "lk_iterations": 5, "max_features": 180},
+        {"id": 2, "name": "Performance", "type": "PERFORMANCE",
+         "fast_threshold": 20, "lk_window": 9, "lk_iterations": 6, "max_features": 250},
+    ]
+
+    _platforms = [
+        {"id": 0, "name": "Pi Zero 2W", "type": "PI_ZERO_2W",
+         "width": 640, "height": 480, "focal_length": 554.0, "target_fps": 15.0},
+        {"id": 1, "name": "Pi 4", "type": "PI_4",
+         "width": 1280, "height": 720, "focal_length": 830.0, "target_fps": 30.0},
+        {"id": 2, "name": "Pi 5", "type": "PI_5",
+         "width": 1280, "height": 960, "focal_length": 1108.0, "target_fps": 30.0},
+    ]
+
+    def get_vo_profiles(self) -> list:
+        return self._vo_modes
+
+    def set_vo_profile(self, mode_id: int) -> bool:
+        if 0 <= mode_id < len(self._vo_modes):
+            m = self._vo_modes[mode_id]
+            with self._lock:
+                self.camera_stats.vo_mode = mode_id
+                self.camera_stats.vo_mode_name = m["name"]
+                self.camera_stats.adaptive_fast_thresh = float(m["fast_threshold"])
+                self.camera_stats.adaptive_lk_window = float(m["lk_window"])
+            return True
+        return False
+
+    def get_platforms(self) -> list:
+        return self._platforms
+
+    # ── Multi-Camera Support ──
+
+    def get_cameras(self) -> list:
+        """Return info about all camera slots (Variant B)."""
+        with self._lock:
+            cam = self.camera_stats
+            # In simulator: primary is simulated CSI
+            primary = {
+                "slot": "PRIMARY",
+                "camera_type": cam.camera_type,
+                "camera_open": cam.camera_open,
+                "active": True,
+                "frame_count": cam.frame_count,
+                "fps_actual": cam.fps_actual,
+                "width": cam.width,
+                "height": cam.height,
+                "label": "Simulated (VO)",
+                "device": "simulated",
+                "has_vo": True,
+                "csi_sensor": None,
+            }
+            secondary = dict(self._secondary_camera)
+            secondary["has_vo"] = False
+            return [primary, secondary]
+
+    def get_secondary_camera_stats(self) -> dict:
+        """Return secondary camera stats."""
+        with self._lock:
+            return dict(self._secondary_camera)
+
+    def vo_fallback_tick(self):
+        """VO fallback monitoring — no-op in simulator."""
+        pass
+
+    def get_features(self) -> list:
+        """Return simulated VO features for frontend testing."""
+        with self._lock:
+            cam = self.camera_stats
+            n_detected = cam.vo_features_detected
+            n_tracked = cam.vo_features_tracked
+            features = []
+            t = time.time() - self._start_time
+            for i in range(min(n_detected, 120)):
+                # Spread features across 320x240 VO resolution
+                fx = (hash((i * 7 + 13)) % 300) + 10 + 3 * math.sin(t * 0.2 + i)
+                fy = (hash((i * 11 + 7)) % 220) + 10 + 3 * math.cos(t * 0.15 + i)
+                features.append({
+                    "x": float(fx),
+                    "y": float(fy),
+                    "tracked": i < n_tracked,
+                    "response": 50 + (hash(i * 3) % 150),
+                })
+            return features
+
+    def capture_secondary(self) -> bool:
+        """Trigger capture from secondary camera (continuous stream)."""
+        with self._lock:
+            if self._usb_capture and self._usb_capture.streaming:
+                self._secondary_capturing = True
+                self._secondary_camera["active"] = True
+                self._secondary_camera["frame_count"] = self._usb_capture.frame_count
+                self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+                self._secondary_camera["fps_actual"] = 5.0
+                return True
+            self._secondary_capturing = True
+            self._secondary_camera["active"] = True
+            self._secondary_camera["frame_count"] += 1
+            self._secondary_camera["last_capture_time"] = time.time() - self._start_time
+            self._secondary_camera["fps_actual"] = 1.0
+            return True
+
+    def get_vo_trail(self) -> list:
+        """Simulated VO trail for 3D visualization."""
+        trail = []
+        t = time.time() - self._start_time
+        # Generate a simple circular path
+        count = min(int(t / 0.5), 100)
+        for i in range(count):
+            tt = i * 0.5
+            trail.append({
+                'x': round(0.05 * math.sin(tt * 0.3), 4),
+                'y': round(0.05 * math.cos(tt * 0.3), 4),
+                'z': round(0.001 * tt, 4),
+                't': round(tt, 1),
+            })
+        return trail
+
+    def get_secondary_frame_data(self) -> bytes:
+        """Return latest frame from USB continuous stream or simulated."""
+        if self._usb_capture and self._usb_capture.streaming:
+            frame = self._usb_capture.capture_frame()
+            if frame:
+                return frame
+        w = self._secondary_camera.get("width", 256)
+        h = self._secondary_camera.get("height", 192)
+        data = bytearray(w * h)
+        t = time.time() - self._start_time
+        cx1 = 128 + 30 * math.sin(t * 0.1)
+        cy1 = 96 + 20 * math.cos(t * 0.15)
+        for y in range(h):
+            dy1_sq = (y - cy1) ** 2
+            for x in range(w):
+                val = 40
+                d1 = math.sqrt((x - cx1)**2 + dy1_sq)
+                if d1 < 40:
+                    val += int(160 * (1.0 - d1 / 40.0))
+                data[y * w + x] = max(0, min(255, val + random.randint(-3, 3)))
+        return bytes(data)
+
     def _update_camera(self, t: float):
         cam = self.camera_stats
         cam.frame_count += 1
@@ -449,7 +728,9 @@ class JTZeroSimulator:
         base_features = 80 + int(30 * math.sin(t * 0.1))
         cam.vo_features_detected = max(10, base_features + random.randint(-10, 10))
         cam.vo_features_tracked = max(5, int(cam.vo_features_detected * (0.7 + random.gauss(0, 0.05))))
+        cam.vo_inlier_count = max(3, int(cam.vo_features_tracked * (0.85 + random.gauss(0, 0.03))))
         cam.vo_tracking_quality = min(1.0, max(0.0, cam.vo_features_tracked / max(1, cam.vo_features_detected)))
+        cam.vo_confidence = min(1.0, max(0.0, cam.vo_tracking_quality * (cam.vo_inlier_count / max(1, cam.vo_features_tracked)) * 0.95))
         
         # VO motion estimate
         cam.vo_dx = 0.001 * math.sin(t * 0.3) + random.gauss(0, 0.0005)
@@ -459,10 +740,63 @@ class JTZeroSimulator:
         cam.vo_vy = cam.vo_dy * 15.0
         cam.vo_valid = cam.vo_features_tracked >= 5
         
+        # Accumulate distance and uncertainty
+        cam.vo_total_distance += abs(cam.vo_dx) + abs(cam.vo_dy)
+        cam.vo_position_uncertainty = cam.vo_total_distance * 0.03 * (1.0 - cam.vo_confidence * 0.5)
+        
+        # ── Adaptive Altitude Parameters ──
+        alt = self.state.altitude_agl
+        if alt < 10.0:
+            cam.altitude_zone = 0
+            cam.altitude_zone_name = "LOW"
+            cam.adaptive_fast_thresh = 30.0
+            cam.adaptive_lk_window = 5.0
+        elif alt < 50.0:
+            cam.altitude_zone = 1
+            cam.altitude_zone_name = "MEDIUM"
+            frac = (alt - 10.0) / 40.0
+            cam.adaptive_fast_thresh = 30.0 - frac * 5.0
+            cam.adaptive_lk_window = 5.0 + frac * 2.0
+        elif alt < 200.0:
+            cam.altitude_zone = 2
+            cam.altitude_zone_name = "HIGH"
+            frac = (alt - 50.0) / 150.0
+            cam.adaptive_fast_thresh = 25.0 - frac * 5.0
+            cam.adaptive_lk_window = 7.0 + frac * 2.0
+        else:
+            cam.altitude_zone = 3
+            cam.altitude_zone_name = "CRUISE"
+            cam.adaptive_fast_thresh = 20.0
+            cam.adaptive_lk_window = 9.0
+        
+        # ── Hover Yaw Correction ──
+        motion = math.sqrt(cam.vo_dx**2 + cam.vo_dy**2) * 1000  # to px-scale
+        is_mode_hover = self.state.flight_mode in ("HOVER", "ARMED")
+        
+        if is_mode_hover and motion < 0.5:
+            if not cam.hover_detected:
+                cam._hover_counter = getattr(cam, '_hover_counter', 0) + 1
+                if cam._hover_counter >= 30:
+                    cam.hover_detected = True
+            cam.hover_duration += 0.05  # 20Hz * 0.05s = 1s
+            # Simulate yaw drift during hover
+            cam.yaw_drift_rate = 0.001 * math.sin(t * 0.01) + random.gauss(0, 0.0002)
+            cam.corrected_yaw = self.state.yaw * 0.0174533 - cam.yaw_drift_rate * cam.hover_duration
+        else:
+            cam.hover_detected = False
+            cam.hover_duration = 0
+            cam.yaw_drift_rate = 0
+            cam._hover_counter = 0
+            cam.corrected_yaw = self.state.yaw * 0.0174533
+        
         # Camera events
         if self._tick % 60 == 15:
+            zone_names = ["LOW", "MED", "HIGH", "CRUISE"]
+            zone = zone_names[cam.altitude_zone] if cam.altitude_zone < 4 else "?"
             self._emit_event(EventType.CAMERA_VO_UPDATE, 20,
-                f"frame={cam.frame_count} feat={cam.vo_features_tracked}/{cam.vo_features_detected} q={cam.vo_tracking_quality:.0%}")
+                f"frame={cam.frame_count} feat={cam.vo_features_tracked}/{cam.vo_features_detected} "
+                f"q={cam.vo_tracking_quality:.0%} zone={zone}"
+                f"{' HOVER' if cam.hover_detected else ''}")
     
     def _update_mavlink(self, t: float):
         mav = self.mavlink_stats

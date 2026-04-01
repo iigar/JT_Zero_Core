@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 export function useWebSocket(path, onMessage) {
   const wsRef = useRef(null);
@@ -10,7 +10,8 @@ export function useWebSocket(path, onMessage) {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const wsUrl = BACKEND_URL.replace(/^http/, 'ws') + path;
+    const base = BACKEND_URL || window.location.origin;
+    const wsUrl = base.replace(/^http/, 'ws') + path;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

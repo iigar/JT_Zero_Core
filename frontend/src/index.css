@@ -1,5 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
 
+/* ═══ Global font scaling: ~1.5x larger across dashboard ═══ */
+/* Override tiny text sizes globally */
+.text-\[8px\]  { font-size: 10px !important; }
+.text-\[9px\]  { font-size: 11px !important; }
+.text-\[10px\] { font-size: 12px !important; }
+.text-\[11px\] { font-size: 13px !important; }
+.text-xs       { font-size: 13px !important; line-height: 1.4 !important; }
+
+/* ═══ Global styles ═══ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,8 +22,8 @@
 
 body {
   font-family: 'JetBrains Mono', monospace;
-  background: #050505;
-  color: #E2E8F0;
+  background: #080A0F;
+  color: #F0F4F8;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
@@ -23,16 +33,32 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0A0C10;
+  background: #0D1017;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1E293B;
-  border-radius: 2px;
+  background: #2D3A4E;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #475569;
+}
+
+/* ═══ Rounded corners for all panels ═══ */
+.rounded-sm { border-radius: 6px !important; }
+.rounded { border-radius: 8px !important; }
+.rounded-lg { border-radius: 12px !important; }
+
+/* ═══ Lighter glow colors ═══ */
+.glow-text {
+  text-shadow: 0 0 8px rgba(51, 204, 255, 0.5);
+}
+.glow-text-warn {
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.4);
+}
+.glow-text-danger {
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
 .tabular-nums {
@@ -66,9 +92,10 @@ body {
 }
 
 .panel-glass {
-  background: rgba(10, 12, 16, 0.8);
+  background: rgba(15, 18, 25, 0.85);
   backdrop-filter: blur(12px);
-  border: 1px solid #1E293B;
+  border: 1px solid #2D3A4E;
+  border-radius: 12px;
 }
 
 .corner-bracket::before {
@@ -76,10 +103,11 @@ body {
   position: absolute;
   top: 0;
   left: 0;
-  width: 8px;
-  height: 8px;
-  border-top: 1px solid #00F0FF;
-  border-left: 1px solid #00F0FF;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid #33CCFF;
+  border-left: 1px solid #33CCFF;
+  border-radius: 6px 0 0 0;
   opacity: 0.5;
 }
 
@@ -88,9 +116,10 @@ body {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 8px;
-  height: 8px;
-  border-bottom: 1px solid #00F0FF;
-  border-right: 1px solid #00F0FF;
+  width: 10px;
+  height: 10px;
+  border-bottom: 1px solid #33CCFF;
+  border-right: 1px solid #33CCFF;
+  border-radius: 0 0 6px 0;
   opacity: 0.5;
 }

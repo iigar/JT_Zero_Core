@@ -16,19 +16,19 @@ export default function Header({ state, connected, runtimeMode }) {
   return (
     <header
       data-testid="header-bar"
-      className="flex items-center justify-between px-4 py-2 bg-[#0A0C10] border-b border-[#1E293B] shrink-0"
+      className="flex items-center justify-between px-4 py-2.5 bg-[#0D1017] border-b border-[#2D3A4E] shrink-0"
     >
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <Zap className="w-5 h-5 text-[#00F0FF]" />
-          <span className="text-sm font-bold tracking-widest text-[#00F0FF] uppercase glow-text">
+          <span className="text-sm font-bold tracking-widest text-[#33CCFF] uppercase glow-text">
             JT-Zero
           </span>
           <span className="text-[10px] text-slate-600 ml-1">v1.0</span>
         </div>
 
         {runtimeMode === 'native' && (
-          <div className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 uppercase tracking-wider">
+          <div className="text-[9px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 uppercase tracking-wider">
             C++ Native
           </div>
         )}
@@ -64,7 +64,7 @@ export default function Header({ state, connected, runtimeMode }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-6 text-[10px] text-slate-500 uppercase tracking-wider">
+      <div className="flex items-center gap-6 text-[11px] text-slate-400 uppercase tracking-wider">
         <div className="flex items-center gap-1.5" data-testid="heartbeat-indicator">
           <Activity className={`w-3 h-3 ${connected ? 'text-emerald-400 animate-pulse' : 'text-slate-700'}`} />
           <span>HB</span>
