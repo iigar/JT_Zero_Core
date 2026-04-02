@@ -1,6 +1,7 @@
 # CLAUDE.md — JT-Zero Runtime Technical Reference
 
 > ## MANDATORY RULES FOR ALL AGENTS
+> 0. **Read Worklog.md first.** At the start of every session read `Worklog.md` — it contains what was done, why, and what is pending. Do NOT start working without reading it.
 > 1. **User language: Ukrainian.** Always respond in Ukrainian.
 > 2. **Bug fixes → document here.** Every bug fix MUST be appended to "Key Bug Fixes" section with: root cause, WHY it failed, WHAT was changed, file:line. Format: `N. **Title** — explanation.` Do NOT write vague descriptions like "fixed bug". Write exactly what was wrong and why the fix works.
 > 3. **Frontend build rule:** `export REACT_APP_BACKEND_URL="" && yarn build`. If built with Emergent Preview URL, the Pi dashboard will break.
