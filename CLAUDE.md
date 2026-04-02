@@ -247,10 +247,23 @@ dx_meters = dx_pixels × altitude / focal_length
 dy_meters = dy_pixels × altitude / focal_length
 ```
 
-**e) Kalman Filter**
-- Smooths velocity, removes noise
-- Cross-validates with IMU (accelerometer)
-- If VO and IMU diverge → reduce confidence
+**e) IMU Pre-integration for LK Hints**
+- T1 (200Hz) accumulates gyro rotation between T6 frames (thread-safe mutex)
+- ~13 IMU samples per camera frame (66ms @ 200Hz)
+- `shift_x = focal * dgz` (yaw → lateral), `shift_y = -focal * dgy` (pitch → vertical)
+- LK tracker initializes flow search at predicted position instead of (0,0)
+- Activates only when |shift| > 0.3px to avoid polluting stationary tracking
+
+**f) Kalman Filter (simplified EKF)**
+- Predict step uses IMU: `kf_vx += imu_ax * dt` (physics-based prediction)
+- Update step uses VO measurement (corrects IMU prediction)
+- Adaptive noise: process noise Q from `kalman_q`, measurement noise R from `kalman_r_base / inlier_ratio`
+- Position uncertainty: `sqrt(pose_var_x + pose_var_y)` from accumulated KF covariance (not ad-hoc)
+
+**g) IMU Consistency Validation**
+- Compares `ΔV_VO = raw_vx - kf_vx_prev` with `ΔV_IMU = imu_ax * dt`
+- Large discrepancy → lower `imu_consistency` → lower confidence
+- Gate: only runs when `imu_hint_valid_` (set by `camera_.set_imu_hint()` in T6)
 
 **f) Sending to ArduPilot**
 ```
@@ -471,6 +484,12 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 33. **Silent WebSocket exceptions** — `except Exception: pass` in both WebSocket handlers discarded error context, making crashes invisible in logs. Fix: added `sys.stderr.write(f"[WS/...] Unexpected error: {e}")` before disconnect. `server.py:websocket_telemetry`, `websocket_events`.
 34. **numpy used as fallback (violates CLAUDE.md rule 5)** — `native_bridge.py` imported numpy and used it as feature detector fallback despite CLAUDE.md explicitly prohibiting numpy on Pi Zero (too heavy). Fix: removed numpy import and entire numpy fallback branch. Fallback chain is now: Pillow → pure Python. `native_bridge.py:33-35,548-574`.
 35. **InvalidToken not distinguished from corrupted file** — `read_session()` caught all exceptions equally and returned `[]`, making wrong password indistinguishable from corrupted data. Fix: catch `InvalidToken` separately and return `None`; server returns `{"error":"Wrong password"}` vs `{"error":"Corrupted or empty file"}`. `flight_log.py:read_session`, `server.py:read_session`.
+36. **imu_consistency compared wrong quantities** — Phase 3 computed `actual_dvx = raw_vx - kf_vx_` (post-update Kalman residual) and compared it with `imu_ax * dt` (velocity delta). These are different physical quantities: residual is `measurement - state`, delta-v is `v[t] - v[t-1]`. The comparison was always near-zero after Kalman update, making `imu_consistency` near-1.0 regardless of actual IMU/VO disagreement. Fix: snapshot `kf_vx_prev_` BEFORE predict step; `actual_dvx = raw_vx - kf_vx_prev_`. Scaling `*0.5 → *5.0` (1 m/s² over 66ms = 0.066 m/s delta). `camera_pipeline.cpp:Phase3`.
+37. **Attitude derived from accelerometer only — gyro unused for roll/pitch** — `sensor_loop` used `roll = atan2(acc_y, acc_z)` (pure accelerometer: noisy on HF, corrupted during acceleration). `yaw += gyro_z * dt` — naked integration with no bias correction, drifting up to 3°/min. Fix: complementary filter alpha=0.98 for roll/pitch; on-ground gyro_z bias estimation (EMA BIAS_ALPHA=0.0005, gate `!armed && |gyro| < 0.05 rad/s`). `runtime.cpp:sensor_loop`. NOTE: applies only in non-FC mode; FC telemetry path unchanged.
+38. **Gyro drift not separated from true yaw drift in hover correction** — `update_hover_state` estimated yaw drift entirely from optical flow (median_dx / focal), mixing true scene drift with gyro bias. Fix: during confirmed hover with `|gyro_z| < 0.3 rad/s`, estimate `hover_.gyro_z_bias` via EMA (BIAS_ALPHA=0.005). Subtract bias from drift rate: `corrected_rate = optical_rate - gyro_z_bias`. `camera_pipeline.cpp:update_hover_state`. New field `gyro_z_bias` and constant `BIAS_ALPHA` in `HoverState`.
+39. **set_imu_hint() never called — IMU cross-validation silently dead** — `VisualOdometry::set_imu_hint()` existed since the beginning but was NEVER called from `runtime.cpp:camera_loop()`. This means `imu_hint_valid_` was always false, making Phase 3 (imu_consistency) always 1.0, and the IMU prediction step (Fix 39) never activating. Fix: added `camera_.set_imu_hint(state_.imu.acc_x, state_.imu.acc_y, state_.imu.gyro_z)` in `camera_loop()` BEFORE `tick()`. Also added IMU prediction in Kalman predict step: `kf_vx_ += imu_ax_ * dt` when `imu_hint_valid_`. `runtime.cpp:camera_loop`, `camera_pipeline.cpp:Phase2`.
+40. **position_uncertainty was ad-hoc, not from filter state** — Formula `uncertainty = total_distance * 0.03 * (1 - confidence*0.5)` had no connection to Kalman filter state. EKF in ArduPilot could not trust it as a real covariance estimate. Fix: accumulate `pose_var_x_ += kf_vx_var_ * dt²` each frame. `position_uncertainty = sqrt(pose_var_x + pose_var_y)` (1-sigma radial, meters). Decay ×0.995/frame at confidence > 0.7; ×4 growth during dead-reckoning. `camera_pipeline.cpp:Phase4+`. New private members `pose_var_x_`, `pose_var_y_` in `VisualOdometry`.
+41. **LK tracker started search at (0,0) flow — failed during inter-frame rotation** — Between T6 frames (66ms at 15Hz ≈ 13 IMU samples), gyroscope rotation was never used to seed LK's initial flow estimate. At ±10° yaw between frames, features shift ~30px on a 320px frame; LK starting at flow=(0,0) would need max_iterations to converge, often failing. Fix: T1 (200Hz) calls `camera_.accumulate_gyro(gx, gy, gz-bias, dt)` (thread-safe via `preint_mtx_`). T6 in `process()`: reads+resets pre-integration, computes `shift_x = focal * dgz`, `shift_y = -focal * dgy`, passes as `hint_dx[]`, `hint_dy[]` to `LKTracker::track()` (only when |shift| > 0.3px). LK initializes `flow_x = hint_dx[f]` instead of 0. New: `PreIntState` struct, `std::mutex preint_mtx_`, `accumulate_gyro()` method, `kf_vx_prev_/vy_prev_` members in `VisualOdometry`. New public methods `set_imu_hint()`, `accumulate_gyro()` on `CameraPipeline`. `camera.h`, `camera_pipeline.cpp`, `runtime.cpp`.
 
 ---
 

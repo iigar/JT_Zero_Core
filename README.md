@@ -104,9 +104,20 @@ cd jt-zero && chmod +x setup.sh && ./setup.sh
 | CI/CD | GitHub Actions (auto-build frontend) |
 | Платформа | Raspberry Pi Zero 2W / Pi 4 / Pi 5 |
 
+## Стан IMU-VO fusion
+
+| Компонент | Що реалізовано |
+|-----------|---------------|
+| Attitude | Complementary filter α=0.98 (roll/pitch), gyro bias estimate (yaw) |
+| Kalman | IMU prediction step (`kf_v += a·dt`) + VO measurement update |
+| LK Tracking | IMU pre-integration hints: seeds initial flow from inter-frame rotation |
+| Uncertainty | `sqrt(pose_var_x + pose_var_y)` з KF covariance (не ad-hoc) |
+| Bias | On-ground (`!armed`) + hover gyro_z bias EMA estimation |
+
 ## Статус
 
 - VO працює на реальному залізі (Pi Zero 2W + IMX290/IMX219)
 - MAVLink підключений до ArduPilot (Matek H743)
 - EKF3 ExternalNav підтверджено
 - 15 fps VO, 25Hz MAVLink, 0 CRC помилок
+- Повний IMU-VO fusion pipeline активний (6 покращень 2026-04-03)

@@ -31,14 +31,14 @@ const API_ENDPOINTS = [
 ];
 
 const THREAD_MODEL = [
-  { id: 'T0', name: 'Supervisor', hz: '10 Hz', core: 0, prio: 90 },
-  { id: 'T1', name: 'Sensors', hz: '200 Hz', core: 1, prio: 95 },
-  { id: 'T2', name: 'Events', hz: '200 Hz', core: 2, prio: 85 },
-  { id: 'T3', name: 'Reflex', hz: '200 Hz', core: 2, prio: 98 },
-  { id: 'T4', name: 'Rules', hz: '20 Hz', core: 3, prio: 70 },
-  { id: 'T5', name: 'MAVLink', hz: '50 Hz', core: 1, prio: 80 },
-  { id: 'T6', name: 'Camera', hz: '15 FPS', core: 3, prio: 60 },
-  { id: 'T7', name: 'API Bridge', hz: '30 Hz', core: -1, prio: 50 },
+  { id: 'T0', name: 'Supervisor — health, battery, failsafe', hz: '10 Hz', core: 0, prio: 90 },
+  { id: 'T1', name: 'Sensors — IMU CF filter, gyro bias, pre-integration → T6', hz: '200 Hz', core: 1, prio: 95 },
+  { id: 'T2', name: 'Events — lock-free queue dispatch', hz: '200 Hz', core: 2, prio: 85 },
+  { id: 'T3', name: 'Reflex — safety reactions <5ms', hz: '200 Hz', core: 2, prio: 98 },
+  { id: 'T4', name: 'Rules — behavioral logic (RTL, hold)', hz: '20 Hz', core: 3, prio: 70 },
+  { id: 'T5', name: 'MAVLink — TX: VO pos/odom/flow; RX: FC telemetry', hz: '50 Hz', core: 1, prio: 80 },
+  { id: 'T6', name: 'Camera — FAST+LK+Kalman EKF VO pipeline', hz: '15 FPS', core: 3, prio: 60 },
+  { id: 'T7', name: 'API Bridge — WebSocket/REST for Dashboard', hz: '30 Hz', core: -1, prio: 50 },
 ];
 
 const FILE_TREE = [
@@ -634,11 +634,47 @@ function VOFallbackSection() {
        │                    │
        │               Python features → /api/camera/features
        ▼
-  C++ inject_frame() ─── VO pipeline (FAST + LK + Kalman)
+  C++ inject_frame() ─── VO pipeline (FAST + LK + Kalman EKF)
        │
        ▼
   MAVLink VISION_POSITION_ESTIMATE → ArduPilot EKF3`
         }</pre>
+      </div>
+
+      {/* IMU-VO Fusion */}
+      <div className="bg-[#0A0C10] border border-[#00F0FF]/20 rounded-sm p-3 space-y-2">
+        <h4 className="text-[10px] text-[#00F0FF] font-bold uppercase tracking-wider">IMU-VO Fusion Pipeline</h4>
+        <p className="text-[9px] text-slate-400">
+          T1 (200Hz) та T6 (15fps) синхронізуються через mutex-захищений PreIntState:
+        </p>
+        <pre className="text-[9px] text-cyan-400 font-mono bg-black/40 px-2 py-2 rounded-sm border border-[#1E293B]/50 overflow-x-auto whitespace-pre leading-relaxed">{
+`T1 (200Hz):  CF filter → roll/pitch  (α=0.98, gyro+accel)
+             gyro_z bias EMA          (gate: !armed, |gyro|<0.05)
+             accumulate_gyro()        (mutex → PreIntState)
+             set_imu_hint(ax,ay,gz)   (for T6 Kalman predict)
+                  ↓ mutex / atomic
+T6 (15fps):  read PreIntState  →  shift_x = focal × dgz
+                                   shift_y = −focal × dgy
+             LK track(hint_dx, hint_dy)   ← flow starts at IMU prediction
+             Phase 2: kf_v += imu_ax × dt  (IMU predict step)
+                      Kalman update (VO measurement)
+             Phase 3: ΔV_VO vs ΔV_IMU  → imu_consistency
+             Phase 5: hover gyro_z_bias estimation`
+        }</pre>
+        <div className="grid grid-cols-2 gap-2 mt-1">
+          {[
+            { label: 'CF alpha', value: '0.98', desc: 'гіро/акселерометр' },
+            { label: 'Bias α (ground)', value: '0.0005', desc: '~30s settling' },
+            { label: 'Bias α (hover)', value: '0.005', desc: 'gate |gz|<0.3' },
+            { label: 'LK hint gate', value: '>0.3px', desc: 'мін зсув' },
+          ].map(({ label, value, desc }) => (
+            <div key={label} className="flex items-center gap-2">
+              <code className="text-[9px] text-cyan-400 font-mono w-28">{label}</code>
+              <span className="text-[9px] text-amber-400 font-bold w-16">{value}</span>
+              <span className="text-[8px] text-slate-500">{desc}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* SET HOMEPOINT */}

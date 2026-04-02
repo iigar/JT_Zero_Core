@@ -1,5 +1,45 @@
 # JT-Zero Changelog
 
+## 2026-04-03 — VO+IMU Fusion Overhaul (6 fixes)
+
+### Fix 36: imu_consistency — правильне ΔV порівняння (`camera_pipeline.cpp`)
+- **Було:** `actual_dvx = raw_vx - kf_vx_` — post-update Kalman residual, не ΔV
+- **Порівнювалося:** Kalman residual (залишок вимірювання) з IMU delta-v — математично некоректно
+- **Рішення:** snapshot `kf_vx_prev_` ДО predict-кроку → `actual_dvx = raw_vx - kf_vx_prev_`
+- Масштабний коефіцієнт: `0.5 → 5.0` (при 1 m/s² розбіжності за 66ms → 0.066 m/s)
+
+### Fix 37: Complementary filter для attitude (`runtime.cpp sensor_loop`)
+- **Було:** `roll = atan2(acc_y, acc_z)` — тільки акселерометр (шумний на HF). `yaw += gyro_z * dt` — голий інтеграл без bias-корекції, drift до 3°/хв
+- **Рішення:** CF alpha=0.98: `cf_roll = 0.98*(cf_roll + gx*dt) + 0.02*atan2(ay, az)`
+- Yaw: `(gz - gyro_z_bias) * dt`. On-ground bias: EMA при `!armed && |gyro| < 0.05 rad/s`, BIAS_ALPHA=0.0005
+
+### Fix 38: Gyro bias estimation в hover (`camera_pipeline.cpp`)
+- При `is_hovering` і `|gyro_z| < 0.3 rad/s` → `hover_.gyro_z_bias += (gyro_z - bias) * 0.005`
+- drift_rate тепер: `rate_from_optical_flow - hover_.gyro_z_bias`
+- Нова константа `HoverState::BIAS_ALPHA = 0.005f` в `camera.h`
+
+### Fix 39: IMU prediction step у Kalman + wire set_imu_hint (`camera_pipeline.cpp`, `runtime.cpp`)
+- **Проблема 1:** Predict = тільки `P += Q`. State відставав при прискореннях дрона
+- **Рішення:** `kf_vx_ += imu_ax_ * dt` перед update (спрощений EKF), якщо `imu_hint_valid_`
+- **Проблема 2 (прихована):** `set_imu_hint()` існував в API але НІКОЛИ не викликався з `runtime.cpp` → `imu_hint_valid_` завжди false → Fixes 36, 37, 39 ніколи не активувалися
+- **Рішення:** `camera_.set_imu_hint(acc_x, acc_y, gyro_z)` додано в `camera_loop()` ДО `tick()`
+
+### Fix 40: position_uncertainty з реальної KF covariance (`camera_pipeline.cpp`)
+- **Було:** `uncertainty = total_distance * 0.03 * (1 - confidence*0.5)` — ad hoc без зв'язку з фільтром
+- **Рішення:** `pose_var_x_ += kf_vx_var_ * dt²` кожен кадр → `uncertainty = sqrt(pose_var_x + pose_var_y)`
+- Decay ×0.995 при confidence > 0.7; growth ×4 при dead-reckoning (no position_update)
+- ArduPilot EKF отримує правдиву 1-sigma невизначеність → кращий баланс з GPS/baro
+
+### Fix 41: IMU pre-integration для LK initial-flow hints (`camera.h`, `camera_pipeline.cpp`, `runtime.cpp`)
+- **Проблема:** між кадрами 15Hz (~66ms = 13 IMU samples) LK не знає про rotation. При ±10° повороті features шукаються у старих позиціях → track failure
+- **Архітектура:**
+  - `PreIntState {dgx, dgy, dgz}` + `std::mutex preint_mtx_` додано в `VisualOdometry`
+  - T1 (200Hz): `camera_.accumulate_gyro(gx, gy, gz-bias, dt)` — thread-safe накопичення
+  - T6: `shift_x = focal * dgz`, `shift_y = -focal * dgy` → `hint_dx[]`, `hint_dy[]` в LKTracker
+  - LKTracker::track(): нові параметри `const float* hint_dx = nullptr, hint_dy = nullptr`
+  - `flow_x` стартує з `hint_dx[f]` замість 0; ворота: |shift| > 0.3px
+- **Нові публічні методи на `CameraPipeline`:** `set_imu_hint()`, `accumulate_gyro()`
+
 ## 2026-03-30 — MAVLink Thread Safety Fix + 3D YAW Wrap Fix (CRITICAL)
 
 ### Bug Fix #24: handle_message() deadlock

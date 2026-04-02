@@ -21,7 +21,7 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - Full VO pipeline (FAST/Shi-Tomasi + LK + Kalman filter)
 - 8 CSI sensor profiles + GENERIC fallback
 - Adaptive altitude zones (LOW/MEDIUM/HIGH/CRUISE)
-- Hover yaw correction
+- Hover yaw correction with gyro bias estimation
 - VO mode profiles (Light/Balanced/Performance)
 - MAVLink v2 integration (VISION_POSITION_ESTIMATE at 25Hz)
 - EKF3 ExternalNav integration with ArduPilot
@@ -39,18 +39,30 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 - Encrypted Flight Logger (AES-256 Fernet, point cloud recording)
 - Thread-safe MAVLink telemetry via RAII ScopedSpinLock (Bug Fix #24)
 - 3D View YAW angle normalization — prevents full-spin on 360→0 wrap (Bug Fix #25)
-- Confidence-based covariance reporting to ArduPilot EKF
+- Backend security hardening: CORS whitelist, min password 12 chars, path traversal fix, InvalidToken distinction (Bug Fixes #26-35)
+- **IMU-VO fusion overhaul (Bug Fixes #36-41):**
+  - Complementary filter for roll/pitch/yaw (replaces pure accelerometer/gyro integration)
+  - On-ground and in-hover gyro bias estimation
+  - IMU prediction step in Kalman filter (simplified EKF)
+  - Correct imu_consistency ΔV comparison (was comparing residual vs delta-v)
+  - KF covariance-based position_uncertainty (replaces ad-hoc formula)
+  - IMU pre-integration for LK initial-flow hints (thread-safe, reduces track loss during rotation)
+- KF covariance-based position_uncertainty reporting to ArduPilot EKF
 - Python simulator with simulated features for dev/preview testing
-- Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md)
+- Frontend design overhaul: HUD grid, sweep animation, battery meter, cockpit Header
+- Comprehensive documentation (CLAUDE.md, PRD.md, CHANGELOG.md, SYSTEM.md, Worklog.md)
 
 ## Backlog
 
 ### P1 - Next
-- Deploy to Pi: `git pull && ./update.sh` — verify YAW glitch resolved with real FC
+- Deploy to Pi: `git pull && ./update.sh` — verify complementary filter + IMU prediction on real FC
+- Test LK hint effectiveness: compare `features_tracked` before/after Fix 41 during yaw rotation test
 - Set flight log password via Dashboard → start recording → fly → stop → download & analyze
 - Test STATUSTEXT visibility in Mission Planner during fallback events
 
 ### P2 - Planned
+- C++ thread safety: SystemState data race (8 threads without mutex on state_ members)
+- C++ MemoryPool::allocate() race condition (CAS in free-list may still have ABA issues)
 - C++ native MJPEG support for USBCamera
 - IP camera (RTSP) support
 - Autonomous Mission Planning UI
@@ -58,5 +70,5 @@ Building a complex robotics runtime "JT-Zero" for drone autonomy on Raspberry Pi
 
 ### P3 - Future
 - Sensor fusion (dual-camera VO simultaneously)
-- CSI camera testing with Sobel/bilinear improvements
 - 3D flight replay from encrypted logs
+- Repo hygiene: remove .gitconfig, *.so binary, jt-zero/build/ from git tracking
