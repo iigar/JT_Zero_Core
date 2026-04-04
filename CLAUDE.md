@@ -490,6 +490,7 @@ Probes 115200 → 921600 → 57600 → 230400 → 460800. For each rate, reads ~
 39. **set_imu_hint() never called — IMU cross-validation silently dead** — `VisualOdometry::set_imu_hint()` existed since the beginning but was NEVER called from `runtime.cpp:camera_loop()`. This means `imu_hint_valid_` was always false, making Phase 3 (imu_consistency) always 1.0, and the IMU prediction step (Fix 39) never activating. Fix: added `camera_.set_imu_hint(state_.imu.acc_x, state_.imu.acc_y, state_.imu.gyro_z)` in `camera_loop()` BEFORE `tick()`. Also added IMU prediction in Kalman predict step: `kf_vx_ += imu_ax_ * dt` when `imu_hint_valid_`. `runtime.cpp:camera_loop`, `camera_pipeline.cpp:Phase2`.
 40. **position_uncertainty was ad-hoc, not from filter state** — Formula `uncertainty = total_distance * 0.03 * (1 - confidence*0.5)` had no connection to Kalman filter state. EKF in ArduPilot could not trust it as a real covariance estimate. Fix: accumulate `pose_var_x_ += kf_vx_var_ * dt²` each frame. `position_uncertainty = sqrt(pose_var_x + pose_var_y)` (1-sigma radial, meters). Decay ×0.995/frame at confidence > 0.7; ×4 growth during dead-reckoning. `camera_pipeline.cpp:Phase4+`. New private members `pose_var_x_`, `pose_var_y_` in `VisualOdometry`.
 41. **LK tracker started search at (0,0) flow — failed during inter-frame rotation** — Between T6 frames (66ms at 15Hz ≈ 13 IMU samples), gyroscope rotation was never used to seed LK's initial flow estimate. At ±10° yaw between frames, features shift ~30px on a 320px frame; LK starting at flow=(0,0) would need max_iterations to converge, often failing. Fix: T1 (200Hz) calls `camera_.accumulate_gyro(gx, gy, gz-bias, dt)` (thread-safe via `preint_mtx_`). T6 in `process()`: reads+resets pre-integration, computes `shift_x = focal * dgz`, `shift_y = -focal * dgy`, passes as `hint_dx[]`, `hint_dy[]` to `LKTracker::track()` (only when |shift| > 0.3px). LK initializes `flow_x = hint_dx[f]` instead of 0. New: `PreIntState` struct, `std::mutex preint_mtx_`, `accumulate_gyro()` method, `kf_vx_prev_/vy_prev_` members in `VisualOdometry`. New public methods `set_imu_hint()`, `accumulate_gyro()` on `CameraPipeline`. `camera.h`, `camera_pipeline.cpp`, `runtime.cpp`.
+42. **Pillow відсутній у venv після fresh setup — VO Fallback ін'єкція зупиняється** — `requirements-pi.txt` не містив `Pillow` та `cryptography`. `setup.sh` встановлює залежності лише з цього файлу, тому на свіжій установці Pillow не попадав у venv. `_decode_jpeg_to_gray()` повертає `b''` (PIL=False, djpeg теж недоступний) → injection loop пропускає ін'єкцію (`if not gray_bytes: continue`) → C++ `tick()` у fallback ніколи не отримує кадр → `inject_state_` ніколи не досягає 2 → `features_snapshot_count_` залишається 0. При цьому `vo_result_.features_tracked=101` показує стале значення від останнього CSI кадру (перед fallback) — `activate_fallback()` скидає `features_snapshot_count_=0`, але `vo_result_` не скидає. Fix: додано `Pillow>=9.0.0` та `cryptography>=41.0.0` до `backend/requirements-pi.txt`. `update.sh` вже мав перевірку та встановлення Pillow (Bug Fix #19), але `setup.sh` обходив її, бо читає лише requirements файл.
 
 ---
 
@@ -734,3 +735,25 @@ EK3_SRC1_POSZ = 1       (Baro — if no rangefinder)
 | `memory/CHANGELOG.md` | Implementation changelog with dates |
 | `backend/flight_log.py` | AES-256 encrypted flight log + point cloud recorder |
 | `jt-zero/camera/neon_accel.h` | ARM NEON SIMD accelerated functions |
+---
+
+## Developer Context
+
+**Developer:** Ihor (Ігор), Ukraine. Military service. Works in extremely limited time (sacrifices sleep).
+
+**Communication rules:**
+- Always respond in Ukrainian
+- Direct, no flattery, no sugar-coating
+- Don't invent — if unsure, say so
+- Ihor is a visual learner — use diagrams, tables, structured output
+
+**Personal context files:** `D:\Obsidian\CloudCode\_claude\`
+- `CLAUDE.md` — personal preferences and communication style  
+- `about_me.md` — who Ihor is
+- `projects.md` — full JT-Zero context from personal perspective
+- `agents/` — mentor, engineer, strategist agents
+- `skills/` — drone systems, Python, C++, business
+- `memory/` — key decisions and insights
+
+**To load personal context at session start:**
+Read `D:\Obsidian\CloudCode\_claude\CLAUDE.md` before starting work.
